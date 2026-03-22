@@ -240,6 +240,13 @@ class FloatingWidget:
 
     def _save_position(self):
         if self.save_position:
+            self.save_current_position()
+
+    def update_save_position(self, enabled: bool):
+        self.save_position = enabled
+
+    def save_current_position(self):
+        if self.root:
             x = self.root.winfo_x()
             y = self.root.winfo_y()
             pos = f"+{x}+{y}"

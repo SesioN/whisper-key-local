@@ -403,6 +403,9 @@ class StateManager:
 
     def update_floating_save_position(self, enabled: bool):
         self.config_manager.update_user_setting('gui', 'floating_widget_save_position', enabled)
+        self.floating_widget.update_save_position(enabled)
+        if enabled:
+            self.floating_widget.save_current_position()
 
     def update_floating_enabled(self, enabled: bool):
         self.config_manager.update_user_setting('gui', 'floating_widget_enabled', enabled)
