@@ -48,6 +48,9 @@ class FloatingWidget:
         self.size_key = gui_config.get('floating_widget_size', 'big')
         if self.size_key not in self.SIZES:
             self.size_key = 'big'
+        
+        self.save_position = gui_config.get('floating_widget_save_position', False)
+        self.last_position = gui_config.get('floating_widget_position', None)
 
     def _setup_ui(self):
         self.root = tk.Tk()
@@ -102,13 +105,16 @@ class FloatingWidget:
             self.root.wait_visibility(self.root)
             self.root.wm_attributes("-alpha", 0.9)
 
-        # Initial position (bottom right-ish)
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        # Default position: 100px from right, 100px from bottom
-        x = screen_width - 150
-        y = screen_height - 150
-        self.root.geometry(f"+{x}+{y}")
+        # Positioning
+        if self.save_position and self.last_position:
+            self.root.geometry(self.last_position)
+        else:
+            # Default position: 100px from right, 100px from bottom
+            screen_width = self.root.winfo_screenwidth()
+            screen_height = self.root.winfo_screenheight()
+            x = screen_width - 150
+            y = screen_height - 150
+            self.root.geometry(f"+{x}+{y}")
 
     def _load_icons(self):
         # Determine platform folder for assets
@@ -228,7 +234,17 @@ class FloatingWidget:
         # If mouse didn't move much, treat as click
         if not self.is_dragging:
              self._handle_click()
+        else:
+             self._save_position()
         self.is_dragging = False
+
+    def _save_position(self):
+        if self.save_position:
+            x = self.root.winfo_x()
+            y = self.root.winfo_y()
+            pos = f"+{x}+{y}"
+            self.state_manager.config_manager.update_user_setting('gui', 'floating_widget_position', pos)
+            self.last_position = pos
 
     def _handle_click(self):
         current_app_state = self.state_manager.get_current_state()

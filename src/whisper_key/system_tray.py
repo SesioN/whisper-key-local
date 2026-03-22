@@ -172,6 +172,7 @@ class SystemTray:
             auto_trigger_enabled = self.config_manager.get_setting('vad', 'auto_trigger_enabled')
             floating_widget_enabled = self.config_manager.get_setting('gui', 'floating_widget_enabled')
             floating_widget_size = self.config_manager.get_setting('gui', 'floating_widget_size')
+            floating_widget_save_position = self.config_manager.get_setting('gui', 'floating_widget_save_position')
 
             floating_size_items = [
                 pystray.MenuItem("Small", lambda icon, item: self._set_floating_size("small"), radio=True, checked=lambda item: floating_widget_size == "small"),
@@ -200,6 +201,7 @@ class SystemTray:
                 pystray.MenuItem("Auto-trigger Sensitivity...", self._open_threshold_adjuster),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Floating Widget", lambda icon, item: self._set_floating_enabled(not floating_widget_enabled), checked=lambda item: floating_widget_enabled),
+                pystray.MenuItem("Save Position", lambda icon, item: self._set_floating_save_position(not floating_widget_save_position), checked=lambda item: floating_widget_save_position) if floating_widget_enabled else None,
                 pystray.MenuItem(
                     "Floating Size",
                     pystray.Menu(*floating_size_items)
@@ -281,6 +283,10 @@ class SystemTray:
 
     def _set_floating_enabled(self, enabled: bool):
         self.state_manager.update_floating_enabled(enabled)
+        self.icon.menu = self._create_menu()
+
+    def _set_floating_save_position(self, enabled: bool):
+        self.state_manager.update_floating_save_position(enabled)
         self.icon.menu = self._create_menu()
 
     def _set_floating_size(self, size_key: str):
