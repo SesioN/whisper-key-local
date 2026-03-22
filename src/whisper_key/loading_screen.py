@@ -15,21 +15,11 @@ class LoadingScreen:
 
     def _setup_ui(self):
         self.root = tk.Tk()
+        # Ensure it's not hidden initially
+        self.root.deiconify()
         self.root.overrideredirect(True)
         self.root.wm_attributes("-topmost", True)
         
-        # Determine icon path
-        plat = "macos" if IS_MACOS else "windows"
-        try:
-            icon_path = resolve_asset_path(f"platform/{plat}/assets/whisperkey-icon.ico")
-            # If ico, we might need a different loading method or convert to png
-            # Simple fallback for now:
-            icon_img = Image.open(icon_path).convert("RGBA")
-            icon_img = icon_img.resize((64, 64), Image.Resampling.LANCZOS)
-            icon_photo = ImageTk.PhotoImage(icon_img)
-        except Exception:
-            icon_photo = None
-
         # Window styling
         self.root.config(bg="#222222")
         self.root.geometry("200x150")
@@ -41,6 +31,18 @@ class LoadingScreen:
         y = (screen_height // 2) - 75
         self.root.geometry(f"200x150+{x}+{y}")
 
+        # Determine icon path
+        plat = "macos" if IS_MACOS else "windows"
+        try:
+            # Use a PNG for better compatibility if possible
+            # Check if there's a tray icon (PNG) instead of ico
+            icon_path = resolve_asset_path(f"platform/{plat}/assets/tray_idle.png")
+            icon_img = Image.open(icon_path).convert("RGBA")
+            icon_img = icon_img.resize((64, 64), Image.Resampling.LANCZOS)
+            icon_photo = ImageTk.PhotoImage(icon_img)
+        except Exception:
+            icon_photo = None
+
         if icon_photo:
             label = tk.Label(self.root, image=icon_photo, bg="#222222")
             label.pack(pady=(20, 10))
@@ -48,6 +50,9 @@ class LoadingScreen:
         
         text = tk.Label(self.root, text="Loading...", bg="#222222", fg="white", font=("Arial", 12))
         text.pack()
+        
+        # Explicit update
+        self.root.update()
 
     def show(self):
         self._running = True
