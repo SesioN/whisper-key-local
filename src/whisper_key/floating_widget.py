@@ -22,10 +22,11 @@ class FloatingWidget:
         self.is_dragging = False
         self._drag_start_x = 0
         self._drag_start_y = 0
+        self.lock_var = tk.BooleanVar(value=False)
         
         self._setup_window()
         self._load_icons()
-        self._create_label()
+        self._create_ui_elements()
         self._bind_events()
         
         self.current_state = "idle"
@@ -95,7 +96,8 @@ class FloatingWidget:
             "processing": load_icon("processing"),
         }
 
-    def _create_label(self):
+    def _create_ui_elements(self):
+        # Icon Label
         self.label = tk.Label(
             self.root, 
             image=self.icons["idle"], 
@@ -103,7 +105,59 @@ class FloatingWidget:
             bd=0,
             highlightthickness=0
         )
-        self.label.pack()
+        self.label.pack(pady=(0, 10))
+
+        # Lock Toggle (Using a solid background to ensure the whole area is clickable)
+        # We use a dark background so it's not click-through like the magenta areas.
+        self.lock_label = tk.Label(
+            self.root,
+            text="[ ] Moveable",
+            bg="#222222", 
+            fg="yellow",
+            font=("Arial", 10, "bold"),
+            padx=15, 
+            pady=8,
+            cursor="hand2",
+            bd=0,
+            width=12
+        )
+        self.lock_label.pack(pady=(0, 5))
+        
+        # Initial state
+        self._update_lock_ui()
+        
+        # Bindings
+        self.lock_label.bind("<Button-1>", self._on_lock_click)
+        self.lock_label.bind("<Enter>", self._on_hover_enter)
+        self.lock_label.bind("<Leave>", self._on_hover_leave)
+
+    def _update_lock_ui(self):
+        if self.lock_var.get():
+            self.lock_label.config(
+                text="[x] Locked", 
+                fg="white",
+                bg="#880000" # Reddish background when locked
+            )
+        else:
+            self.lock_label.config(
+                text="[ ] Moveable", 
+                fg="yellow",
+                bg="#222222" # Dark grey when moveable
+            )
+
+    def _on_hover_enter(self, event):
+        if not self.lock_var.get():
+            self.lock_label.config(bg="#333333")
+
+    def _on_hover_leave(self, event):
+        if not self.lock_var.get():
+            self.lock_label.config(bg="#222222")
+
+    def _on_lock_click(self, event):
+        # Toggle the variable
+        self.lock_var.set(not self.lock_var.get())
+        self._update_lock_ui()
+        return "break"
 
     def _bind_events(self):
         self.label.bind("<Button-1>", self._on_press)
@@ -119,6 +173,9 @@ class FloatingWidget:
         self.is_dragging = False
 
     def _on_drag(self, event):
+        if self.lock_var.get():
+            return
+
         self.is_dragging = True
         # Calculate delta
         dx = event.x - self._drag_start_x
