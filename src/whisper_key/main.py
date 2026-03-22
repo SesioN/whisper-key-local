@@ -29,6 +29,7 @@ from .instance_manager import guard_against_multiple_instances
 from .model_registry import ModelRegistry
 from .streaming_manager import StreamingManager
 from .voice_commands import VoiceCommandManager
+from .loading_screen import LoadingScreen
 from .floating_widget import FloatingWidget
 from .hardware_detection import detect_and_print as detect_hardware
 from .onboarding import check_gpu
@@ -188,11 +189,13 @@ def setup_hotkey_listener(hotkey_config, state_manager, voice_commands_enabled=T
         recording_mode=hotkey_config.get('recording_mode', 'toggle')
     )
 
-def shutdown_app(hotkey_listener: HotkeyListener, state_manager: StateManager, logger: logging.Logger):
+def shutdown_app(hotkey_listener: HotkeyListener, state_manager: StateManager, logger: logging.Logger, loading_screen=None):
     try:
         if hotkey_listener and hotkey_listener.is_active():
             logger.info("Stopping hotkey listener...")
             hotkey_listener.stop_listening()
+        if loading_screen:
+            loading_screen.hide()
     except Exception as ex:
         logger.error(f"Error stopping hotkey listener: {ex}")
 
@@ -222,6 +225,9 @@ def main():
     # Note: --console is handled manually above, but we can add it here for help text
     parser.add_argument('--console', action='store_true', help='Show console window (Windows only)')
     args = parser.parse_args()
+
+    loading_screen = LoadingScreen()
+    loading_screen.show()
 
     instance_name = "WhisperKeyLocal_test" if args.test else "WhisperKeyLocal"
     mutex_handle = guard_against_multiple_instances(instance_name)
@@ -289,6 +295,7 @@ def main():
         
         hotkey_listener = setup_hotkey_listener(hotkey_config, state_manager, voice_commands_config['enabled'])
 
+        loading_screen.hide()
         system_tray.start()
         
         if floating_widget:
@@ -316,7 +323,8 @@ def main():
         print(f"Error occurred: {e}")
         
     finally:
-        shutdown_app(hotkey_listener, state_manager, logger)
+        shutdown_app(hotkey_listener, state_manager, logger, loading_screen)
+
 
 if __name__ == "__main__":
     main()
