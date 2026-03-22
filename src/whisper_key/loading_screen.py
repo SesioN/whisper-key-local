@@ -1,17 +1,16 @@
 import tkinter as tk
+import logging
 import threading
-import os
-import platform
-import ctypes
-from PIL import Image, ImageTk
-from .utils import resolve_asset_path
-from .platform import IS_MACOS
+# ...
 
 class LoadingScreen:
     def __init__(self):
         self.root = None
         self.thread = None
         self._running = False
+        self.logger = logging.getLogger(__name__)
+        self.destroyed_event = threading.Event()
+
 
     def _setup_ui(self):
         self.root = tk.Tk()
@@ -60,10 +59,18 @@ class LoadingScreen:
         self.thread.start()
 
     def _run_loop(self):
-        self._setup_ui()
-        self.root.mainloop()
+        try:
+            self._setup_ui()
+            self.root.mainloop()
+        except Exception as e:
+            self.logger.error(f"Loading screen loop error: {e}")
+        finally:
+            self.destroyed_event.set()
 
     def hide(self):
         if self.root:
             self.root.after(0, self.root.destroy)
+            if not self.destroyed_event.wait(timeout=3):
+                self.logger.warning("Loading screen destruction timeout!")
         self._running = False
+        self.logger.info("Loading screen hidden")
