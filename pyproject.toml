@@ -37,7 +37,7 @@ dependencies = [
     "pyobjc-framework-ApplicationServices; sys_platform=='darwin'",
 ]
 
-[project.scripts]
+[project.gui-scripts]
 whisper-key = "whisper_key.main:main"
 wk = "whisper_key.main:main"
 

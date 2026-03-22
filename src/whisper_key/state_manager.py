@@ -15,6 +15,7 @@ from .audio_feedback import AudioFeedback
 from .utils import OptionalComponent
 from .voice_activity_detection import VadEvent, VadManager
 from .voice_commands import VoiceCommandManager
+from .floating_widget import FloatingWidget
 
 class StateManager:
     def __init__(self,
@@ -25,7 +26,8 @@ class StateManager:
                  vad_manager: VadManager,
                  system_tray: Optional[SystemTray] = None,
                  audio_feedback: Optional[AudioFeedback] = None,
-                 voice_command_manager: Optional[VoiceCommandManager] = None):
+                 voice_command_manager: Optional[VoiceCommandManager] = None,
+                 floating_widget: Optional[FloatingWidget] = None):
 
         self.audio_recorder = audio_recorder
         self.whisper_engine = whisper_engine
@@ -35,6 +37,7 @@ class StateManager:
         self.audio_feedback = OptionalComponent(audio_feedback)
         self.vad_manager = vad_manager
         self.voice_command_manager = voice_command_manager
+        self.floating_widget = OptionalComponent(floating_widget)
 
         self.is_processing = False
         self.is_model_loading = False
@@ -44,6 +47,12 @@ class StateManager:
         self._command_mode = False
         self._state_lock = threading.Lock()
         self._streaming_display_active = False
+        
+        # Auto-trigger state
+        vad_config = self.config_manager.get_vad_config()
+        self.auto_trigger_enabled = vad_config.get('auto_trigger_enabled', False)
+        self.auto_trigger_silence_delay = vad_config.get('auto_trigger_silence_delay', 1.5)
+        self._auto_trigger_stop_timer = None
 
         self.logger = logging.getLogger(__name__)
         self._current_audio_host = None
@@ -51,23 +60,70 @@ class StateManager:
 
     def attach_components(self,
                           audio_recorder: AudioRecorder,
-                          system_tray: Optional[SystemTray]):
+                          system_tray: Optional[SystemTray],
+                          floating_widget: Optional[FloatingWidget] = None):
         self.audio_recorder = audio_recorder
         self.system_tray = OptionalComponent(system_tray)
+        self.floating_widget = OptionalComponent(floating_widget)
         self._ensure_audio_device_for_host(self._current_audio_host)
+        
+        # Start monitoring if auto-trigger is enabled
+        if self.auto_trigger_enabled:
+            self.audio_recorder.start_monitoring()
+    
+    def _update_ui_state(self, state: str):
+        self.system_tray.update_state(state)
+        self.floating_widget.update_state(state)
     
     def handle_max_recording_duration_reached(self, audio_data):
         self.logger.info("Max recording duration reached - starting transcription")
         self._transcription_pipeline(audio_data, use_auto_enter=False)
 
     def handle_vad_event(self, event: VadEvent):
-        if event == VadEvent.SILENCE_TIMEOUT:
-            self.logger.info("VAD silence timeout detected - stopping recording")
-            timeout_seconds = int(self.vad_manager.vad_silence_timeout_seconds)
-            self._clear_streaming_display()
-            print(f"⏰ Stopping recording after {timeout_seconds} seconds of silence...")
-            audio_data = self.audio_recorder.stop_recording()
-            self._transcription_pipeline(audio_data, use_auto_enter=False)
+        if not self.auto_trigger_enabled:
+            # Standard silence timeout for manual recording
+            if event == VadEvent.SILENCE_TIMEOUT:
+                self.logger.info("VAD silence timeout detected - stopping recording")
+                timeout_seconds = int(self.vad_manager.vad_silence_timeout_seconds)
+                self._clear_streaming_display()
+                print(f"⏰ Stopping recording after {timeout_seconds} seconds of silence...")
+                audio_data = self.audio_recorder.stop_recording()
+                self._transcription_pipeline(audio_data, use_auto_enter=False)
+            return
+
+        # Auto-trigger logic
+        if event == VadEvent.SPEECH_START:
+            if self.get_current_state() == "idle":
+                self.logger.info("Auto-trigger: Speech started")
+                self._cancel_auto_trigger_stop_timer()
+                self.start_recording()
+            elif self.get_current_state() == "recording":
+                # Speech continued, reset stop timer if active
+                self._cancel_auto_trigger_stop_timer()
+
+        elif event == VadEvent.SILENCE_START or event == VadEvent.SILENCE_TIMEOUT:
+            if self.get_current_state() == "recording":
+                self.logger.info(f"Auto-trigger: Silence detected, starting stop timer ({self.auto_trigger_silence_delay}s)")
+                self._start_auto_trigger_stop_timer()
+
+    def _start_auto_trigger_stop_timer(self):
+        self._cancel_auto_trigger_stop_timer()
+        self._auto_trigger_stop_timer = threading.Timer(
+            self.auto_trigger_silence_delay, 
+            self._handle_auto_trigger_stop
+        )
+        self._auto_trigger_stop_timer.daemon = True
+        self._auto_trigger_stop_timer.start()
+
+    def _cancel_auto_trigger_stop_timer(self):
+        if self._auto_trigger_stop_timer:
+            self._auto_trigger_stop_timer.cancel()
+            self._auto_trigger_stop_timer = None
+
+    def _handle_auto_trigger_stop(self):
+        if self.get_current_state() == "recording":
+            self.logger.info("Auto-trigger: Stop timer reached, stopping recording")
+            self.stop_recording()
 
     def handle_streaming_result(self, text: str, is_final: bool):
         if is_final:
@@ -100,7 +156,7 @@ class StateManager:
         self._command_mode = False
         self.audio_recorder.cancel_recording()
         self.audio_feedback.play_cancel_sound()
-        self.system_tray.update_state("idle")
+        self._update_ui_state("idle")
     
     def cancel_recording_hotkey_pressed(self) -> bool:
         current_state = self.get_current_state()
@@ -138,7 +194,7 @@ class StateManager:
             print("\n🎤 Command mode activated! Speak a command...")
             self.config_manager.print_command_stop_instructions()
             self.audio_feedback.play_start_sound()
-            self.system_tray.update_state("recording")
+            self._update_ui_state("recording")
 
     def _begin_recording(self):
         success = self.audio_recorder.start_recording()
@@ -147,7 +203,7 @@ class StateManager:
             print("\n🎤 Recording started! Speak now...")
             self.config_manager.print_stop_instructions_based_on_config()
             self.audio_feedback.play_start_sound()
-            self.system_tray.update_state("recording")
+            self._update_ui_state("recording")
     
     def _transcription_pipeline(self, audio_data, use_auto_enter: bool = False):
         try:
@@ -164,7 +220,7 @@ class StateManager:
             duration = self.audio_recorder.get_audio_duration(audio_data)
             print(f"   ✓ Recorded {duration:.1f} seconds, transcribing...")
 
-            self.system_tray.update_state("processing")
+            self._update_ui_state("processing")
 
             transcribed_text = self.whisper_engine.transcribe_audio(audio_data)
 
@@ -206,7 +262,7 @@ class StateManager:
                 self._pending_model_change = None
 
             if not (pending_device or pending_model):
-                self.system_tray.update_state("idle")
+                self._update_ui_state("idle")
 
     def _handle_command_transcription(self, text: str, use_auto_enter: bool = False):
         log_config = self.config_manager.get_logging_config()
@@ -257,6 +313,7 @@ class StateManager:
             self.audio_recorder.stop_recording()
         
         self.system_tray.stop()
+        self.floating_widget.stop()
     
     def set_model_loading(self, loading: bool):
         with self._state_lock:
@@ -265,9 +322,9 @@ class StateManager:
             
             if old_state != loading:
                 if loading:
-                    self.system_tray.update_state("processing")
+                    self._update_ui_state("processing")
                 else:
-                    self.system_tray.update_state("idle")
+                    self._update_ui_state("idle")
     
     def is_transcription_recording(self) -> bool:
         return self.audio_recorder.get_recording_status() and not self._command_mode
@@ -318,6 +375,25 @@ class StateManager:
     def update_transcription_mode(self, value):
         self.config_manager.update_user_setting('clipboard', 'auto_paste', value)
         self.clipboard_manager.update_auto_paste(value)
+
+    def update_auto_trigger(self, enabled: bool):
+        self.auto_trigger_enabled = enabled
+        self.config_manager.update_user_setting('vad', 'auto_trigger_enabled', enabled)
+        
+        if enabled:
+            # Ensure VAD is enabled and initialized
+            self.vad_manager.vad_realtime_enabled = True
+            if not self.vad_manager.ten_vad:
+                self.vad_manager.ten_vad = self.vad_manager._check_and_init_ten_vad()
+            
+            if self.audio_recorder:
+                # Re-setup continuous VAD if it was None
+                if not self.audio_recorder.continuous_vad:
+                    self.audio_recorder.continuous_vad = self.audio_recorder._setup_continuous_vad_monitoring()
+                self.audio_recorder.start_monitoring()
+        else:
+            if self.audio_recorder:
+                self.audio_recorder.stop_monitoring()
 
     def _execute_model_change(self, new_model_key: str):
         def progress_callback(message: str):
@@ -453,6 +529,9 @@ class StateManager:
             )
 
             self.audio_recorder = new_recorder
+            
+            if self.auto_trigger_enabled:
+                self.audio_recorder.start_monitoring()
 
             print(f"✅ Successfully switched audio device to: {device_name}")
 

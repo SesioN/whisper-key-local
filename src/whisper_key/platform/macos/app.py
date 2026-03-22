@@ -14,6 +14,12 @@ def setup():
     _delegate = AppDelegate.alloc().init()
     app.setDelegate_(_delegate)
 
+def ensure_console(force_show=False):
+    """
+    No-op on macOS as standard python/pythonw behavior differs from Windows.
+    """
+    pass
+
 def getch():
     import tty
     import termios

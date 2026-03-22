@@ -41,6 +41,9 @@ class VadState(Enum):
 class VadEvent(Enum):
     NO_EVENT = "no_event"
     SILENCE_TIMEOUT = "silence_timeout"
+    SPEECH_START = "speech_start"
+    SPEECH_END = "speech_end"
+    SILENCE_START = "silence_start"
 
 class VadManager:
     def __init__(self,
@@ -210,22 +213,30 @@ class ContinuousVoiceDetector:
                 else:
                     self.state = VadState.SILENCE_COUNTING
                     self.silence_frame_count = 1
+                    event = VadEvent.SILENCE_START
 
             elif current_state == VadState.SILENCE_COUNTING:
                 if speech_detected:
                     self.state = VadState.SPEECH_DETECTED
                     self.silence_frame_count = 0
+                    event = VadEvent.SPEECH_START
                 else:
                     self.silence_frame_count += 1
                     if self.silence_frame_count >= self.frames_for_timeout:
                         self.state = VadState.TIMEOUT_TRIGGERED
                         event = VadEvent.SILENCE_TIMEOUT
+                        # Also dispatch SPEECH_END for auto-trigger purposes
+                        self._dispatch_event(VadEvent.SPEECH_END)
 
             elif current_state == VadState.TIMEOUT_TRIGGERED:
-                pass
+                if speech_detected:
+                    # Allow recovery from timeout state in continuous monitoring
+                    self.state = VadState.SPEECH_DETECTED
+                    self.silence_frame_count = 0
+                    event = VadEvent.SPEECH_START
 
             if event != VadEvent.NO_EVENT:
-                threading.Thread(target=self._dispatch_event, args=(event,), daemon=True).start()
+                self._dispatch_event(event)
 
             return event
 

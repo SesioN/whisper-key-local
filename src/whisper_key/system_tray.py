@@ -169,6 +169,7 @@ class SystemTray:
             model_sub_menu_items = self._build_model_menu_items(current_model, is_model_loading)
 
             voice_commands_enabled = self.config_manager.get_setting('voice_commands', 'enabled')
+            auto_trigger_enabled = self.config_manager.get_setting('vad', 'auto_trigger_enabled')
 
             menu_items = [
                 pystray.MenuItem("Open log file...", self._open_log_file),
@@ -186,6 +187,8 @@ class SystemTray:
                     f"Audio Source",
                     pystray.Menu(*audio_device_items)
                 ),
+                pystray.Menu.SEPARATOR,
+                pystray.MenuItem("Auto-trigger recording", lambda icon, item: self._set_auto_trigger(not auto_trigger_enabled), checked=lambda item: auto_trigger_enabled),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Auto-paste", lambda icon, item: self._set_transcription_mode(True), radio=True, checked=lambda item: auto_paste_enabled),
                 pystray.MenuItem("Copy to clipboard", lambda icon, item: self._set_transcription_mode(False), radio=True, checked=lambda item: not auto_paste_enabled),
@@ -252,6 +255,10 @@ class SystemTray:
                 auto_paste = False
 
         self.state_manager.update_transcription_mode(auto_paste)
+        self.icon.menu = self._create_menu()
+
+    def _set_auto_trigger(self, enabled: bool):
+        self.state_manager.update_auto_trigger(enabled)
         self.icon.menu = self._create_menu()
 
     def _select_model(self, model_key: str):

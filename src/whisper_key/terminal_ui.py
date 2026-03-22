@@ -46,9 +46,23 @@ def prompt_choice(title: str, options: list[tuple[str, str]], subtitle: str = No
 
     valid_choices = {str(i): i for i in range(1, len(options) + 1)}
 
+    # If not interactive (e.g. background/headless), return default (cancel/skip)
+    # We assume the last option is usually "Cancel" or "Skip" or safest default
+    import sys
+    is_interactive = hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()
+    # On Windows with pythonw, stdout might be a file wrapper but not a TTY
+    # If we are in headless mode, prompt_choice should probably fail safe.
+    
+    if not is_interactive:
+        # Return the last option index (usually Cancel/Exit)
+        return len(options)
+
     while True:
         try:
             ch = app.getch()
+            if ch is None:  # Handle missing console
+                return len(options)
+                
             if ch in valid_choices:
                 print(ch)
                 return valid_choices[ch]

@@ -49,9 +49,11 @@ class AudioRecorder:
         self._test_audio_source()
 
         self.continuous_streaming = self._setup_continuous_streaming()
+        self.is_monitoring = False
+        self.monitoring_thread = None
 
     def _setup_continuous_vad_monitoring(self):
-        if self.vad_manager.is_available():
+        if self.vad_manager and self.vad_manager.is_available():
             continuous_vad = self.vad_manager.create_continuous_detector(
                 event_callback=self._handle_vad_event
             )
@@ -142,10 +144,89 @@ class AudioRecorder:
         except Exception as e:
             self.logger.error(f"Audio source test failed: {e}")
             raise
+
+    def start_monitoring(self):
+        if self.is_monitoring:
+            return False
+        
+        self.logger.info("Starting audio monitoring...")
+        self.is_monitoring = True
+        self.monitoring_thread = threading.Thread(target=self._monitor_audio)
+        self.monitoring_thread.daemon = True
+        self.monitoring_thread.start()
+        return True
     
+    def stop_monitoring(self):
+        if not self.is_monitoring:
+            return
+        self.is_monitoring = False
+        if self.monitoring_thread:
+            self.monitoring_thread.join(timeout=self.THREAD_JOIN_TIMEOUT)
+            self.monitoring_thread = None
+
+    def _monitor_audio(self):
+        try:
+            recording_rate = self._get_recording_sample_rate()
+            needs_resampling = self._needs_resampling()
+
+            if needs_resampling:
+                vad_blocksize = int(VAD_CHUNK_SIZE * recording_rate / self.WHISPER_SAMPLE_RATE)
+            else:
+                vad_blocksize = VAD_CHUNK_SIZE
+
+            def audio_callback(audio_data, frames, _time, status):
+                if self.is_recording:
+                    self.audio_data.append(audio_data.copy())
+                
+                if self.continuous_vad and frames == vad_blocksize:
+                    if needs_resampling:
+                        chunk_16k = self._resample_audio(audio_data, recording_rate, self.WHISPER_SAMPLE_RATE)
+                        self.continuous_vad.process_chunk(chunk_16k.reshape(-1, 1))
+                    else:
+                        self.continuous_vad.process_chunk(audio_data)
+
+                if self.is_recording and self.continuous_streaming:
+                    self.continuous_streaming.process_chunk(audio_data)
+
+                if status:
+                    self.logger.debug(f"Audio monitor status: {status}")
+
+            blocksize = vad_blocksize if self.continuous_vad else None
+            
+            if needs_resampling:
+                time.sleep(self.WASAPI_REOPEN_DELAY)
+
+            with sd.InputStream(samplerate=recording_rate,
+                                channels=self.channels,
+                                callback=audio_callback,
+                                dtype=self.STREAM_DTYPE,
+                                blocksize=blocksize,
+                                device=self.device):
+                while self.is_monitoring:
+                    if self.is_recording:
+                        if self._check_max_duration_exceeded():
+                            self.is_recording = False
+                    
+                    sd.sleep(self.RECORDING_SLEEP_INTERVAL)
+
+        except Exception as e:
+            self.logger.error(f"Error during audio monitoring: {e}")
+            self.is_monitoring = False
+            self.is_recording = False
+
     def start_recording(self):
         if self.is_recording:
             return False
+
+        if self.is_monitoring:
+            self.audio_data = []
+            self.recording_start_time = time.time()
+            self.is_recording = True
+            if self.continuous_vad:
+                self.continuous_vad.reset()
+            if self.continuous_streaming:
+                self.continuous_streaming.reset()
+            return True
 
         try:
             self.logger.info("Starting audio recording...")
@@ -176,7 +257,8 @@ class AudioRecorder:
             return None
         
         self.is_recording = False
-        self._wait_for_thread_finish()
+        if not self.is_monitoring:
+            self._wait_for_thread_finish()
         
         return self._process_audio_data()
     
@@ -201,7 +283,8 @@ class AudioRecorder:
             return
         
         self.is_recording = False
-        self._wait_for_thread_finish()
+        if not self.is_monitoring:
+            self._wait_for_thread_finish()
         
         self.audio_data = []
         self.recording_start_time = None
@@ -235,7 +318,6 @@ class AudioRecorder:
 
             blocksize = vad_blocksize if self.continuous_vad else None
 
-            # WASAPI requires delay before reopening stream (OS-level async cleanup)
             if needs_resampling:
                 time.sleep(self.WASAPI_REOPEN_DELAY)
 
@@ -245,10 +327,6 @@ class AudioRecorder:
                                 dtype=self.STREAM_DTYPE,
                                 blocksize=blocksize,
                                 device=self.device):
-
-                # NOTE: WASAPI breaks if the calling thread is blocked or if audio
-                # playback runs from this thread. Reason unknown. Don't add synchronization
-                # or audio calls here — print messages before start_recording() returns instead.
                 while self.is_recording:
                     if self._check_max_duration_exceeded():
                         break
@@ -286,8 +364,11 @@ class AudioRecorder:
     def get_device_id(self) -> Optional[int]:
         if self.device is not None:
             return self.device
-        default_device_id = sd.query_devices(kind='input')['index']
-        return default_device_id
+        try:
+            default_device_id = sd.query_devices(kind='input')['index']
+            return default_device_id
+        except Exception:
+            return None
 
     @staticmethod
     def get_available_audio_devices(host_filter: Optional[str] = None):

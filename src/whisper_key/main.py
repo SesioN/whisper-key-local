@@ -10,9 +10,10 @@ import signal
 import sys
 import threading
 
-sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-sys.stdout.write("\033]0;Whisper Key\007")
-sys.stdout.flush()
+# Defer stdout configuration until after console setup
+# sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+# sys.stdout.write("\033]0;Whisper Key\007")
+# sys.stdout.flush()
 
 from .platform import app, permissions
 from .config_manager import ConfigManager
@@ -28,6 +29,7 @@ from .instance_manager import guard_against_multiple_instances
 from .model_registry import ModelRegistry
 from .streaming_manager import StreamingManager
 from .voice_commands import VoiceCommandManager
+from .floating_widget import FloatingWidget
 from .hardware_detection import detect_and_print as detect_hardware
 from .onboarding import check_gpu
 from .update_checker import check_for_updates
@@ -83,9 +85,11 @@ def setup_audio_recorder(audio_config, state_manager, vad_manager, streaming_man
     )
 
 def setup_vad(vad_config):
+    # Auto-trigger depends on realtime VAD
+    realtime_enabled = vad_config['vad_realtime_enabled'] or vad_config.get('auto_trigger_enabled', False)
     return VadManager(
         vad_precheck_enabled=vad_config['vad_precheck_enabled'],
-        vad_realtime_enabled=vad_config['vad_realtime_enabled'],
+        vad_realtime_enabled=realtime_enabled,
         vad_onset_threshold=vad_config['vad_onset_threshold'],
         vad_offset_threshold=vad_config['vad_offset_threshold'],
         vad_min_speech_duration=vad_config['vad_min_speech_duration'],
@@ -152,6 +156,11 @@ def setup_system_tray(tray_config, config_manager, state_manager, model_registry
         model_registry=model_registry
     )
 
+def setup_floating_widget(gui_config, state_manager):
+    if not gui_config.get('floating_widget_enabled', False):
+        return None
+    return FloatingWidget(state_manager=state_manager)
+
 def run_gpu_onboarding(config_manager, whisper_config):
     gpu_status = config_manager.config.get('onboarding', {}).get('gpu', 'pending')
     if gpu_status != 'pending':
@@ -191,10 +200,27 @@ def shutdown_app(hotkey_listener: HotkeyListener, state_manager: StateManager, l
         state_manager.shutdown()
 
 def main():
+    # Handle console allocation before anything else
+    show_console = '--console' in sys.argv
+    if show_console:
+        sys.argv.remove('--console')
+    
+    app.ensure_console(force_show=show_console)
+
+    if sys.stdout is not None:
+        try:
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+            sys.stdout.write("\033]0;Whisper Key\007")
+            sys.stdout.flush()
+        except Exception:
+            pass
+
     app.setup()
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--test', action='store_true', help='Run as separate test instance')
+    # Note: --console is handled manually above, but we can add it here for help text
+    parser.add_argument('--console', action='store_true', help='Show console window (Windows only)')
     args = parser.parse_args()
 
     instance_name = "WhisperKeyLocal_test" if args.test else "WhisperKeyLocal"
@@ -227,6 +253,7 @@ def main():
         vad_config = config_manager.get_vad_config()
         streaming_config = config_manager.get_streaming_config()
         voice_commands_config = config_manager.get_voice_commands_config()
+        gui_config = config_manager.get_gui_config()
         log_config = config_manager.get_logging_config()
         log_transcriptions = log_config.get('log_transcriptions', False)
 
@@ -252,15 +279,20 @@ def main():
             config_manager=config_manager,
             audio_feedback=audio_feedback,
             vad_manager=vad_manager,
-            voice_command_manager=voice_command_manager
+            voice_command_manager=voice_command_manager,
+            floating_widget=None
         )
         audio_recorder = setup_audio_recorder(audio_config, state_manager, vad_manager, streaming_manager)
         system_tray = setup_system_tray(tray_config, config_manager, state_manager, model_registry)
-        state_manager.attach_components(audio_recorder, system_tray)
+        floating_widget = setup_floating_widget(gui_config, state_manager)
+        state_manager.attach_components(audio_recorder, system_tray, floating_widget)
         
         hotkey_listener = setup_hotkey_listener(hotkey_config, state_manager, voice_commands_config['enabled'])
 
         system_tray.start()
+        
+        if floating_widget:
+            threading.Thread(target=lambda: floating_widget.start(shutdown_event), daemon=True).start()
 
         if clipboard_config['auto_paste']:
             if not permissions.check_accessibility_permission():

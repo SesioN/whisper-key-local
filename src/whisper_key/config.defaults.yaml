@@ -179,6 +179,12 @@ vad: # Voice Activity Detection (VAD)
   vad_realtime_enabled: true  # Enables continuous silence detection and automatic recording stop
   vad_silence_timeout_seconds: 30.0  # Auto-stop recording after this many seconds of silence
 
+  # Auto-trigger recording based on speech detection
+  auto_trigger_enabled: false
+  
+  # Seconds of silence before auto-stopping in auto-trigger mode
+  auto_trigger_silence_delay: 1.5
+
 audio: # Audio Recording Settings
 
   # Sample rate is fixed at 16000 Hz for optimal Whisper and TEN VAD performance
@@ -325,6 +331,13 @@ onboarding: # First-run setup state (managed automatically)
   # Detected GPU class (set automatically)
   # nvidia | amd_rdna2+ | amd_rdna1 | null
   gpu_class: null
+
+gui: # Graphical User Interface Settings
+
+  # Enable floating transparent widget
+  # true = show floating icon for mouse interaction
+  # false = disable floating widget
+  floating_widget_enabled: true
 
 voice_commands: # Voice Command Settings
 
