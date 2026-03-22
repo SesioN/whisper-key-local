@@ -170,6 +170,14 @@ class SystemTray:
 
             voice_commands_enabled = self.config_manager.get_setting('voice_commands', 'enabled')
             auto_trigger_enabled = self.config_manager.get_setting('vad', 'auto_trigger_enabled')
+            floating_widget_enabled = self.config_manager.get_setting('gui', 'floating_widget_enabled')
+            floating_widget_size = self.config_manager.get_setting('gui', 'floating_widget_size')
+
+            floating_size_items = [
+                pystray.MenuItem("Small", lambda icon, item: self._set_floating_size("small"), radio=True, checked=lambda item: floating_widget_size == "small"),
+                pystray.MenuItem("Medium", lambda icon, item: self._set_floating_size("medium"), radio=True, checked=lambda item: floating_widget_size == "medium"),
+                pystray.MenuItem("Big", lambda icon, item: self._set_floating_size("big"), radio=True, checked=lambda item: floating_widget_size == "big"),
+            ]
 
             menu_items = [
                 pystray.MenuItem("Open log file...", self._open_log_file),
@@ -189,6 +197,12 @@ class SystemTray:
                 ),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Auto-trigger recording", lambda icon, item: self._set_auto_trigger(not auto_trigger_enabled), checked=lambda item: auto_trigger_enabled),
+                pystray.Menu.SEPARATOR,
+                pystray.MenuItem("Floating Widget", lambda icon, item: self._set_floating_enabled(not floating_widget_enabled), checked=lambda item: floating_widget_enabled),
+                pystray.MenuItem(
+                    "Floating Size",
+                    pystray.Menu(*floating_size_items)
+                ) if floating_widget_enabled else None,
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Auto-paste", lambda icon, item: self._set_transcription_mode(True), radio=True, checked=lambda item: auto_paste_enabled),
                 pystray.MenuItem("Copy to clipboard", lambda icon, item: self._set_transcription_mode(False), radio=True, checked=lambda item: not auto_paste_enabled),
@@ -259,6 +273,14 @@ class SystemTray:
 
     def _set_auto_trigger(self, enabled: bool):
         self.state_manager.update_auto_trigger(enabled)
+        self.icon.menu = self._create_menu()
+
+    def _set_floating_enabled(self, enabled: bool):
+        self.state_manager.update_floating_enabled(enabled)
+        self.icon.menu = self._create_menu()
+
+    def _set_floating_size(self, size_key: str):
+        self.state_manager.update_floating_size(size_key)
         self.icon.menu = self._create_menu()
 
     def _select_model(self, model_key: str):

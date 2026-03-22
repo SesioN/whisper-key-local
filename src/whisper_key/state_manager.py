@@ -395,6 +395,17 @@ class StateManager:
             if self.audio_recorder:
                 self.audio_recorder.stop_monitoring()
 
+    def update_floating_size(self, size_key: str):
+        self.config_manager.update_user_setting('gui', 'floating_widget_size', size_key)
+        self.floating_widget.update_size(size_key)
+
+    def update_floating_enabled(self, enabled: bool):
+        self.config_manager.update_user_setting('gui', 'floating_widget_enabled', enabled)
+        if enabled:
+            self.floating_widget.show()
+        else:
+            self.floating_widget.hide()
+
     def _execute_model_change(self, new_model_key: str):
         def progress_callback(message: str):
             if "ready" in message.lower() or "already loaded" in message.lower():

@@ -333,11 +333,14 @@ onboarding: # First-run setup state (managed automatically)
   gpu_class: null
 
 gui: # Graphical User Interface Settings
-
   # Enable floating transparent widget
   # true = show floating icon for mouse interaction
   # false = disable floating widget
   floating_widget_enabled: true
+
+  # Floating widget size
+  # Options: small, medium, big
+  floating_widget_size: big
 
 voice_commands: # Voice Command Settings
 

@@ -9,6 +9,33 @@ from .utils import resolve_asset_path
 from .platform import IS_MACOS
 
 class FloatingWidget:
+    SIZES = {
+        "small": {
+            "icon": 32,
+            "font": 8,
+            "padx": 8,
+            "pady": 4,
+            "width": 12,
+            "spacing": 5
+        },
+        "medium": {
+            "icon": 48,
+            "font": 9,
+            "padx": 12,
+            "pady": 6,
+            "width": 12,
+            "spacing": 8
+        },
+        "big": {
+            "icon": 64,
+            "font": 10,
+            "padx": 15,
+            "pady": 8,
+            "width": 12,
+            "spacing": 10
+        }
+    }
+
     def __init__(self, state_manager):
         self.state_manager = state_manager
         self.logger = logging.getLogger(__name__)
@@ -16,6 +43,11 @@ class FloatingWidget:
         self._is_running = False
         self.root = None
         self.icons = {}
+        
+        gui_config = self.state_manager.config_manager.get_gui_config()
+        self.size_key = gui_config.get('floating_widget_size', 'big')
+        if self.size_key not in self.SIZES:
+            self.size_key = 'big'
 
     def _setup_ui(self):
         self.root = tk.Tk()
@@ -31,6 +63,11 @@ class FloatingWidget:
         
         self.current_state = "idle"
         self.update_icon("idle")
+        
+        # Check initial visibility
+        gui_config = self.state_manager.config_manager.get_gui_config()
+        if not gui_config.get('floating_widget_enabled', False):
+            self.root.withdraw()
         
         # Start polling queue
         self.root.after(100, self._process_queue)
@@ -76,18 +113,19 @@ class FloatingWidget:
     def _load_icons(self):
         # Determine platform folder for assets
         plat = "macos" if IS_MACOS else "windows"
+        icon_size = self.SIZES[self.size_key]["icon"]
         
         def load_icon(name):
              try:
                  path = resolve_asset_path(f"platform/{plat}/assets/tray_{name}.png")
                  img = Image.open(path).convert("RGBA")
-                 # Resize to a reasonable widget size (e.g. 64x64)
-                 img = img.resize((64, 64), Image.Resampling.LANCZOS)
+                 # Resize based on size key
+                 img = img.resize((icon_size, icon_size), Image.Resampling.LANCZOS)
                  return ImageTk.PhotoImage(img)
              except Exception as e:
                  self.logger.error(f"Failed to load icon {name}: {e}")
                  # Create a fallback colored square
-                 img = Image.new('RGBA', (64, 64), color='red')
+                 img = Image.new('RGBA', (icon_size, icon_size), color='red')
                  return ImageTk.PhotoImage(img)
 
         self.icons = {
@@ -97,6 +135,7 @@ class FloatingWidget:
         }
 
     def _create_ui_elements(self):
+        size = self.SIZES[self.size_key]
         # Icon Label
         self.label = tk.Label(
             self.root, 
@@ -105,7 +144,7 @@ class FloatingWidget:
             bd=0,
             highlightthickness=0
         )
-        self.label.pack(pady=(0, 10))
+        self.label.pack(pady=(0, size["spacing"]))
 
         # Lock Toggle (Using a solid background to ensure the whole area is clickable)
         # We use a dark background so it's not click-through like the magenta areas.
@@ -114,12 +153,12 @@ class FloatingWidget:
             text="[ ] Moveable",
             bg="#222222", 
             fg="yellow",
-            font=("Arial", 10, "bold"),
-            padx=15, 
-            pady=8,
+            font=("Arial", size["font"], "bold"),
+            padx=size["padx"], 
+            pady=size["pady"],
             cursor="hand2",
             bd=0,
-            width=12
+            width=size["width"]
         )
         self.lock_label.pack(pady=(0, 5))
         
@@ -214,12 +253,28 @@ class FloatingWidget:
         # Thread-safe update via queue
         self.queue.put(("state", new_state))
 
+    def update_size(self, size_key):
+        # Thread-safe update via queue
+        self.queue.put(("size", size_key))
+
+    def show(self):
+        self.queue.put(("show", None))
+
+    def hide(self):
+        self.queue.put(("hide", None))
+
     def _process_queue(self):
         try:
             while True:
                 msg_type, data = self.queue.get_nowait()
                 if msg_type == "state":
                     self.update_icon(data)
+                elif msg_type == "size":
+                    self._handle_size_change(data)
+                elif msg_type == "show":
+                    self.root.deiconify()
+                elif msg_type == "hide":
+                    self.root.withdraw()
                 elif msg_type == "quit":
                     self.root.destroy()
                     return
@@ -233,6 +288,24 @@ class FloatingWidget:
         
         if self._is_running:
             self.root.after(100, self._process_queue)
+
+    def _handle_size_change(self, size_key):
+        if size_key not in self.SIZES:
+            return
+        self.size_key = size_key
+        self._load_icons()
+        self._update_ui_for_size()
+        self.update_icon(self.current_state)
+
+    def _update_ui_for_size(self):
+        size = self.SIZES[self.size_key]
+        self.label.pack_configure(pady=(0, size["spacing"]))
+        self.lock_label.config(
+            font=("Arial", size["font"], "bold"),
+            padx=size["padx"],
+            pady=size["pady"],
+            width=size["width"]
+        )
 
     def update_icon(self, state):
         self.current_state = state

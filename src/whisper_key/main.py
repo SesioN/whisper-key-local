@@ -157,8 +157,6 @@ def setup_system_tray(tray_config, config_manager, state_manager, model_registry
     )
 
 def setup_floating_widget(gui_config, state_manager):
-    if not gui_config.get('floating_widget_enabled', False):
-        return None
     return FloatingWidget(state_manager=state_manager)
 
 def run_gpu_onboarding(config_manager, whisper_config):
