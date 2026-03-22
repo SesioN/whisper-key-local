@@ -2,6 +2,7 @@ import logging
 import threading
 import time
 from typing import Optional, Callable
+from collections import deque
 
 import numpy as np
 import sounddevice as sd
@@ -55,6 +56,9 @@ class AudioRecorder:
         self.continuous_streaming = self._setup_continuous_streaming()
         self.is_monitoring = False
         self.monitoring_thread = None
+        
+        self.audio_buffer = deque(maxlen=int(self.WHISPER_SAMPLE_RATE * 1.0 / VAD_CHUNK_SIZE) + 1)
+        self.buffer_lock = threading.Lock()
 
     def _setup_continuous_vad_monitoring(self):
         if self.vad_manager and self.vad_manager.is_available():
@@ -117,7 +121,7 @@ class AudioRecorder:
             self.device_native_rate = self.WHISPER_SAMPLE_RATE
 
     def _needs_resampling(self) -> bool:
-        return self.device_hostapi and 'wasapi' in self.device_hostapi.lower()
+        return self.device_hostapi is not None and 'wasapi' in self.device_hostapi.lower()
 
     def _get_recording_sample_rate(self) -> int:
         if self._needs_resampling():
@@ -180,9 +184,12 @@ class AudioRecorder:
                 vad_blocksize = VAD_CHUNK_SIZE
 
             def audio_callback(audio_data, frames, _time, status):
+                with self.buffer_lock:
+                    self.audio_buffer.append(audio_data.copy())
+                
                 if self.is_recording:
                     self.audio_data.append(audio_data.copy())
-                
+
                 if self.on_db_update:
                     # Calculate dBFS (decibels relative to full scale)
                     # 1e-6 is added to avoid log10(0)
@@ -232,6 +239,12 @@ class AudioRecorder:
 
         if self.is_monitoring:
             self.audio_data = []
+            
+            with self.buffer_lock:
+                if self.audio_buffer:
+                    buffered_audio = np.concatenate(list(self.audio_buffer), axis=0)
+                    self.audio_data.append(buffered_audio)
+            
             self.recording_start_time = time.time()
             self.is_recording = True
             if self.continuous_vad:
@@ -312,6 +325,8 @@ class AudioRecorder:
                 vad_blocksize = VAD_CHUNK_SIZE
 
             def audio_callback(audio_data, frames, _time, status):
+                with self.buffer_lock:
+                    self.audio_buffer.append(audio_data.copy())
                 if self.is_recording:
                     self.audio_data.append(audio_data.copy())
 
