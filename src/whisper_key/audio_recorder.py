@@ -21,10 +21,12 @@ class AudioRecorder:
                  channels: int = 1,
                  dtype: str = "float32",
                  max_duration: int = 30,
-                 on_max_duration_reached: callable = None,
+                 on_max_duration_reached: Optional[Callable[[Optional[np.ndarray]], None]] = None,
                  vad_manager = None,
                  streaming_manager = None,
-                 on_streaming_result: Callable[[str, bool], None] = None,
+                 on_streaming_result: Optional[Callable[[str, bool], None]] = None,
+                 on_probability_update: Optional[Callable[[float], None]] = None,
+                 on_db_update: Optional[Callable[[float], None]] = None,
                  device = None):
 
         self.sample_rate = self.WHISPER_SAMPLE_RATE
@@ -32,6 +34,8 @@ class AudioRecorder:
         self.dtype = dtype
         self.max_duration = max_duration
         self.on_max_duration_reached = on_max_duration_reached
+        self.on_probability_update = on_probability_update
+        self.on_db_update = on_db_update
         self.is_recording = False
         self.audio_data = []
         self.recording_thread = None
@@ -55,7 +59,8 @@ class AudioRecorder:
     def _setup_continuous_vad_monitoring(self):
         if self.vad_manager and self.vad_manager.is_available():
             continuous_vad = self.vad_manager.create_continuous_detector(
-                event_callback=self._handle_vad_event
+                event_callback=self._handle_vad_event,
+                probability_callback=self.on_probability_update
             )
             return continuous_vad
         else:
@@ -178,6 +183,13 @@ class AudioRecorder:
                 if self.is_recording:
                     self.audio_data.append(audio_data.copy())
                 
+                if self.on_db_update:
+                    # Calculate dBFS (decibels relative to full scale)
+                    # 1e-6 is added to avoid log10(0)
+                    rms = np.sqrt(np.mean(audio_data**2))
+                    db = 20 * np.log10(rms + 1e-6)
+                    self.on_db_update(db)
+
                 if self.continuous_vad and frames == vad_blocksize:
                     if needs_resampling:
                         chunk_16k = self._resample_audio(audio_data, recording_rate, self.WHISPER_SAMPLE_RATE)

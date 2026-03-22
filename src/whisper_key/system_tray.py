@@ -197,6 +197,7 @@ class SystemTray:
                 ),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Auto-trigger recording", lambda icon, item: self._set_auto_trigger(not auto_trigger_enabled), checked=lambda item: auto_trigger_enabled),
+                pystray.MenuItem("Auto-trigger Sensitivity...", self._open_threshold_adjuster),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Floating Widget", lambda icon, item: self._set_floating_enabled(not floating_widget_enabled), checked=lambda item: floating_widget_enabled),
                 pystray.MenuItem(
@@ -274,6 +275,9 @@ class SystemTray:
     def _set_auto_trigger(self, enabled: bool):
         self.state_manager.update_auto_trigger(enabled)
         self.icon.menu = self._create_menu()
+
+    def _open_threshold_adjuster(self, icon=None, item=None):
+        self.state_manager.open_threshold_adjuster()
 
     def _set_floating_enabled(self, enabled: bool):
         self.state_manager.update_floating_enabled(enabled)

@@ -16,6 +16,7 @@ from .utils import OptionalComponent
 from .voice_activity_detection import VadEvent, VadManager
 from .voice_commands import VoiceCommandManager
 from .floating_widget import FloatingWidget
+from .threshold_adjuster import ThresholdAdjuster
 
 class StateManager:
     def __init__(self,
@@ -38,6 +39,7 @@ class StateManager:
         self.vad_manager = vad_manager
         self.voice_command_manager = voice_command_manager
         self.floating_widget = OptionalComponent(floating_widget)
+        self.threshold_adjuster = ThresholdAdjuster(self)
 
         self.is_processing = False
         self.is_model_loading = False
@@ -406,6 +408,25 @@ class StateManager:
         else:
             self.floating_widget.hide()
 
+    def open_threshold_adjuster(self):
+        self.threshold_adjuster.show()
+
+    def update_vad_thresholds(self, onset: float, offset: float):
+        self.vad_manager.vad_onset_threshold = onset
+        self.vad_manager.vad_offset_threshold = offset
+        self.config_manager.update_user_setting('vad', 'vad_onset_threshold', onset)
+        self.config_manager.update_user_setting('vad', 'vad_offset_threshold', offset)
+        
+        # Update active detector if it exists
+        if self.audio_recorder and self.audio_recorder.continuous_vad:
+            self.audio_recorder.continuous_vad.set_thresholds(onset, offset)
+
+    def handle_probability_update(self, probability: float):
+        self.threshold_adjuster.update_probability(probability)
+        
+    def handle_db_update(self, db: float):
+        self.threshold_adjuster.update_db(db)
+
     def _execute_model_change(self, new_model_key: str):
         def progress_callback(message: str):
             if "ready" in message.lower() or "already loaded" in message.lower():
@@ -536,6 +557,8 @@ class StateManager:
                 vad_manager=vad_manager,
                 streaming_manager=streaming_manager,
                 on_streaming_result=on_streaming_result,
+                on_probability_update=self.handle_probability_update,
+                on_db_update=self.handle_db_update,
                 device=device_id if device_id != -1 else None
             )
 

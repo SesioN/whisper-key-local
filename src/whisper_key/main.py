@@ -81,6 +81,8 @@ def setup_audio_recorder(audio_config, state_manager, vad_manager, streaming_man
         vad_manager=vad_manager,
         streaming_manager=streaming_manager,
         on_streaming_result=state_manager.handle_streaming_result,
+        on_probability_update=state_manager.handle_probability_update,
+        on_db_update=state_manager.handle_db_update,
         device=audio_config['input_device']
     )
 
