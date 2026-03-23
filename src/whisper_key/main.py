@@ -226,7 +226,7 @@ def main():
     parser.add_argument('--console', action='store_true', help='Show console window (Windows only)')
     args = parser.parse_args()
 
-    loading_screen = LoadingScreen()
+    loading_screen = LoadingScreen(get_version())
     loading_screen.show()
 
     instance_name = "WhisperKeyLocal_test" if args.test else "WhisperKeyLocal"
@@ -248,6 +248,7 @@ def main():
         logger = logging.getLogger(__name__)
         setup_exception_handler()
 
+        loading_screen.set_status("Loading configuration...")
         check_for_updates(config_manager, test_mode=args.test)
 
         whisper_config = config_manager.get_whisper_config()
@@ -263,16 +264,21 @@ def main():
         log_config = config_manager.get_logging_config()
         log_transcriptions = log_config.get('log_transcriptions', False)
 
+        loading_screen.set_status("Checking GPU...")
         whisper_config = run_gpu_onboarding(config_manager, whisper_config)
 
+        loading_screen.set_status("Initializing AI models...")
         model_registry = ModelRegistry(
             whisper_models_config=whisper_config.get('models', {}),
             streaming_models_config=streaming_config.get('models', {})
         )
+        loading_screen.set_status("Setting up VAD and Streaming...")
         vad_manager = setup_vad(vad_config)
         streaming_manager = setup_streaming(streaming_config, model_registry)
+        loading_screen.set_status("Loading Whisper Engine...")
         whisper_engine = setup_whisper_engine(whisper_config, vad_manager, model_registry, log_transcriptions)
         streaming_manager.initialize()
+        loading_screen.set_status("Finalizing setup...")
         clipboard_manager = setup_clipboard_manager(clipboard_config)
         audio_feedback = setup_audio_feedback(audio_feedback_config)
         voice_command_manager = setup_voice_commands(voice_commands_config, clipboard_manager, log_transcriptions)

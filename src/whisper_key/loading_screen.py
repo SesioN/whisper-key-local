@@ -7,12 +7,14 @@ from .utils import resolve_asset_path
 from .platform import IS_MACOS
 
 class LoadingScreen:
-    def __init__(self):
+    def __init__(self, version):
         self.root = None
         self.thread = None
         self._running = False
+        self.version = version
         self.logger = logging.getLogger(__name__)
         self.destroyed_event = threading.Event()
+        self.status_label = None
 
     def _setup_ui(self):
         self.root = tk.Tk()
@@ -22,16 +24,20 @@ class LoadingScreen:
         
         # Window styling
         self.root.config(bg="#222222")
-        self.root.geometry("200x150")
+        self.root.geometry("400x200") # Made a bit larger to fit more text
         
         # Center on screen
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
-        x = (screen_width // 2) - 100
-        y = (screen_height // 2) - 75
-        self.root.geometry(f"200x150+{x}+{y}")
+        x = (screen_width // 2) - 200
+        y = (screen_height // 2) - 100
+        self.root.geometry(f"400x200+{x}+{y}")
 
-        # Determine icon path
+        # Version Label
+        version_label = tk.Label(self.root, text=f"Whisper Key {self.version}", bg="#222222", fg="#888888", font=("Arial", 8))
+        version_label.pack(anchor="ne", padx=10, pady=5)
+
+        # Icon
         plat = "macos" if IS_MACOS else "windows"
         try:
             icon_path = resolve_asset_path(f"platform/{plat}/assets/tray_idle.png")
@@ -43,14 +49,20 @@ class LoadingScreen:
 
         if icon_photo:
             label = tk.Label(self.root, image=icon_photo, bg="#222222")
-            label.pack(pady=(20, 10))
+            label.pack(pady=(10, 10))
             self.root.icon_photo = icon_photo
         
-        text = tk.Label(self.root, text="Loading...", bg="#222222", fg="white", font=("Arial", 12))
-        text.pack()
+        # Status text
+        self.status_label = tk.Label(self.root, text="Starting...", bg="#222222", fg="white", font=("Arial", 10), wraplength=380)
+        self.status_label.pack(pady=10)
         
         self.root.bind("<<Quit>>", lambda e: self.root.destroy())
         self.root.update()
+
+    def set_status(self, text):
+        if self.status_label:
+            # Thread-safe update
+            self.root.after(0, lambda: self.status_label.config(text=text))
 
     def show(self):
         self._running = True
