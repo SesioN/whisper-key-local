@@ -28,6 +28,7 @@ from .instance_manager import guard_against_multiple_instances
 from .model_registry import ModelRegistry
 from .streaming_manager import StreamingManager
 from .voice_commands import VoiceCommandManager
+from .loading_screen import LoadingScreen
 from .hardware_detection import detect_and_print as detect_hardware
 from .onboarding import check_gpu
 from .update_checker import check_for_updates
@@ -179,11 +180,13 @@ def setup_hotkey_listener(hotkey_config, state_manager, voice_commands_enabled=T
         recording_mode=hotkey_config.get('recording_mode', 'toggle')
     )
 
-def shutdown_app(hotkey_listener: HotkeyListener, state_manager: StateManager, logger: logging.Logger):
+def shutdown_app(hotkey_listener: HotkeyListener, state_manager: StateManager, logger: logging.Logger, loading_screen=None):
     try:
         if hotkey_listener and hotkey_listener.is_active():
             logger.info("Stopping hotkey listener...")
             hotkey_listener.stop_listening()
+        if loading_screen:
+            loading_screen.hide()
     except Exception as ex:
         logger.error(f"Error stopping hotkey listener: {ex}")
 
@@ -196,6 +199,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--test', action='store_true', help='Run as separate test instance')
     args = parser.parse_args()
+
+    loading_screen = LoadingScreen(get_version())
+    loading_screen.show()
 
     instance_name = "WhisperKeyLocal_test" if args.test else "WhisperKeyLocal"
     mutex_handle = guard_against_multiple_instances(instance_name)
@@ -216,6 +222,7 @@ def main():
         logger = logging.getLogger(__name__)
         setup_exception_handler()
 
+        loading_screen.set_status("Loading configuration...")
         check_for_updates(config_manager, test_mode=args.test)
 
         whisper_config = config_manager.get_whisper_config()
@@ -230,16 +237,21 @@ def main():
         log_config = config_manager.get_logging_config()
         log_transcriptions = log_config.get('log_transcriptions', False)
 
+        loading_screen.set_status("Checking GPU...")
         whisper_config = run_gpu_onboarding(config_manager, whisper_config)
 
+        loading_screen.set_status("Initializing AI models...")
         model_registry = ModelRegistry(
             whisper_models_config=whisper_config.get('models', {}),
             streaming_models_config=streaming_config.get('models', {})
         )
+        loading_screen.set_status("Setting up VAD and Streaming...")
         vad_manager = setup_vad(vad_config)
         streaming_manager = setup_streaming(streaming_config, model_registry)
+        loading_screen.set_status("Loading Whisper Engine...")
         whisper_engine = setup_whisper_engine(whisper_config, vad_manager, model_registry, log_transcriptions)
         streaming_manager.initialize()
+        loading_screen.set_status("Finalizing setup...")
         clipboard_manager = setup_clipboard_manager(clipboard_config)
         audio_feedback = setup_audio_feedback(audio_feedback_config)
         voice_command_manager = setup_voice_commands(voice_commands_config, clipboard_manager, log_transcriptions)
@@ -260,6 +272,7 @@ def main():
         
         hotkey_listener = setup_hotkey_listener(hotkey_config, state_manager, voice_commands_config['enabled'])
 
+        loading_screen.hide()
         system_tray.start()
 
         if clipboard_config['auto_paste']:
@@ -284,7 +297,7 @@ def main():
         print(f"Error occurred: {e}")
         
     finally:
-        shutdown_app(hotkey_listener, state_manager, logger)
+        shutdown_app(hotkey_listener, state_manager, logger, loading_screen)
 
 if __name__ == "__main__":
     main()
