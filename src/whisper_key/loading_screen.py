@@ -24,7 +24,7 @@ class LoadingScreen:
         
         # Window styling
         self.root.config(bg="#222222")
-        self.root.geometry("400x200") # Made a bit larger to fit more text
+        self.root.geometry("400x200")
         
         # Center on screen
         screen_width = self.root.winfo_screenwidth()
@@ -34,7 +34,7 @@ class LoadingScreen:
         self.root.geometry(f"400x200+{x}+{y}")
 
         # Version Label
-        version_label = tk.Label(self.root, text=f"Whisper Key {self.version}", bg="#222222", fg="#888888", font=("Arial", 8))
+        version_label = tk.Label(self.root, text=f"Whisper Key {self.version}", bg="#222222", fg="#AAAAAA", font=("Arial", 8))
         version_label.pack(anchor="ne", padx=10, pady=5)
 
         # Icon
@@ -52,9 +52,12 @@ class LoadingScreen:
             label.pack(pady=(10, 10))
             self.root.icon_photo = icon_photo
         
-        # Status text
-        self.status_label = tk.Label(self.root, text="Starting...", bg="#222222", fg="white", font=("Arial", 10), wraplength=380)
-        self.status_label.pack(pady=10)
+        # Use a Frame to ensure text has a clear background and contrast
+        text_frame = tk.Frame(self.root, bg="#222222")
+        text_frame.pack(pady=10, fill=tk.X)
+        
+        self.status_label = tk.Label(text_frame, text="Starting...", bg="#222222", fg="white", font=("Arial", 10), wraplength=380)
+        self.status_label.pack()
         
         self.root.bind("<<Quit>>", lambda e: self.root.destroy())
         self.root.update()
