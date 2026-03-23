@@ -10,9 +10,10 @@ import signal
 import sys
 import threading
 
-sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-sys.stdout.write("\033]0;Whisper Key\007")
-sys.stdout.flush()
+# Defer stdout configuration until after console setup
+# sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+# sys.stdout.write("\033]0;Whisper Key\007")
+# sys.stdout.flush()
 
 from .platform import app, permissions
 from .config_manager import ConfigManager
@@ -191,10 +192,27 @@ def shutdown_app(hotkey_listener: HotkeyListener, state_manager: StateManager, l
         state_manager.shutdown()
 
 def main():
+    # Handle console allocation before anything else
+    show_console = '--console' in sys.argv
+    if show_console:
+        sys.argv.remove('--console')
+    
+    app.ensure_console(force_show=show_console)
+
+    if sys.stdout is not None:
+        try:
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+            sys.stdout.write("\033]0;Whisper Key\007")
+            sys.stdout.flush()
+        except Exception:
+            pass
+
     app.setup()
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--test', action='store_true', help='Run as separate test instance')
+    # Note: --console is handled manually above, but we can add it here for help text
+    parser.add_argument('--console', action='store_true', help='Show console window (Windows only)')
     args = parser.parse_args()
 
     instance_name = "WhisperKeyLocal_test" if args.test else "WhisperKeyLocal"
