@@ -326,6 +326,25 @@ onboarding: # First-run setup state (managed automatically)
   # nvidia | amd_rdna2+ | amd_rdna1 | null
   gpu_class: null
 
+gui: # Graphical User Interface Settings
+  # Enable floating transparent widget
+  # true = show floating icon for mouse interaction
+  # false = disable floating widget
+  floating_widget_enabled: true
+
+  # Floating widget size
+  # Options: small, medium, big
+  floating_widget_size: big
+
+  # Remember floating widget position
+  # true = restore last position on start
+  # false = use default position
+  floating_widget_save_position: false
+
+  # Last known position (managed automatically)
+  # Format: "+x+y"
+  floating_widget_position: null
+
 voice_commands: # Voice Command Settings
 
   # Enable/disable voice commands feature

@@ -28,6 +28,7 @@ from .instance_manager import guard_against_multiple_instances
 from .model_registry import ModelRegistry
 from .streaming_manager import StreamingManager
 from .voice_commands import VoiceCommandManager
+from .floating_widget import FloatingWidget
 from .hardware_detection import detect_and_print as detect_hardware
 from .onboarding import check_gpu
 from .update_checker import check_for_updates
@@ -152,6 +153,9 @@ def setup_system_tray(tray_config, config_manager, state_manager, model_registry
         model_registry=model_registry
     )
 
+def setup_floating_widget(gui_config, state_manager):
+    return FloatingWidget(state_manager=state_manager)
+
 def run_gpu_onboarding(config_manager, whisper_config):
     gpu_status = config_manager.config.get('onboarding', {}).get('gpu', 'pending')
     if gpu_status != 'pending':
@@ -227,6 +231,7 @@ def main():
         vad_config = config_manager.get_vad_config()
         streaming_config = config_manager.get_streaming_config()
         voice_commands_config = config_manager.get_voice_commands_config()
+        gui_config = config_manager.get_gui_config()
         log_config = config_manager.get_logging_config()
         log_transcriptions = log_config.get('log_transcriptions', False)
 
@@ -252,15 +257,20 @@ def main():
             config_manager=config_manager,
             audio_feedback=audio_feedback,
             vad_manager=vad_manager,
-            voice_command_manager=voice_command_manager
+            voice_command_manager=voice_command_manager,
+            floating_widget=None
         )
         audio_recorder = setup_audio_recorder(audio_config, state_manager, vad_manager, streaming_manager)
         system_tray = setup_system_tray(tray_config, config_manager, state_manager, model_registry)
-        state_manager.attach_components(audio_recorder, system_tray)
+        floating_widget = setup_floating_widget(gui_config, state_manager)
+        state_manager.attach_components(audio_recorder, system_tray, floating_widget)
         
         hotkey_listener = setup_hotkey_listener(hotkey_config, state_manager, voice_commands_config['enabled'])
 
         system_tray.start()
+        
+        if floating_widget:
+            threading.Thread(target=lambda: floating_widget.start(shutdown_event), daemon=True).start()
 
         if clipboard_config['auto_paste']:
             if not permissions.check_accessibility_permission():

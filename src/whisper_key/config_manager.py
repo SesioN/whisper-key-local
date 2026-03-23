@@ -306,6 +306,9 @@ class ConfigManager:
 
     def get_update_config(self) -> Dict[str, Any]:
         return self.config.get('update', {}).copy()
+    
+    def get_gui_config(self) -> Dict[str, Any]:
+        return self.config.get('gui', {'floating_widget_enabled': False}).copy()
 
     def get_streaming_config(self) -> Dict[str, Any]:
         return self.config.get('streaming', {}).copy()
