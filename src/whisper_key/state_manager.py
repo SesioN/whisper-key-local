@@ -378,6 +378,17 @@ class StateManager:
         self.config_manager.update_user_setting('clipboard', 'auto_paste', value)
         self.clipboard_manager.update_auto_paste(value)
 
+    def update_audio_feedback(self, enabled: bool):
+        self.config_manager.update_user_setting('audio_feedback', 'enabled', enabled)
+        if self.audio_feedback.component:
+            self.audio_feedback.component.enabled = enabled
+            if not enabled:
+                self.logger.info("Audio feedback disabled by user")
+            else:
+                self.logger.info("Audio feedback enabled by user")
+        
+        self.system_tray.refresh_menu()
+
     def update_auto_trigger(self, enabled: bool):
         self.auto_trigger_enabled = enabled
         self.config_manager.update_user_setting('vad', 'auto_trigger_enabled', enabled)

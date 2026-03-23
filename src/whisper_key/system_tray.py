@@ -141,6 +141,8 @@ class SystemTray:
                         )
                     )
 
+            audio_feedback_enabled = self.config_manager.get_setting('audio_feedback', 'enabled')
+
             available_devices = self.state_manager.get_available_audio_devices(current_host)
             current_device = self.state_manager.get_current_audio_device_id()
 
@@ -196,6 +198,7 @@ class SystemTray:
                     f"Audio Source",
                     pystray.Menu(*audio_device_items)
                 ),
+                pystray.MenuItem("Audio Feedback", lambda icon, item: self._set_audio_feedback(not audio_feedback_enabled), checked=lambda item: audio_feedback_enabled),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Auto-trigger recording", lambda icon, item: self._set_auto_trigger(not auto_trigger_enabled), checked=lambda item: auto_trigger_enabled),
                 pystray.MenuItem("Auto-trigger Sensitivity...", self._open_threshold_adjuster),
@@ -272,6 +275,10 @@ class SystemTray:
                 auto_paste = False
 
         self.state_manager.update_transcription_mode(auto_paste)
+        self.icon.menu = self._create_menu()
+
+    def _set_audio_feedback(self, enabled: bool):
+        self.state_manager.update_audio_feedback(enabled)
         self.icon.menu = self._create_menu()
 
     def _set_auto_trigger(self, enabled: bool):
