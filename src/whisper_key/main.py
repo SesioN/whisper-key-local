@@ -10,10 +10,6 @@ import signal
 import sys
 import threading
 
-sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-sys.stdout.write("\033]0;Whisper Key\007")
-sys.stdout.flush()
-
 from .platform import app, permissions
 from .config_manager import ConfigManager
 from .audio_recorder import AudioRecorder
@@ -195,6 +191,16 @@ def shutdown_app(hotkey_listener: HotkeyListener, state_manager: StateManager, l
         state_manager.shutdown()
 
 def main():
+    app.ensure_console(force_show="true")
+
+    if sys.stdout is not None:
+        try:
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+            sys.stdout.write("\033]0;Whisper Key\007")
+            sys.stdout.flush()
+        except Exception:
+            pass
+
     app.setup()
 
     parser = argparse.ArgumentParser()
