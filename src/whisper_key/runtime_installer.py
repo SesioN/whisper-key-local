@@ -1,4 +1,5 @@
 import glob
+import hashlib
 import json
 import logging
 import os
@@ -23,7 +24,8 @@ ROCM_SYSTEM_SDK_VERSION = "7.2"
 ROCM_SYSTEM_DLLS = ("amdhip64_7.dll", "hipblas.dll", "rocblas.dll")
 CUDA_SYSTEM_DLLS = ("cublas64_12.dll", "cudnn64_9.dll")
 
-WHISPER_CPP_RELEASE_API = "https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest"
+WHISPER_CPP_VERSION = "v1.9.4"
+WHISPER_CPP_SOURCE_SHA256 = "873e67727d51213d3a14a6700c7415900a6645b78c4e6edad9328eea90e53572"
 WHISPER_CPP_SOURCE_URL = "https://github.com/ggml-org/whisper.cpp/archive/refs/tags/{tag}.zip"
 GGML_MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{file_name}"
 GGML_MODEL_NAMES = (
@@ -31,6 +33,20 @@ GGML_MODEL_NAMES = (
     "small.en", "small", "base.en", "base", "tiny.en", "tiny",
 )
 GGML_MODEL_ALIASES = {"large": "large-v3"}
+GGML_MODEL_SHA256 = {
+    "ggml-tiny.bin": "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
+    "ggml-tiny.en.bin": "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
+    "ggml-base.bin": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+    "ggml-base.en.bin": "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
+    "ggml-small.bin": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+    "ggml-small.en.bin": "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d",
+    "ggml-medium.bin": "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208",
+    "ggml-medium.en.bin": "cc37e93478338ec7700281a7ac30a10128929eb8f427dda2e865faa8f6da4356",
+    "ggml-large-v1.bin": "7d99f41a10525d0206bddadd86760181fa920438b6b33237e3118ff6c83bb53d",
+    "ggml-large-v2.bin": "9a423fe4d40c82774b6af34115b8b935f34152246eb19e80e376071d3f999487",
+    "ggml-large-v3.bin": "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2",
+    "ggml-large-v3-turbo.bin": "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69",
+}
 
 WINGET_PACKAGES = {
     "cmake": ["Kitware.CMake"],
@@ -249,7 +265,7 @@ class RuntimeInstaller:
         model_file_name = ggml_model_file_name(model_key)
 
         build_env = self._prepare_build_tools()
-        tag = self._latest_whisper_cpp_tag()
+        tag = WHISPER_CPP_VERSION
 
         work_dir = get_runtimes_dir() / ".build"
         shutil.rmtree(work_dir, ignore_errors=True)
@@ -277,7 +293,8 @@ class RuntimeInstaller:
 
         model_dir = staging_dir / "models"
         model_dir.mkdir()
-        self._download_file(GGML_MODEL_URL.format(file_name=model_file_name), model_dir / model_file_name)
+        self._download_file(GGML_MODEL_URL.format(file_name=model_file_name), model_dir / model_file_name,
+                            GGML_MODEL_SHA256[model_file_name])
 
         binary = bin_dir / "whisper-cli.exe"
         self._report("Checking the GPU...")
@@ -345,13 +362,9 @@ class RuntimeInstaller:
         self._run(["winget", "install", "--id", package_id, "-e", "--silent", "--accept-package-agreements",
                    "--accept-source-agreements", *extra_arguments], BUILD_TIMEOUT_SECONDS)
 
-    def _latest_whisper_cpp_tag(self) -> str:
-        with urllib.request.urlopen(WHISPER_CPP_RELEASE_API, timeout=30) as response:
-            return json.load(response)["tag_name"]
-
     def _download_whisper_cpp_source(self, tag: str, work_dir: Path) -> Path:
         archive = work_dir / "whisper.cpp.zip"
-        self._download_file(WHISPER_CPP_SOURCE_URL.format(tag=tag), archive)
+        self._download_file(WHISPER_CPP_SOURCE_URL.format(tag=tag), archive, WHISPER_CPP_SOURCE_SHA256)
         with zipfile.ZipFile(archive) as source_zip:
             source_zip.extractall(work_dir / "src")
         top_level_dirs = [path for path in (work_dir / "src").iterdir() if path.is_dir()]
@@ -359,20 +372,25 @@ class RuntimeInstaller:
             raise RuntimeInstallError("Unexpected whisper.cpp source archive layout")
         return top_level_dirs[0]
 
-    def _download_file(self, url: str, destination: Path):
+    def _download_file(self, url: str, destination: Path, expected_sha256: str):
         partial = destination.with_name(destination.name + ".download")
+        digest = hashlib.sha256()
         with urllib.request.urlopen(url, timeout=60) as response, open(partial, "wb") as output:
             total_bytes = int(response.headers.get("Content-Length") or 0)
             received_bytes = 0
             last_reported_percent = -1
             while chunk := response.read(DOWNLOAD_CHUNK_BYTES):
                 output.write(chunk)
+                digest.update(chunk)
                 received_bytes += len(chunk)
                 if total_bytes:
                     percent = received_bytes * 100 // total_bytes
                     if percent >= last_reported_percent + 10:
                         last_reported_percent = percent
                         self._report(f"Downloading {destination.name}... {percent}%")
+        if digest.hexdigest() != expected_sha256:
+            partial.unlink(missing_ok=True)
+            raise RuntimeInstallError(f"Checksum mismatch for {destination.name}; the download was discarded")
         partial.replace(destination)
 
     def _verify_whisper_cpp(self, binary: Path, model_path: Path):
