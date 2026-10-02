@@ -107,8 +107,10 @@ def setup_whisper_engine(whisper_config, vad_manager, model_registry, config_man
             vad_manager=vad_manager,
             model_registry=model_registry,
         )
-    except RuntimeError as e:
-        if engine_type == 'faster_whisper' and whisper_config.get('device') == 'cuda' and config_manager:
+    except (RuntimeError, OSError) as e:
+        if engine_type == 'whisper_cpp':
+            return _handle_whisper_cpp_failure(e, whisper_config, vad_manager, model_registry)
+        if isinstance(e, RuntimeError) and whisper_config.get('device') == 'cuda' and config_manager:
             return _handle_gpu_failure(e, whisper_config, vad_manager, model_registry, config_manager)
         raise
 
@@ -171,12 +173,12 @@ def run_gpu_onboarding(config_manager, whisper_config):
     gpu_class, gpu_name, ct2_works = detect_hardware(whisper_config['device'])
 
     if gpu_class and gpu_class.startswith('amd') and not ct2_works:
-        from .terminal_ui import BOLD_GREEN, RESET, prompt_choice
+        from .terminal_ui import BOLD_GREEN, BOLD_RED, RESET, prompt_choice
+        from .onboarding import install_gpu_runtime
 
-        INSTALL_ROCM = 0
-        USE_WHISPER_CPP = 1
-        SKIP = 2
-        CPU_ONLY = 3
+        INSTALL_ROCM = 1
+        USE_WHISPER_CPP = 2
+        CPU_ONLY = 4
 
         choice = prompt_choice(
             "GPU acceleration available",
@@ -191,10 +193,18 @@ def run_gpu_onboarding(config_manager, whisper_config):
         print()
 
         if choice == INSTALL_ROCM:
-            check_gpu(gpu_class, gpu_name, ct2_works, whisper_config['device'], config_manager)
+            install_gpu_runtime(gpu_class, gpu_name, config_manager)
             return config_manager.get_whisper_config()
 
         if choice == USE_WHISPER_CPP:
+            from .whisper_cpp_engine import WhisperCppEngine
+            try:
+                WhisperCppEngine(model_key=whisper_config['model'],
+                                 binary_path=whisper_config.get('cpp_binary'),
+                                 model_dir=whisper_config.get('cpp_model_dir'))
+            except (RuntimeError, OSError) as e:
+                print(f"{BOLD_RED}whisper.cpp is not ready: {e}{RESET}\n")
+                return whisper_config
             config_manager.update_user_setting('whisper', 'engine_type', 'whisper_cpp')
             config_manager.update_user_setting('onboarding', 'gpu', 'complete')
             config_manager.update_user_setting('onboarding', 'gpu_class', gpu_class)
@@ -211,6 +221,14 @@ def run_gpu_onboarding(config_manager, whisper_config):
 
     check_gpu(gpu_class, gpu_name, ct2_works, whisper_config['device'], config_manager)
     return config_manager.get_whisper_config()
+
+
+def _handle_whisper_cpp_failure(error, whisper_config, vad_manager, model_registry):
+    logging.getLogger(__name__).error(f"whisper.cpp engine failed to start: {error}")
+    print(f"\n❌ whisper.cpp engine unavailable: {error}")
+    print("   Falling back to faster-whisper on CPU for this session.\n")
+    fallback_config = {**whisper_config, 'device': 'cpu', 'compute_type': 'int8'}
+    return create_whisper_engine('faster_whisper', fallback_config, vad_manager, model_registry)
 
 
 def _handle_gpu_failure(error, whisper_config, vad_manager, model_registry, config_manager):

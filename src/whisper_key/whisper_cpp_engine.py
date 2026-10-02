@@ -75,10 +75,8 @@ class WhisperCppEngine:
                  beam_size: int = 5,
                  initial_prompt: str = "",
                  hotwords: list = None,
-                 strip_trailing_period: bool = False,
                  vad_manager=None,
                  model_registry=None,
-                 log_transcriptions: bool = False,
                  binary_path: str = None,
                  model_dir: str = None):
 
@@ -87,10 +85,8 @@ class WhisperCppEngine:
         self.beam_size = beam_size
         self.initial_prompt = initial_prompt or None
         self.hotwords = ", ".join(hotwords) if hotwords else None
-        self.strip_trailing_period = strip_trailing_period
         self.vad_manager = vad_manager
         self.registry = model_registry
-        self.log_transcriptions = log_transcriptions
         self.logger = logging.getLogger(__name__)
 
         self._binary = binary_path or _find_whisper_cli()
@@ -239,19 +235,10 @@ class WhisperCppEngine:
                         text_lines.append(line)
                 transcribed = " ".join(text_lines).strip()
 
-            if self.strip_trailing_period and transcribed.endswith('.'):
-                transcribed = transcribed[:-1]
-
             elapsed = time.time() - start_time
-            print(f"   OK Transcription completed in {elapsed:.1f}s")
-
-            if self.log_transcriptions and transcribed:
-                self.logger.info("Transcribed text: '%s'", transcribed)
-            elif transcribed:
-                self.logger.info("Transcribed %d chars", len(transcribed))
+            self.logger.info(f"Transcription completed in {elapsed:.2f}s")
 
             if transcribed:
-                print(f"   OK Transcribed: '{transcribed}'")
                 return transcribed
 
             self.logger.info("Transcription was empty")

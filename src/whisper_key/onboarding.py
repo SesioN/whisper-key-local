@@ -158,6 +158,13 @@ def _prompt_and_install(gpu_class, gpu_name, config_manager):
         _ensure_cpu_config(config_manager)
 
 
+def install_gpu_runtime(gpu_class, gpu_name, config_manager):
+    if gpu_class == 'amd_rdna1':
+        _prompt_rdna1(gpu_name, config_manager)
+    else:
+        _install_gpu_packages(gpu_class, gpu_name, config_manager)
+
+
 def _ensure_cpu_config(config_manager):
     config_manager.update_user_setting('whisper', 'device', 'cpu')
     config_manager.update_user_setting('whisper', 'compute_type', 'int8')
