@@ -164,6 +164,8 @@ Delete this file and restart app to reset to defaults.
 | `terminal_title.processing` | `""` | Tab title prefix while transcribing |
 | **Console** |||
 | `console.start_hidden` | `false` | Hide console after startup (whisper-key-hideable.exe only) |
+| **Loading Screen** |||
+| `loading_screen.enabled` | `true` | Show a startup progress window while models load (Windows only) |
 | **Update** |||
 | `update.mode` | `prompt` | prompt or auto |
 | **Voice Commands** |||

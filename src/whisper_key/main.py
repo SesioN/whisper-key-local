@@ -11,7 +11,7 @@ import signal
 import sys
 import threading
 
-from .platform import app, permissions, console
+from .platform import app, permissions, console, IS_WINDOWS
 from .config_manager import ConfigManager
 from .audio_recorder import AudioRecorder
 from .hotkey_listener import HotkeyListener
@@ -30,7 +30,7 @@ from .voice_commands import VoiceCommandManager
 from .hardware_detection import detect_and_print as detect_hardware
 from .onboarding import check_gpu
 from .update_checker import check_for_updates
-from .utils import get_user_app_data_path, get_version
+from .utils import get_user_app_data_path, get_version, OptionalComponent
 
 def setup_logging(config_manager: ConfigManager):
     log_config = config_manager.get_logging_config()
@@ -158,6 +158,16 @@ def setup_voice_commands(voice_commands_config, clipboard_manager, log_transcrip
         log_transcriptions=log_transcriptions
     )
 
+def setup_loading_screen(loading_screen_config):
+    if not IS_WINDOWS or not loading_screen_config.get('enabled', False):
+        return None
+    try:
+        from .loading_screen import LoadingScreen
+    except ImportError as e:
+        logging.getLogger(__name__).warning(f"Loading screen not available: {e}")
+        return None
+    return LoadingScreen(version=get_version())
+
 def setup_system_tray(tray_config, config_manager, state_manager, model_registry, console_config=None):
     return SystemTray(
         state_manager=state_manager,
@@ -234,6 +244,7 @@ def main():
     hotkey_listener = None
     state_manager = None
     logger = None
+    loading_screen = OptionalComponent(None)
     
     try:
         config_manager = ConfigManager()
@@ -260,14 +271,20 @@ def main():
 
         whisper_config = run_gpu_onboarding(config_manager, whisper_config)
 
+        loading_screen = OptionalComponent(setup_loading_screen(config_manager.get_loading_screen_config()))
+        loading_screen.show()
+
         model_registry = ModelRegistry(
             whisper_models_config=whisper_config.get('models', {}),
             streaming_models_config=streaming_config.get('models', {})
         )
         vad_manager = setup_vad(vad_config)
         streaming_manager = setup_streaming(streaming_config, model_registry)
+        loading_screen.set_status("Loading Whisper model...")
         whisper_engine = setup_whisper_engine(whisper_config, vad_manager, model_registry, config_manager)
+        loading_screen.set_status("Loading streaming model...")
         streaming_manager.initialize()
+        loading_screen.set_status("Finishing startup...")
         clipboard_manager = setup_clipboard_manager(clipboard_config)
         audio_feedback = setup_audio_feedback(audio_feedback_config)
         voice_command_manager = setup_voice_commands(voice_commands_config, clipboard_manager, log_transcriptions)
@@ -301,6 +318,7 @@ def main():
                     return
                 clipboard_manager.update_auto_paste(False)
 
+        loading_screen.close()
         print("🚀 Whisper Key ready!")
         audio_feedback.play_ready_sound()
         config_manager.print_startup_hotkey_instructions()
@@ -319,6 +337,7 @@ def main():
         print(f"Error occurred: {e}")
         
     finally:
+        loading_screen.close()
         shutdown_app(hotkey_listener, state_manager, logger)
 
 if __name__ == "__main__":
