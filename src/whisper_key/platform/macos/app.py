@@ -14,6 +14,10 @@ def setup():
     _delegate = AppDelegate.alloc().init()
     app.setDelegate_(_delegate)
 
+def has_interactive_terminal():
+    import sys
+    return sys.stdin is not None and sys.stdin.isatty()
+
 def getch():
     import tty
     import termios

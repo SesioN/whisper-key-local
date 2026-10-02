@@ -83,11 +83,17 @@ def _configure_console():
     kernel32.SetCurrentConsoleFontEx(handle, False, ctypes.byref(font))
 
 
+def _redirect_missing_streams_to_devnull():
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w", encoding="utf-8")
+
+
 def setup():
     global _hwnd, _active
-    if not os.environ.get("PYAPP"):
-        return
-    if not kernel32.AllocConsole():
+    if not os.environ.get("PYAPP") or not kernel32.AllocConsole():
+        _redirect_missing_streams_to_devnull()
         return
     _hwnd = None
     _get_hwnd()

@@ -9,6 +9,9 @@ RESET = "\x1b[0m"
 
 
 def prompt_choice(title: str, options: list[tuple[str, str]], subtitle: str = None) -> int:
+    if not app.has_interactive_terminal():
+        return -1
+
     all_texts = [title]
     if subtitle:
         all_texts.append(subtitle)
