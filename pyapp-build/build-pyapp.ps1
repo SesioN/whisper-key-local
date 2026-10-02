@@ -1,7 +1,8 @@
 param(
     [string]$ProjectRoot = (Split-Path -Parent $PSScriptRoot),
     [string]$AppName = "whisper-key",
-    [switch]$Clean
+    [switch]$Clean,
+    [switch]$FromSource
 )
 
 function Get-ResolvedPath {
@@ -19,6 +20,46 @@ function Get-ProjectVersion {
     }
     Write-Host "Error: Could not find version in pyproject.toml" -ForegroundColor Red
     exit 1
+}
+
+function Build-SourceWheel {
+    param($ProjectRoot, $AppVersion, $DistPath)
+
+    $Commit = (git -C $ProjectRoot rev-parse --short HEAD).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Error: -FromSource needs a git checkout" -ForegroundColor Red
+        exit 1
+    }
+    if (git -C $ProjectRoot status --porcelain) {
+        Write-Host "Warning: uncommitted changes are not included (building commit $Commit)" -ForegroundColor Yellow
+    }
+
+    $WheelVersion = "$AppVersion+g$Commit"
+    $StagingDir = Join-Path ([System.IO.Path]::GetTempPath()) "whisper-key-wheel-$Commit"
+    $WheelDir = Join-Path $DistPath "wheel"
+    if (Test-Path $StagingDir) { Remove-Item -Recurse -Force $StagingDir }
+    if (Test-Path $WheelDir) { Remove-Item -Recurse -Force $WheelDir }
+    New-Item -ItemType Directory -Path $StagingDir, $WheelDir -Force | Out-Null
+
+    $Archive = Join-Path $StagingDir "source.zip"
+    git -C $ProjectRoot archive --format=zip --output=$Archive HEAD
+    Expand-Archive -Path $Archive -DestinationPath $StagingDir
+    Remove-Item $Archive
+
+    $PyProjectFile = Join-Path $StagingDir "pyproject.toml"
+    $PyProject = Get-Content $PyProjectFile -Raw
+    $PyProject = $PyProject -replace "(?m)^version\s*=\s*`"[^`"]+`"", "version = `"$WheelVersion`""
+    Set-Content $PyProjectFile $PyProject -NoNewline
+
+    Write-Host "Building wheel $WheelVersion from commit $Commit..." -ForegroundColor Yellow
+    python -m pip wheel $StagingDir --no-deps --wheel-dir $WheelDir --quiet | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Wheel build failed!" -ForegroundColor Red
+        exit 1
+    }
+    Remove-Item -Recurse -Force $StagingDir
+
+    return (Get-ChildItem $WheelDir -Filter "*.whl" | Select-Object -First 1).FullName
 }
 
 function Patch-IconSupport {
@@ -84,8 +125,16 @@ Write-Host "Starting pyapp build for $AppName v$AppVersion..." -ForegroundColor 
 Write-Host "PyApp source: $PyAppSourcePath" -ForegroundColor Gray
 Write-Host "Distribution: $DistPath" -ForegroundColor Gray
 
-$env:PYAPP_PROJECT_NAME = "whisper-key-local"
-$env:PYAPP_PROJECT_VERSION = $AppVersion
+if ($FromSource) {
+    $env:PYAPP_PROJECT_PATH = Build-SourceWheel $ProjectRoot $AppVersion $DistPath
+    Write-Host "Embedding $($env:PYAPP_PROJECT_PATH)" -ForegroundColor Gray
+    Remove-Item Env:\PYAPP_PROJECT_NAME -ErrorAction SilentlyContinue
+    Remove-Item Env:\PYAPP_PROJECT_VERSION -ErrorAction SilentlyContinue
+} else {
+    Remove-Item Env:\PYAPP_PROJECT_PATH -ErrorAction SilentlyContinue
+    $env:PYAPP_PROJECT_NAME = "whisper-key-local"
+    $env:PYAPP_PROJECT_VERSION = $AppVersion
+}
 $env:PYAPP_PYTHON_VERSION = "3.12"
 $env:PYAPP_EXEC_CODE = 'from whisper_key.main import main; main()'
 $env:PYAPP_SELF_COMMAND = "self"
@@ -135,6 +184,7 @@ Write-Host "`nBuild complete!" -ForegroundColor Green
 
 Remove-Item Env:\PYAPP_PROJECT_NAME -ErrorAction SilentlyContinue
 Remove-Item Env:\PYAPP_PROJECT_VERSION -ErrorAction SilentlyContinue
+Remove-Item Env:\PYAPP_PROJECT_PATH -ErrorAction SilentlyContinue
 Remove-Item Env:\PYAPP_PYTHON_VERSION -ErrorAction SilentlyContinue
 Remove-Item Env:\PYAPP_EXEC_CODE -ErrorAction SilentlyContinue
 Remove-Item Env:\PYAPP_SELF_COMMAND -ErrorAction SilentlyContinue

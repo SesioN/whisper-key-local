@@ -21,4 +21,7 @@ powershell.exe -ExecutionPolicy Bypass -File pyapp-build/build-pyapp.ps1
 
 `-Clean` flag forces full Rust rebuild.
 
+`-FromSource` embeds a wheel built from the current commit (version `<version>+g<commit>`) instead of installing
+`whisper-key-local` from PyPI. Use it for builds of unreleased branches; uncommitted changes are not included.
+
 Produces two executables: `whisper-key.exe` (console) and `whisper-key-hideable.exe` (GUI subsystem, for start_hidden/minimize-to-tray).
