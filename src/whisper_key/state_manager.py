@@ -7,7 +7,8 @@ from typing import Optional, TYPE_CHECKING
 import sounddevice as sd
 
 from .audio_recorder import AudioRecorder
-from .whisper_engine import WhisperEngine
+from .whisper_engine import WhisperEngine, create_whisper_engine
+from .runtime_options import FASTER_WHISPER, Runtime, choose_compute_type, current_runtime_key, detect_runtimes
 from .clipboard_manager import ClipboardManager
 from .system_tray import SystemTray
 from .config_manager import ConfigManager
@@ -66,6 +67,8 @@ class StateManager:
         self.vad_sensitivity_window = OptionalComponent(None)
         self.vad_sensitivity_window_attached = False
         self._vad_sensitivity_window_open = False
+
+        self._runtimes = None
 
         self.logger = logging.getLogger(__name__)
         self._current_audio_host = None
@@ -448,6 +451,73 @@ class StateManager:
 
     def save_floating_widget_position(self, position: str):
         self.config_manager.update_user_setting('floating_widget', 'position', position)
+
+    def get_runtimes(self) -> list:
+        if self._runtimes is None:
+            from .whisper_cpp_engine import find_whisper_cli
+            whisper_cpp_binary = self.config_manager.get_setting('whisper', 'cpp_binary') or find_whisper_cli()
+            self._runtimes = detect_runtimes(whisper_cpp_binary)
+        return self._runtimes
+
+    def get_current_runtime(self) -> Optional[Runtime]:
+        runtimes = self.get_runtimes()
+        key = current_runtime_key(self.whisper_engine.ENGINE_TYPE, getattr(self.whisper_engine, 'device', 'cpu'), runtimes)
+        return next((runtime for runtime in runtimes if runtime.key == key), None)
+
+    def get_current_compute_type(self) -> Optional[str]:
+        if self.whisper_engine.ENGINE_TYPE != FASTER_WHISPER:
+            return None
+        return self.whisper_engine.compute_type
+
+    def request_runtime_change(self, runtime_key: str, compute_type: Optional[str] = None) -> bool:
+        runtime = next((runtime for runtime in self.get_runtimes() if runtime.key == runtime_key), None)
+        if not runtime or not runtime.available:
+            return False
+
+        compute_type = choose_compute_type(runtime, compute_type or self.get_current_compute_type())
+        current_runtime = self.get_current_runtime()
+        if current_runtime and current_runtime.key == runtime.key and compute_type == self.get_current_compute_type():
+            return True
+
+        if self.get_current_state() == "recording":
+            print(f"🎤 Cancelling recording to switch to [{runtime.label}]...")
+            self.cancel_active_recording()
+
+        with self._state_lock:
+            if self.is_processing or self.is_model_loading or self.audio_recorder.get_recording_status():
+                print("⏳ Busy, change the runtime again in a moment...")
+                return False
+            self.is_model_loading = True
+
+        self._update_ui_state("processing")
+        threading.Thread(target=self._execute_runtime_change, args=(runtime, compute_type), daemon=True).start()
+        return True
+
+    def _execute_runtime_change(self, runtime: Runtime, compute_type: Optional[str]):
+        description = runtime.label if runtime.engine_type != FASTER_WHISPER else f"{runtime.label}, {compute_type}"
+        print(f"🔄 Switching runtime to [{description}]...")
+
+        whisper_config = self.config_manager.get_whisper_config()
+        whisper_config['model'] = self.whisper_engine.model_key
+        if runtime.engine_type == FASTER_WHISPER:
+            whisper_config['device'] = runtime.device
+            whisper_config['compute_type'] = compute_type
+
+        try:
+            new_engine = create_whisper_engine(runtime.engine_type, whisper_config, self.vad_manager, self.whisper_engine.registry)
+        except Exception as e:
+            self.logger.error(f"Failed to switch runtime to {description}: {e}")
+            print(f"❌ Failed to switch runtime: {e}")
+        else:
+            self.whisper_engine = new_engine
+            self.config_manager.update_user_setting('whisper', 'engine_type', runtime.engine_type)
+            if runtime.engine_type == FASTER_WHISPER:
+                self.config_manager.update_user_setting('whisper', 'device', runtime.device)
+                self.config_manager.update_user_setting('whisper', 'compute_type', compute_type)
+            print(f"✅ Now transcribing with [{description}]")
+        finally:
+            self.set_model_loading(False)
+            self.system_tray.refresh_menu()
 
     def update_transcription_mode(self, value):
         self.config_manager.update_user_setting('clipboard', 'auto_paste', value)

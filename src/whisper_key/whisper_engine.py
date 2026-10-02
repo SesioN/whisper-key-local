@@ -8,6 +8,8 @@ from faster_whisper import WhisperModel
 
 
 class WhisperEngine:
+    ENGINE_TYPE = "faster_whisper"
+
     def __init__(self,
                  model_key: str = "tiny",
                  device: str = "cpu",

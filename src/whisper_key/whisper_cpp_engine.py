@@ -13,7 +13,7 @@ from typing import Optional, Callable
 import numpy as np
 
 
-def _find_whisper_cli():
+def find_whisper_cli():
     env = os.environ.get("WHISPER_CPP_BINARY", "")
     if env and os.path.isfile(env):
         return env
@@ -66,6 +66,7 @@ _MODEL_FILE_MAP = {
 
 
 class WhisperCppEngine:
+    ENGINE_TYPE = "whisper_cpp"
 
     def __init__(self,
                  model_key: str = "base",
@@ -89,7 +90,7 @@ class WhisperCppEngine:
         self.registry = model_registry
         self.logger = logging.getLogger(__name__)
 
-        self._binary = binary_path or _find_whisper_cli()
+        self._binary = binary_path or find_whisper_cli()
         self._model_dir = model_dir or _find_model_dir()
 
         self._loading_thread = None

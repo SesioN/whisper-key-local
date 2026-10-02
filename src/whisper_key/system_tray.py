@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .utils import open_file
 from .platform import permissions, icons, console
+from .runtime_options import COMPUTE_TYPES
 
 try:
     import pystray
@@ -235,6 +236,8 @@ class SystemTray:
                 pystray.MenuItem("Voice detection sensitivity...", self._open_vad_sensitivity_window) if vad_sensitivity_window_available else None,
             ]
 
+            menu_items += self._build_runtime_menu_items(is_model_loading)
+
             menu_items.extend([
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Exit", self._quit_application_from_tray)
@@ -247,6 +250,56 @@ class SystemTray:
         except Exception as e:
             self.logger.error(f"Error in _create_menu: {e}")
             raise
+
+    def _build_runtime_menu_items(self, is_model_loading: bool) -> list:
+        current_runtime = self.state_manager.get_current_runtime()
+        current_compute_type = self.state_manager.get_current_compute_type()
+
+        def make_runtime_selector(runtime_key):
+            return lambda icon, item: self.state_manager.request_runtime_change(runtime_key)
+
+        def make_compute_type_selector(compute_type):
+            return lambda icon, item: self.state_manager.request_runtime_change(current_runtime.key, compute_type)
+
+        def make_is_current_runtime(runtime_key):
+            return lambda item: current_runtime is not None and runtime_key == current_runtime.key
+
+        def make_is_current_compute_type(compute_type):
+            return lambda item: compute_type == current_compute_type
+
+        runtime_items = [
+            pystray.MenuItem(
+                runtime.menu_label,
+                make_runtime_selector(runtime.key),
+                radio=True,
+                checked=make_is_current_runtime(runtime.key),
+                enabled=runtime.available and not is_model_loading
+            )
+            for runtime in self.state_manager.get_runtimes()
+        ]
+
+        if current_runtime and current_runtime.compute_types:
+            precision_items = [
+                pystray.MenuItem(
+                    compute_type,
+                    make_compute_type_selector(compute_type),
+                    radio=True,
+                    checked=make_is_current_compute_type(compute_type),
+                    enabled=compute_type in current_runtime.compute_types and not is_model_loading
+                )
+                for compute_type in COMPUTE_TYPES
+            ]
+            precision_label = f"Precision: {current_compute_type}"
+        else:
+            precision_items = [pystray.MenuItem("Set by the model file", None, enabled=False)]
+            precision_label = "Precision: model file"
+
+        runtime_label = f"Runtime: {current_runtime.label}" if current_runtime else "Runtime"
+        return [
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem(runtime_label, pystray.Menu(*runtime_items)),
+            pystray.MenuItem(precision_label, pystray.Menu(*precision_items)),
+        ]
 
     def _open_config_folder(self, icon=None, item=None):
         try:

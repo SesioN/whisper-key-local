@@ -295,6 +295,10 @@ def _parse_pe_imports(dll_path: pathlib.Path) -> list[str]:
         return imports
 
 
+def detect_ct2_variant() -> str:
+    return _detect_ct2_variant()
+
+
 def _detect_ct2_variant() -> str:
     try:
         import ctranslate2
