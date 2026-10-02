@@ -420,6 +420,7 @@ def validate_config(config, default_config, logger):
     _validate_numeric_range(config, default_config, 'vad.vad_offset_threshold', logger, min_val=0.0, max_val=1.0)
     _validate_numeric_range(config, default_config, 'vad.vad_min_speech_duration', logger, min_val=0.001, max_val=5.0)
     _validate_numeric_range(config, default_config, 'vad.vad_silence_timeout_seconds', logger, min_val=1.0, max_val=36000.0)
+    _validate_numeric_range(config, default_config, 'vad.auto_trigger_silence_seconds', logger, min_val=0.2, max_val=60.0)
 
     recording_mode = _get_config_value_at_path(config, 'hotkey.recording_mode')
     if recording_mode not in ('toggle', 'push_to_talk'):
