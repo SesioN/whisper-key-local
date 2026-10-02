@@ -119,7 +119,9 @@ class VadManager:
             self.logger.warning(f"TEN VAD check failed after {vad_time:.1f}ms: {e}")
             return True
 
-    def create_continuous_detector(self, event_callback: Optional[Callable[[VadEvent], None]] = None) -> Optional["ContinuousVoiceDetector"]:
+    def create_continuous_detector(self,
+                                   event_callback: Optional[Callable[[VadEvent], None]] = None,
+                                   probability_callback: Optional[Callable[[float], None]] = None) -> Optional["ContinuousVoiceDetector"]:
         if not self.vad_realtime_enabled or not self.ten_vad:
             return None
 
@@ -131,7 +133,8 @@ class VadManager:
             frame_duration_sec=VAD_HOP_DURATION_SEC,
             min_speech_duration_seconds=self.vad_min_speech_duration,
             speech_end_silence_seconds=self.auto_trigger_silence_seconds,
-            event_callback=event_callback
+            event_callback=event_callback,
+            probability_callback=probability_callback
         )
 
     def is_available(self) -> bool:
@@ -172,7 +175,8 @@ class ContinuousVoiceDetector:
     def __init__(self, ten_vad, vad_onset_threshold, vad_offset_threshold,
                  vad_silence_timeout_seconds, frame_duration_sec,
                  min_speech_duration_seconds, speech_end_silence_seconds,
-                 event_callback: Optional[Callable[[VadEvent], None]] = None):
+                 event_callback: Optional[Callable[[VadEvent], None]] = None,
+                 probability_callback: Optional[Callable[[float], None]] = None):
         self.ten_vad = ten_vad
         self.hysteresis = Hysteresis(high_threshold=vad_onset_threshold,
                                    low_threshold=vad_offset_threshold,
@@ -189,11 +193,16 @@ class ContinuousVoiceDetector:
         self.state = VadState.SILENCE_COUNTING
         self._lock = threading.Lock()
         self.event_callback = event_callback
+        self.probability_callback = probability_callback
         self.logger = logging.getLogger(__name__)
 
     def _dispatch_event(self, event: VadEvent):
         if self.event_callback:
             threading.Thread(target=self.event_callback, args=(event,), daemon=True).start()
+
+    def set_thresholds(self, onset_threshold: float, offset_threshold: float):
+        self.hysteresis.high_threshold = onset_threshold
+        self.hysteresis.low_threshold = offset_threshold
 
     def process_chunk(self, audio_chunk: np.ndarray) -> VadEvent:
         if not self.ten_vad:
@@ -202,6 +211,8 @@ class ContinuousVoiceDetector:
         try:
             audio_int16 = convert_audio_for_ten_vad(audio_chunk)
             probability, _ = self.ten_vad.process(audio_int16)
+            if self.probability_callback:
+                self.probability_callback(probability)
             speech_detected = self.hysteresis.detect_speech(probability)
             self.probability_buffer.append(probability)
             return self._update_state(speech_detected)

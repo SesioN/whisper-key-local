@@ -78,6 +78,7 @@ def setup_audio_recorder(audio_config, state_manager, vad_manager, streaming_man
         vad_manager=vad_manager,
         streaming_manager=streaming_manager,
         on_streaming_result=state_manager.handle_streaming_result,
+        on_vad_probability=state_manager.handle_vad_probability,
         device=audio_config['input_device']
     )
 
@@ -90,6 +91,21 @@ def setup_vad(vad_config):
         vad_min_speech_duration=vad_config['vad_min_speech_duration'],
         vad_silence_timeout_seconds=vad_config['vad_silence_timeout_seconds'],
         auto_trigger_silence_seconds=vad_config['auto_trigger_silence_seconds']
+    )
+
+def setup_vad_sensitivity_window(vad_config, state_manager):
+    if not IS_WINDOWS:
+        return None
+    try:
+        from .vad_sensitivity_window import VadSensitivityWindow
+    except ImportError as e:
+        logging.getLogger(__name__).warning(f"VAD sensitivity window not available: {e}")
+        return None
+    return VadSensitivityWindow(
+        onset_threshold=vad_config['vad_onset_threshold'],
+        on_threshold_selected=state_manager.update_vad_onset_threshold,
+        on_opened=state_manager.handle_vad_sensitivity_window_opened,
+        on_closed=state_manager.handle_vad_sensitivity_window_closed
     )
 
 def setup_streaming(streaming_config, model_registry):
@@ -321,6 +337,7 @@ def main():
             terminal_title=terminal_title
         )
         audio_recorder = setup_audio_recorder(audio_config, state_manager, vad_manager, streaming_manager)
+        state_manager.attach_vad_sensitivity_window(setup_vad_sensitivity_window(vad_config, state_manager))
         system_tray = setup_system_tray(tray_config, config_manager, state_manager, model_registry, console_config)
         floating_widget = setup_floating_widget(floating_widget_config, state_manager)
         state_manager.attach_components(audio_recorder, system_tray, floating_widget)

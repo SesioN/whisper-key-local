@@ -22,6 +22,10 @@ if TYPE_CHECKING:
     from .floating_widget import FloatingWidget
 
 class StateManager:
+    VAD_HYSTERESIS_GAP = 0.15
+    MIN_VAD_OFFSET_THRESHOLD = 0.05
+    MAX_VAD_ONSET_THRESHOLD = 0.95
+
     def __init__(self,
                  audio_recorder: AudioRecorder,
                  whisper_engine: WhisperEngine,
@@ -55,9 +59,13 @@ class StateManager:
         self._command_mode = False
         self._state_lock = threading.Lock()
         self._recording_stop_lock = threading.Lock()
+        self._monitoring_lock = threading.Lock()
         self._streaming_display_active = False
         self.auto_trigger_enabled = config_manager.get_setting('vad', 'auto_trigger_enabled')
         self._auto_triggered_recording = False
+        self.vad_sensitivity_window = OptionalComponent(None)
+        self.vad_sensitivity_window_attached = False
+        self._vad_sensitivity_window_open = False
 
         self.logger = logging.getLogger(__name__)
         self._current_audio_host = None
@@ -100,7 +108,7 @@ class StateManager:
             self._handle_auto_trigger_speech_end()
 
     def _handle_auto_trigger_speech_start(self):
-        if not self.auto_trigger_enabled or not self.can_start_recording():
+        if not self.auto_trigger_enabled or self._vad_sensitivity_window_open or not self.can_start_recording():
             return
         self.logger.info("Auto-trigger: speech detected, starting recording")
         self._begin_recording(auto_triggered=True)
@@ -111,11 +119,44 @@ class StateManager:
         self.logger.info("Auto-trigger: speech ended, stopping recording")
         self.stop_recording()
 
+    def attach_vad_sensitivity_window(self, vad_sensitivity_window):
+        self.vad_sensitivity_window = OptionalComponent(vad_sensitivity_window)
+        self.vad_sensitivity_window_attached = vad_sensitivity_window is not None
+
+    def is_vad_sensitivity_window_available(self) -> bool:
+        return self.vad_sensitivity_window_attached and self.audio_recorder.continuous_vad is not None
+
+    def open_vad_sensitivity_window(self):
+        self.vad_sensitivity_window.open()
+
+    def handle_vad_sensitivity_window_opened(self):
+        self._vad_sensitivity_window_open = True
+        self._apply_auto_trigger()
+
+    def handle_vad_sensitivity_window_closed(self):
+        self._vad_sensitivity_window_open = False
+        self._apply_auto_trigger()
+
+    def handle_vad_probability(self, probability: float):
+        if self._vad_sensitivity_window_open:
+            self.vad_sensitivity_window.update_probability(probability)
+
+    def update_vad_onset_threshold(self, onset_threshold: float):
+        onset_threshold = round(min(onset_threshold, self.MAX_VAD_ONSET_THRESHOLD), 2)
+        offset_threshold = round(max(self.MIN_VAD_OFFSET_THRESHOLD, onset_threshold - self.VAD_HYSTERESIS_GAP), 2)
+        self.vad_manager.vad_onset_threshold = onset_threshold
+        self.vad_manager.vad_offset_threshold = offset_threshold
+        if self.audio_recorder.continuous_vad:
+            self.audio_recorder.continuous_vad.set_thresholds(onset_threshold, offset_threshold)
+        self.config_manager.update_user_setting('vad', 'vad_onset_threshold', onset_threshold)
+        self.config_manager.update_user_setting('vad', 'vad_offset_threshold', offset_threshold)
+
     def _apply_auto_trigger(self):
-        if not self.auto_trigger_enabled:
-            self.audio_recorder.stop_monitoring()
-        elif not self.audio_recorder.start_monitoring():
-            self.logger.warning("Auto-trigger needs real-time VAD (vad.vad_realtime_enabled) and ten-vad")
+        with self._monitoring_lock:
+            if not (self.auto_trigger_enabled or self._vad_sensitivity_window_open):
+                self.audio_recorder.stop_monitoring()
+            elif not self.audio_recorder.start_monitoring():
+                self.logger.warning("Microphone monitoring needs real-time VAD (vad.vad_realtime_enabled) and ten-vad")
 
     def is_auto_trigger_available(self) -> bool:
         return self.audio_recorder.continuous_vad is not None
@@ -326,6 +367,7 @@ class StateManager:
 
         if self.audio_recorder.get_recording_status():
             self.audio_recorder.stop_recording()
+        self.vad_sensitivity_window.stop()
         self.audio_recorder.stop_monitoring()
 
         self.system_tray.stop()
@@ -545,6 +587,7 @@ class StateManager:
                 vad_manager=vad_manager,
                 streaming_manager=streaming_manager,
                 on_streaming_result=on_streaming_result,
+                on_vad_probability=self.handle_vad_probability,
                 device=device_id if device_id != -1 else None
             )
 

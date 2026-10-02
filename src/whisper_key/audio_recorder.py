@@ -27,6 +27,7 @@ class AudioRecorder:
                  vad_manager = None,
                  streaming_manager = None,
                  on_streaming_result: Callable[[str, bool], None] = None,
+                 on_vad_probability: Callable[[float], None] = None,
                  device = None):
 
         self.sample_rate = self.WHISPER_SAMPLE_RATE
@@ -46,6 +47,7 @@ class AudioRecorder:
 
         self.vad_manager = vad_manager
         self.on_vad_event = on_vad_event
+        self.on_vad_probability = on_vad_probability
         self.continuous_vad = self._setup_continuous_vad_monitoring()
 
         self.streaming_manager = streaming_manager
@@ -59,7 +61,8 @@ class AudioRecorder:
     def _setup_continuous_vad_monitoring(self):
         if self.vad_manager.is_available():
             continuous_vad = self.vad_manager.create_continuous_detector(
-                event_callback=self._handle_vad_event
+                event_callback=self._handle_vad_event,
+                probability_callback=self.on_vad_probability
             )
             return continuous_vad
         else:
