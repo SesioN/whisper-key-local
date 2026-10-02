@@ -298,6 +298,9 @@ class ConfigManager:
     def get_system_tray_config(self) -> Dict[str, Any]:
         return self.config['system_tray'].copy()
     
+    def get_floating_widget_config(self) -> Dict[str, Any]:
+        return self.config.get('floating_widget', {}).copy()
+
     def get_audio_feedback_config(self) -> Dict[str, Any]:
         return self.config['audio_feedback'].copy()
 
@@ -421,6 +424,10 @@ def validate_config(config, default_config, logger):
     recording_mode = _get_config_value_at_path(config, 'hotkey.recording_mode')
     if recording_mode not in ('toggle', 'push_to_talk'):
         _set_to_default(config, default_config, 'hotkey.recording_mode', recording_mode, logger)
+
+    floating_widget_size = _get_config_value_at_path(config, 'floating_widget.size')
+    if floating_widget_size not in ('small', 'medium', 'big'):
+        _set_to_default(config, default_config, 'floating_widget.size', floating_widget_size, logger)
 
     stop_key = _get_config_value_at_path(config, 'hotkey.stop_key')
     auto_send_key = _get_config_value_at_path(config, 'hotkey.auto_send_key')

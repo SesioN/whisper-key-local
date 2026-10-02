@@ -1,0 +1,265 @@
+import gc
+import logging
+import queue
+import re
+import threading
+import tkinter as tk
+from typing import Callable, Optional
+
+from PIL import ImageTk
+
+from .platform import icons, window_style
+
+SIZES = {
+    "small": {"icon": 32, "font": 8, "padding_x": 8, "padding_y": 4, "spacing": 5},
+    "medium": {"icon": 48, "font": 9, "padding_x": 12, "padding_y": 6, "spacing": 8},
+    "big": {"icon": 64, "font": 10, "padding_x": 15, "padding_y": 8, "spacing": 10},
+}
+DEFAULT_SIZE = "big"
+DEFAULT_SCREEN_MARGIN = 150
+POSITION_PATTERN = re.compile(r"^\+(-?\d+)\+(-?\d+)$")
+DRAG_THRESHOLD_PIXELS = 4
+TRANSPARENT_KEY_COLOR = "#010203"
+OPAQUE_ALPHA_THRESHOLD = 128
+MOVABLE_APPEARANCE = {"text": "Movable", "fg": "#FFD700", "bg": "#222222"}
+LOCKED_APPEARANCE = {"text": "Locked", "fg": "#FFFFFF", "bg": "#880000"}
+LOCK_LABEL_WIDTH = 9
+FONT_FAMILY = "Segoe UI"
+QUEUE_POLL_INTERVAL_MS = 100
+STOP_TIMEOUT_SECONDS = 3.0
+
+SHOW = "show"
+HIDE = "hide"
+REFRESH_ICON = "refresh_icon"
+RESIZE = "resize"
+SAVE_POSITION = "save_position"
+CLOSE = "close"
+
+
+class FloatingWidget:
+    def __init__(self,
+                 on_click: Callable[[], None],
+                 on_position_changed: Callable[[str], None],
+                 size: str = DEFAULT_SIZE,
+                 save_position: bool = False,
+                 position: Optional[str] = None):
+        self.on_click = on_click
+        self.on_position_changed = on_position_changed
+        self.size = size if size in SIZES else DEFAULT_SIZE
+        self.save_position = save_position
+        self.position = position
+        self.state = "idle"
+        self.logger = logging.getLogger(__name__)
+
+        self._command_queue = queue.Queue()
+        self._window_thread = None
+        self._thread_lock = threading.Lock()
+        self._click_thread = None
+
+        self._root = None
+        self._icon_label = None
+        self._lock_label = None
+        self._icon_photos = {}
+        self._locked = False
+        self._dragging = False
+        self._drag_offset_x = 0
+        self._drag_offset_y = 0
+
+    def show(self):
+        with self._thread_lock:
+            if not self._window_thread:
+                self._command_queue = queue.Queue()
+                self._window_thread = threading.Thread(target=self._run_window_thread, daemon=True, name="FloatingWidget")
+                self._window_thread.start()
+            self._command_queue.put(SHOW)
+
+    def hide(self):
+        self._send_to_window(HIDE)
+
+    def update_state(self, new_state: str):
+        self.state = new_state
+        self._send_to_window(REFRESH_ICON)
+
+    def set_size(self, size: str):
+        if size not in SIZES:
+            return
+        self.size = size
+        self._send_to_window(RESIZE)
+
+    def set_save_position(self, save_position: bool):
+        self.save_position = save_position
+        if save_position:
+            self._send_to_window(SAVE_POSITION)
+
+    def stop(self):
+        with self._thread_lock:
+            window_thread = self._window_thread
+            self._window_thread = None
+            if window_thread:
+                self._command_queue.put(CLOSE)
+        if not window_thread:
+            return
+        window_thread.join(timeout=STOP_TIMEOUT_SECONDS)
+        if window_thread.is_alive():
+            self.logger.warning("Floating widget did not close within timeout")
+
+    def _send_to_window(self, command: str):
+        with self._thread_lock:
+            if self._window_thread:
+                self._command_queue.put(command)
+
+    def _run_window_thread(self):
+        try:
+            self._build_window()
+            self._root.mainloop()
+        except Exception as e:
+            self.logger.error(f"Floating widget failed: {e}")
+        finally:
+            self._free_tk_objects_on_owning_thread()
+            with self._thread_lock:
+                if self._window_thread is threading.current_thread():
+                    self._window_thread = None
+
+    def _free_tk_objects_on_owning_thread(self):
+        if self._root:
+            try:
+                self._root.destroy()
+            except tk.TclError:
+                pass
+        self._root = None
+        self._icon_label = None
+        self._lock_label = None
+        self._icon_photos = {}
+        gc.collect()
+
+    def _build_window(self):
+        self._root = tk.Tk()
+        self._root.withdraw()
+        self._root.overrideredirect(True)
+        self._root.attributes("-topmost", True)
+        self._root.attributes("-transparentcolor", TRANSPARENT_KEY_COLOR)
+        self._root.config(bg=TRANSPARENT_KEY_COLOR)
+
+        self._icon_label = tk.Label(self._root, bg=TRANSPARENT_KEY_COLOR, bd=0, highlightthickness=0, cursor="hand2")
+        self._icon_label.pack()
+        self._icon_label.bind("<Button-1>", self._on_icon_press)
+        self._icon_label.bind("<B1-Motion>", self._on_icon_drag)
+        self._icon_label.bind("<ButtonRelease-1>", self._on_icon_release)
+
+        self._lock_label = tk.Label(self._root, bd=0, cursor="hand2", width=LOCK_LABEL_WIDTH)
+        self._lock_label.pack()
+        self._lock_label.bind("<Button-1>", self._on_lock_click)
+
+        self._apply_size()
+        self._apply_lock_appearance()
+        self._root.geometry(self._initial_position())
+        self._root.update_idletasks()
+        window_style.prevent_focus_steal(self._root.winfo_id())
+
+        self._root.after(QUEUE_POLL_INTERVAL_MS, self._process_command_queue)
+
+    def _initial_position(self) -> str:
+        if self.save_position and self._saved_position_is_on_screen():
+            return self.position
+        x = self._root.winfo_screenwidth() - DEFAULT_SCREEN_MARGIN
+        y = self._root.winfo_screenheight() - DEFAULT_SCREEN_MARGIN
+        return f"+{x}+{y}"
+
+    def _saved_position_is_on_screen(self) -> bool:
+        if not isinstance(self.position, str):
+            return False
+        match = POSITION_PATTERN.match(self.position)
+        if not match:
+            return False
+        return window_style.is_point_on_screen(int(match.group(1)), int(match.group(2)))
+
+    def _load_icon_photos(self, icon_size: int) -> dict:
+        photos = {}
+        for state, image in icons.get_tray_icons().items():
+            resized = image.convert("RGBA").resize((icon_size, icon_size))
+            hard_edged_alpha = resized.getchannel("A").point(lambda alpha: 255 if alpha >= OPAQUE_ALPHA_THRESHOLD else 0)
+            resized.putalpha(hard_edged_alpha)
+            photos[state] = ImageTk.PhotoImage(resized, master=self._root)
+        return photos
+
+    def _apply_size(self):
+        dimensions = SIZES[self.size]
+        self._icon_photos = self._load_icon_photos(dimensions["icon"])
+        self._icon_label.pack_configure(pady=(0, dimensions["spacing"]))
+        self._lock_label.config(
+            font=(FONT_FAMILY, dimensions["font"], "bold"),
+            padx=dimensions["padding_x"],
+            pady=dimensions["padding_y"]
+        )
+        self._apply_icon()
+
+    def _apply_icon(self):
+        photo = self._icon_photos.get(self.state, self._icon_photos["idle"])
+        self._icon_label.config(image=photo)
+
+    def _apply_lock_appearance(self):
+        self._lock_label.config(**(LOCKED_APPEARANCE if self._locked else MOVABLE_APPEARANCE))
+
+    def _process_command_queue(self):
+        try:
+            while True:
+                command = self._command_queue.get_nowait()
+                if command == CLOSE:
+                    self._root.quit()
+                    return
+                self._handle_command_safely(command)
+        except queue.Empty:
+            pass
+        self._root.after(QUEUE_POLL_INTERVAL_MS, self._process_command_queue)
+
+    def _handle_command_safely(self, command: str):
+        try:
+            self._handle_command(command)
+        except Exception as e:
+            self.logger.error(f"Floating widget command '{command}' failed: {e}")
+
+    def _handle_command(self, command: str):
+        if command == SHOW:
+            self._root.deiconify()
+        elif command == HIDE:
+            self._root.withdraw()
+        elif command == REFRESH_ICON:
+            self._apply_icon()
+        elif command == RESIZE:
+            self._apply_size()
+        elif command == SAVE_POSITION:
+            self._report_position()
+
+    def _report_position(self):
+        self.position = f"+{self._root.winfo_x()}+{self._root.winfo_y()}"
+        self.on_position_changed(self.position)
+
+    def _on_lock_click(self, event):
+        self._locked = not self._locked
+        self._apply_lock_appearance()
+
+    def _on_icon_press(self, event):
+        self._dragging = False
+        self._drag_offset_x = event.x
+        self._drag_offset_y = event.y
+
+    def _on_icon_drag(self, event):
+        if self._locked:
+            return
+        delta_x = event.x - self._drag_offset_x
+        delta_y = event.y - self._drag_offset_y
+        if not self._dragging and max(abs(delta_x), abs(delta_y)) < DRAG_THRESHOLD_PIXELS:
+            return
+        self._dragging = True
+        self._root.geometry(f"+{self._root.winfo_x() + delta_x}+{self._root.winfo_y() + delta_y}")
+
+    def _on_icon_release(self, event):
+        if self._dragging:
+            self._dragging = False
+            if self.save_position:
+                self._handle_command_safely(SAVE_POSITION)
+            return
+        if self._click_thread and self._click_thread.is_alive():
+            return
+        self._click_thread = threading.Thread(target=self.on_click, daemon=True, name="FloatingWidgetClick")
+        self._click_thread.start()
