@@ -87,6 +87,16 @@ def restart_or_exit(message_restart, message_exit):
     sys.exit(0)
 
 
+def restart_app():
+    pyapp_exe = os.environ.get('PYAPP', '')
+    command = [pyapp_exe] if os.path.isfile(pyapp_exe) else list(sys.orig_argv)
+    restart_helper = str(Path(__file__).with_name('restart_helper.py'))
+    subprocess.Popen([sys.executable, restart_helper, str(os.getpid()), *command],
+                     creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+    import signal
+    os.kill(os.getpid(), signal.SIGINT)
+
+
 def get_version():
     if is_installed_package():
         import importlib.metadata

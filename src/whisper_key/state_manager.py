@@ -8,7 +8,9 @@ import sounddevice as sd
 
 from .audio_recorder import AudioRecorder
 from .whisper_engine import WhisperEngine, create_whisper_engine
-from .runtime_options import FASTER_WHISPER, Runtime, choose_compute_type, current_runtime_key, detect_runtimes
+from .runtime_options import FASTER_WHISPER, INSTALLABLE, UNSUPPORTED, Runtime, choose_compute_type, current_runtime_key, detect_runtimes, with_whisper_cpp_paths
+from .runtime_loader import VULKAN, whisper_cpp_runtime_paths
+from .platform import dialogs
 from .clipboard_manager import ClipboardManager
 from .system_tray import SystemTray
 from .config_manager import ConfigManager
@@ -69,6 +71,7 @@ class StateManager:
         self._vad_sensitivity_window_open = False
 
         self._runtimes = None
+        self._runtime_install_running = False
 
         self.logger = logging.getLogger(__name__)
         self._current_audio_host = None
@@ -455,7 +458,9 @@ class StateManager:
     def get_runtimes(self) -> list:
         if self._runtimes is None:
             from .whisper_cpp_engine import find_whisper_cli
-            whisper_cpp_binary = self.config_manager.get_setting('whisper', 'cpp_binary') or find_whisper_cli()
+            installed_binary, _ = whisper_cpp_runtime_paths()
+            whisper_cpp_binary = (self.config_manager.get_setting('whisper', 'cpp_binary')
+                                  or installed_binary or find_whisper_cli())
             self._runtimes = detect_runtimes(whisper_cpp_binary)
         return self._runtimes
 
@@ -471,8 +476,19 @@ class StateManager:
 
     def request_runtime_change(self, runtime_key: str, compute_type: Optional[str] = None) -> bool:
         runtime = next((runtime for runtime in self.get_runtimes() if runtime.key == runtime_key), None)
-        if not runtime or not runtime.available:
+        if not runtime or runtime.state == UNSUPPORTED:
             return False
+
+        if runtime.state == INSTALLABLE:
+            if self._runtime_install_running:
+                print("⏳ A runtime is already being installed...")
+                return False
+            threading.Thread(target=self._install_and_switch_runtime, args=(runtime,), daemon=True).start()
+            return True
+
+        if runtime.needs_restart:
+            threading.Thread(target=self._confirm_restart_into_runtime, args=(runtime,), daemon=True).start()
+            return True
 
         compute_type = choose_compute_type(runtime, compute_type or self.get_current_compute_type())
         current_runtime = self.get_current_runtime()
@@ -497,7 +513,7 @@ class StateManager:
         description = runtime.label if runtime.engine_type != FASTER_WHISPER else f"{runtime.label}, {compute_type}"
         print(f"🔄 Switching runtime to [{description}]...")
 
-        whisper_config = self.config_manager.get_whisper_config()
+        whisper_config = with_whisper_cpp_paths(self.config_manager.get_whisper_config())
         whisper_config['model'] = self.whisper_engine.model_key
         if runtime.engine_type == FASTER_WHISPER:
             whisper_config['device'] = runtime.device
@@ -510,6 +526,7 @@ class StateManager:
             print(f"❌ Failed to switch runtime: {e}")
         else:
             self.whisper_engine = new_engine
+            self.config_manager.update_user_setting('whisper', 'runtime', runtime.key)
             self.config_manager.update_user_setting('whisper', 'engine_type', runtime.engine_type)
             if runtime.engine_type == FASTER_WHISPER:
                 self.config_manager.update_user_setting('whisper', 'device', runtime.device)
@@ -518,6 +535,84 @@ class StateManager:
         finally:
             self.set_model_loading(False)
             self.system_tray.refresh_menu()
+
+    def _choose_install_option(self, runtime: Runtime):
+        from .runtime_installer import install_options
+        options = install_options(runtime.key)
+        title = f"Install {runtime.label}"
+        restart_note = "" if runtime.key == VULKAN else "\n\nWhisper Key restarts afterwards to use it."
+        if len(options) >= 2:
+            first, second = options[0], options[1]
+            choice = dialogs.choose(title, (
+                f"{runtime.label} is not installed yet.\n\n"
+                f"Yes: {first.description} (download {first.download_size})\n"
+                f"No: {second.description} (download {second.download_size})"
+                f"{restart_note}"
+            ))
+            if choice is None:
+                return None
+            return first if choice else second
+        if options and dialogs.confirm(title, f"{options[0].description}.\nDownload: {options[0].download_size}{restart_note}"):
+            return options[0]
+        return None
+
+    def _report_install_progress(self, message: str):
+        print(f"   {message}")
+        self.system_tray.set_status_text(message)
+
+    def _install_and_switch_runtime(self, runtime: Runtime):
+        from .runtime_installer import RuntimeInstaller
+
+        option = self._choose_install_option(runtime)
+        if option is None:
+            return
+
+        with self._state_lock:
+            if self._runtime_install_running:
+                print("⏳ A runtime is already being installed...")
+                return
+            self._runtime_install_running = True
+
+        print(f"📦 Installing [{runtime.label}]: {option.description}")
+        try:
+            RuntimeInstaller(on_progress=self._report_install_progress).install(
+                runtime.key, option, model_key=self.whisper_engine.model_key)
+        except Exception as e:
+            self.logger.error(f"Failed to install runtime {runtime.key}: {e}")
+            print(f"❌ Failed to install {runtime.label}: {e}")
+            dialogs.show_error(f"Install {runtime.label}", f"Installation failed:\n\n{str(e)[:600]}\n\nDetails are in the log file.")
+            return
+        finally:
+            with self._state_lock:
+                self._runtime_install_running = False
+            self.system_tray.set_status_text(None)
+
+        print(f"✅ {runtime.label} installed")
+        self._runtimes = None
+        installed_runtime = next(candidate for candidate in self.get_runtimes() if candidate.key == runtime.key)
+        if installed_runtime.needs_restart:
+            self._restart_into_runtime(installed_runtime)
+        else:
+            self.system_tray.refresh_menu()
+            self.request_runtime_change(installed_runtime.key)
+
+    def _confirm_restart_into_runtime(self, runtime: Runtime):
+        if dialogs.confirm(f"Switch to {runtime.label}", f"Whisper Key restarts to switch to {runtime.label}."):
+            self._restart_into_runtime(runtime)
+
+    def _restart_into_runtime(self, runtime: Runtime):
+        if self.get_current_state() != "idle":
+            message = f"{runtime.label} is installed. Select it again in the Runtime menu once the current recording is done."
+            print(f"⏳ {message}")
+            dialogs.confirm(f"Switch to {runtime.label}", message)
+            return
+        self.config_manager.update_user_setting('whisper', 'runtime', runtime.key)
+        self.config_manager.update_user_setting('whisper', 'engine_type', runtime.engine_type)
+        self.config_manager.update_user_setting('whisper', 'device', runtime.device)
+        self.config_manager.update_user_setting('whisper', 'compute_type', choose_compute_type(runtime, None))
+        print(f"🔄 Restarting Whisper Key to switch to [{runtime.label}]...")
+        from .utils import restart_app
+        restart_app()
 
     def update_transcription_mode(self, value):
         self.config_manager.update_user_setting('clipboard', 'auto_paste', value)

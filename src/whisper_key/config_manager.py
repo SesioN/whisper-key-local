@@ -138,6 +138,15 @@ class ConfigManager:
         for section in sections_to_remove:
             del user_config[section]
     
+    def _fill_missing_runtime(self, user_config: Dict[str, Any]):
+        from .runtime_loader import derive_runtime
+        whisper_settings = user_config.get('whisper') or {}
+        if 'runtime' in whisper_settings:
+            return
+        derived_runtime = derive_runtime(dict(whisper_settings), dict(user_config.get('onboarding') or {}))
+        if derived_runtime != 'cpu':
+            user_config.setdefault('whisper', {})['runtime'] = derived_runtime
+
     def _load_config(self):
 
         default_config = self._load_default_config()
@@ -159,6 +168,7 @@ class ConfigManager:
                     user_config = {}
 
                 self._remove_unused_keys_from_user_config(user_config, default_config)
+                self._fill_missing_runtime(user_config)
                 merged_config = deep_merge_config(default_config, user_config)
                 resolved_config = _resolve_platform_values(merged_config)
                 self.logger.info(f"Loaded user configuration from {self.config_path}")
@@ -424,6 +434,10 @@ def validate_config(config, default_config, logger):
     _validate_numeric_range(config, default_config, 'vad.vad_min_speech_duration', logger, min_val=0.001, max_val=5.0)
     _validate_numeric_range(config, default_config, 'vad.vad_silence_timeout_seconds', logger, min_val=1.0, max_val=36000.0)
     _validate_numeric_range(config, default_config, 'vad.auto_trigger_silence_seconds', logger, min_val=0.2, max_val=60.0)
+
+    runtime = _get_config_value_at_path(config, 'whisper.runtime')
+    if runtime not in ('cpu', 'cuda', 'rocm', 'vulkan'):
+        _set_to_default(config, default_config, 'whisper.runtime', runtime, logger)
 
     recording_mode = _get_config_value_at_path(config, 'hotkey.recording_mode')
     if recording_mode not in ('toggle', 'push_to_talk'):

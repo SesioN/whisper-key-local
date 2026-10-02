@@ -273,7 +273,7 @@ class SystemTray:
                 make_runtime_selector(runtime.key),
                 radio=True,
                 checked=make_is_current_runtime(runtime.key),
-                enabled=runtime.available and not is_model_loading
+                enabled=runtime.selectable and not is_model_loading
             )
             for runtime in self.state_manager.get_runtimes()
         ]
@@ -428,6 +428,12 @@ class SystemTray:
             self.icon.menu = self._create_menu()
         except Exception as e:
             self.logger.error(f"Failed to update tray icon: {e}")
+
+    def set_status_text(self, text: Optional[str]):
+        if not self.icon:
+            return
+        tooltip = self.tray_config.get('tooltip', 'Whisper Key')
+        self.icon.title = f"{tooltip} - {text}"[:127] if text else tooltip
 
     def refresh_menu(self):
         if not self.icon:

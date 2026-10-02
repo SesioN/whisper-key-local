@@ -299,6 +299,15 @@ def detect_ct2_variant() -> str:
     return _detect_ct2_variant()
 
 
+def detect_gpu_class() -> tuple:
+    gpu_vendor, gpu_name = _detect_gpu()
+    return _classify_gpu(gpu_vendor, gpu_name) if gpu_vendor else None, gpu_name
+
+
+def has_vulkan_driver() -> bool:
+    return os.path.isfile(os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'System32', 'vulkan-1.dll'))
+
+
 def _detect_ct2_variant() -> str:
     try:
         import ctranslate2

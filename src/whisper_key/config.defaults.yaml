@@ -17,7 +17,12 @@ whisper: # Whisper AI Model Settings
     # See "models" below for more information
     model: tiny
 
-    # Transcription device (only for faster_whisper engine)
+    # Transcription runtime (choose from the tray "Runtime" menu)
+    # Options: cpu, cuda (NVIDIA), rocm (AMD), vulkan (whisper.cpp)
+    # GPU runtimes are installed on demand into %LOCALAPPDATA%\whisperkey\runtimes
+    runtime: cpu
+
+    # Transcription device (only for faster_whisper engine, set from runtime)
     # Options: cpu, cuda (for both NVIDIA and AMD)
     # For GPU setup, see https://github.com/PinW/whisper-key-local/blob/master/docs/gpu-setup.md
     device: cpu
