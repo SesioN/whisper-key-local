@@ -275,7 +275,7 @@ class RuntimeInstaller:
             build_dir = work_dir / "build"
             self._report(f"Configuring whisper.cpp {tag} with Vulkan...")
             self._run([build_env["CMAKE"], "-S", str(source_dir), "-B", str(build_dir), "-DGGML_VULKAN=ON",
-                       "-DWHISPER_BUILD_TESTS=OFF", "-DWHISPER_BUILD_SERVER=OFF"], BUILD_TIMEOUT_SECONDS, env=build_env)
+                       "-DWHISPER_BUILD_TESTS=OFF", "-DWHISPER_BUILD_SERVER=ON"], BUILD_TIMEOUT_SECONDS, env=build_env)
             self._report("Compiling whisper.cpp (this takes a few minutes)...")
             self._run([build_env["CMAKE"], "--build", str(build_dir), "--config", "Release", "--parallel"],
                       BUILD_TIMEOUT_SECONDS, env=build_env)
@@ -283,7 +283,8 @@ class RuntimeInstaller:
             bin_dir = staging_dir / "bin"
             bin_dir.mkdir()
             built_files = glob.glob(str(build_dir / "bin" / "**" / "*.dll"), recursive=True)
-            built_files += glob.glob(str(build_dir / "bin" / "**" / "whisper-cli.exe"), recursive=True)
+            for executable in ("whisper-cli.exe", "whisper-server.exe"):
+                built_files += glob.glob(str(build_dir / "bin" / "**" / executable), recursive=True)
             if not any(name.endswith("whisper-cli.exe") for name in built_files):
                 raise RuntimeInstallError("The whisper.cpp build did not produce whisper-cli.exe")
             for built_file in built_files:
