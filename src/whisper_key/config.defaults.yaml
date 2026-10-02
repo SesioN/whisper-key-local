@@ -335,6 +335,10 @@ console: # Console Window Management (whisper-key-hideable.exe only)
     # Hide console window after startup (requires system tray)
     start_hidden: false
 
+loading_screen: # Startup Loading Screen (Windows only)
+    # Show a small window with startup progress while models load
+    enabled: true
+
 update: # Update Settings
     # How to handle available updates
     # "prompt" = ask user before updating
