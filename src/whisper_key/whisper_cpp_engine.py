@@ -1,16 +1,59 @@
+import io
+import json
 import logging
 import os
+import secrets
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import urllib.error
+import urllib.request
+import uuid
 import wave
 from pathlib import Path
 from typing import Optional, Callable
 
 import numpy as np
+
+from .platform import child_processes
+
+SERVER_HOST = "127.0.0.1"
+SERVER_STARTUP_TIMEOUT_SECONDS = 120
+SERVER_REQUEST_TIMEOUT_SECONDS = 120
+SERVER_POLL_INTERVAL_SECONDS = 0.2
+SERVER_STOP_TIMEOUT_SECONDS = 5
+NO_WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
+
+
+def find_whisper_server(cli_binary: str) -> Optional[str]:
+    for name in ("whisper-server.exe", "whisper-server"):
+        candidate = Path(cli_binary).with_name(name)
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def _free_local_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind((SERVER_HOST, 0))
+        return probe.getsockname()[1]
+
+
+def _multipart_body(fields: dict, file_field: str, file_name: str, file_bytes: bytes):
+    boundary = uuid.uuid4().hex
+    parts = []
+    for name, value in fields.items():
+        parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode("utf-8"))
+    parts.append(
+        f'--{boundary}\r\nContent-Disposition: form-data; name="{file_field}"; filename="{file_name}"\r\n'
+        f'Content-Type: audio/wav\r\n\r\n'.encode("utf-8") + file_bytes + b"\r\n"
+    )
+    parts.append(f"--{boundary}--\r\n".encode("utf-8"))
+    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
 
 
 def find_whisper_cli():
@@ -105,6 +148,109 @@ class WhisperCppEngine:
         self.logger.info("WhisperCppEngine: binary=%s model_dir=%s", self._binary, self._model_dir)
         self._load_model()
 
+        self._server_process = None
+        self._server_url = None
+        self._server_lock = threading.Lock()
+        self._closed = False
+        self._start_server()
+
+    def _prompt(self) -> Optional[str]:
+        return " ".join(filter(None, [self.initial_prompt, self.hotwords])) or None
+
+    def _decoding_arguments(self, include_prompt: bool = True) -> list:
+        arguments = ["-l", self.language or "auto"]
+        if self.beam_size:
+            arguments.extend(["-bs", str(self.beam_size)])
+        if include_prompt and self._prompt():
+            arguments.extend(["--prompt", self._prompt()])
+        return arguments
+
+    def _start_server(self):
+        server_binary = find_whisper_server(self._binary)
+        if not server_binary:
+            self.logger.info("whisper-server not found, using whisper-cli per transcription")
+            return
+
+        port = _free_local_port()
+        request_path = f"/{secrets.token_urlsafe(16)}"
+        command = [server_binary, "-m", self._get_model_path(), "--host", SERVER_HOST, "--port", str(port),
+                   "--request-path", request_path, "-nt", *self._decoding_arguments(include_prompt=False)]
+        self.logger.info("Starting whisper-server: %s", " ".join(command))
+        process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **NO_WINDOW)
+        child_processes.tie_to_current_process(process)
+
+        deadline = time.time() + SERVER_STARTUP_TIMEOUT_SECONDS
+        while time.time() < deadline:
+            if process.poll() is not None:
+                self.logger.warning(f"whisper-server exited with code {process.returncode}, using whisper-cli instead")
+                return
+            try:
+                with socket.create_connection((SERVER_HOST, port), timeout=1):
+                    pass
+                if process.poll() is None:
+                    break
+            except OSError:
+                time.sleep(SERVER_POLL_INTERVAL_SECONDS)
+        else:
+            self.logger.warning("whisper-server did not start in time, using whisper-cli instead")
+            process.kill()
+            return
+
+        with self._server_lock:
+            if self._closed:
+                process.kill()
+                return
+            self._server_process = process
+            self._server_url = f"http://{SERVER_HOST}:{port}{request_path}/inference"
+        print(f"   ✓ whisper.cpp model kept loaded (whisper-server on port {port})")
+
+    def close(self):
+        with self._server_lock:
+            self._closed = True
+            process = self._server_process
+            self._server_process = None
+            self._server_url = None
+        if process and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=SERVER_STOP_TIMEOUT_SECONDS)
+            except subprocess.TimeoutExpired:
+                process.kill()
+
+    def _stop_server(self):
+        with self._server_lock:
+            process = self._server_process
+            self._server_process = None
+            self._server_url = None
+        if process and process.poll() is None:
+            process.kill()
+
+    def _restart_server(self):
+        self._stop_server()
+        self._start_server()
+
+    def _transcribe_with_server(self, wav_bytes: bytes) -> Optional[str]:
+        with self._server_lock:
+            server_url = self._server_url
+        if not server_url:
+            return None
+        fields = {"temperature": "0.0", "response_format": "json"}
+        if self._prompt():
+            fields["prompt"] = self._prompt()
+        body, content_type = _multipart_body(fields, "file", "audio.wav", wav_bytes)
+        request = urllib.request.Request(server_url, data=body, headers={"Content-Type": content_type}, method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=SERVER_REQUEST_TIMEOUT_SECONDS) as response:
+                result = json.load(response)
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            self.logger.warning(f"whisper-server stopped responding, using whisper-cli from now on: {e}")
+            self._stop_server()
+            return None
+        if "error" in result or "text" not in result:
+            self.logger.warning(f"whisper-server returned an error, falling back to whisper-cli: {result.get('error', result)}")
+            return None
+        return result["text"].strip()
+
     def _get_model_path(self, model_key: str = None):
         key = model_key or self.model_key
         filename = _MODEL_FILE_MAP.get(key, f"ggml-{key}.bin")
@@ -156,6 +302,8 @@ class WhisperCppEngine:
 
                 old_model_key = self.model_key
                 self.model_key = new_model_key
+                if self._server_url:
+                    self._restart_server()
                 self.logger.info("WhisperCpp model changed: %s -> %s", old_model_key, new_model_key)
 
                 if progress_callback:
@@ -188,11 +336,17 @@ class WhisperCppEngine:
                 return None
 
         start_time = time.time()
+        wav_bytes = self._wav_bytes(audio_data)
+        server_text = self._transcribe_with_server(wav_bytes)
+        if server_text is not None:
+            self.logger.info(f"Transcription completed in {time.time() - start_time:.2f}s (whisper-server)")
+            return server_text or None
+
         tmp_path = None
         try:
             tmp_fd, tmp_path = tempfile.mkstemp(suffix=".wav", prefix="whisperkey_")
-            os.close(tmp_fd)
-            self._write_wav(tmp_path, audio_data)
+            with os.fdopen(tmp_fd, "wb") as tmp_file:
+                tmp_file.write(wav_bytes)
 
             model_path = self._get_model_path()
             cmd = [
@@ -200,11 +354,8 @@ class WhisperCppEngine:
                 "-m", model_path,
                 "-f", tmp_path,
                 "-nt",
+                *self._decoding_arguments(),
             ]
-            if self.language:
-                cmd.extend(["-l", self.language])
-            if self.beam_size:
-                cmd.extend(["-bs", str(self.beam_size)])
 
             self.logger.info("Running: %s", " ".join(cmd))
             result = subprocess.run(
@@ -266,16 +417,17 @@ class WhisperCppEngine:
         self._load_model_async(new_model_key, progress_callback)
 
     @staticmethod
-    def _write_wav(path: str, audio_data: np.ndarray):
+    def _wav_bytes(audio_data: np.ndarray) -> bytes:
         if len(audio_data.shape) > 1:
             audio_data = audio_data.ravel()
         if audio_data.dtype == np.float32:
             audio_data = (audio_data * 32767).clip(-32768, 32767).astype(np.int16)
         elif audio_data.dtype != np.int16:
             audio_data = audio_data.astype(np.int16)
-        rate = 16000
-        with wave.open(path, "wb") as wf:
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as wf:
             wf.setnchannels(1)
             wf.setsampwidth(2)
-            wf.setframerate(rate)
+            wf.setframerate(16000)
             wf.writeframes(audio_data.tobytes())
+        return buffer.getvalue()

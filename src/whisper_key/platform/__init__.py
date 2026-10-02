@@ -5,6 +5,6 @@ IS_MACOS = PLATFORM == 'macos'
 IS_WINDOWS = PLATFORM == 'windows'
 
 if IS_MACOS:
-    from .macos import instance_lock, keyboard, hotkeys, paths, app, permissions, icons, gpu, console, window_style, dialogs
+    from .macos import instance_lock, keyboard, hotkeys, paths, app, permissions, icons, gpu, console, window_style, dialogs, child_processes
 else:
-    from .windows import instance_lock, keyboard, hotkeys, paths, app, permissions, icons, gpu, console, window_style, dialogs
+    from .windows import instance_lock, keyboard, hotkeys, paths, app, permissions, icons, gpu, console, window_style, dialogs, child_processes

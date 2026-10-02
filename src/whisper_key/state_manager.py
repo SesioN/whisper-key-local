@@ -379,6 +379,7 @@ class StateManager:
         self.system_tray.stop()
         self.terminal_title.stop()
         self.floating_widget.stop()
+        getattr(self.whisper_engine, 'close', lambda: None)()
     
     def set_model_loading(self, loading: bool):
         with self._state_lock:
@@ -525,7 +526,9 @@ class StateManager:
             self.logger.error(f"Failed to switch runtime to {description}: {e}")
             print(f"❌ Failed to switch runtime: {e}")
         else:
+            previous_engine = self.whisper_engine
             self.whisper_engine = new_engine
+            getattr(previous_engine, 'close', lambda: None)()
             self.config_manager.update_user_setting('whisper', 'runtime', runtime.key)
             self.config_manager.update_user_setting('whisper', 'engine_type', runtime.engine_type)
             if runtime.engine_type == FASTER_WHISPER:
