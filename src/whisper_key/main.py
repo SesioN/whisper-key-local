@@ -4,6 +4,9 @@ from .utils import setup_portaudio_path, setup_nvidia_dll_path
 setup_portaudio_path()
 setup_nvidia_dll_path()
 
+from .runtime_loader import activate_selected_runtime
+activate_selected_runtime()
+
 import argparse
 import logging
 import os
@@ -16,6 +19,7 @@ from .config_manager import ConfigManager
 from .audio_recorder import AudioRecorder
 from .hotkey_listener import HotkeyListener
 from .whisper_engine import create_whisper_engine
+from .runtime_options import apply_runtime_selection
 from .voice_activity_detection import VadManager
 from .clipboard_manager import ClipboardManager
 from .state_manager import StateManager
@@ -99,7 +103,8 @@ def setup_streaming(streaming_config, model_registry):
     )
 
 def setup_whisper_engine(whisper_config, vad_manager, model_registry, config_manager=None):
-    engine_type = config_manager.get_engine_type() if config_manager else whisper_config.get('engine_type', 'faster_whisper')
+    whisper_config = apply_runtime_selection(whisper_config)
+    engine_type = whisper_config['engine_type']
     try:
         return create_whisper_engine(
             engine_type=engine_type,
@@ -206,6 +211,7 @@ def run_gpu_onboarding(config_manager, whisper_config):
                 print(f"{BOLD_RED}whisper.cpp is not ready: {e}{RESET}\n")
                 return whisper_config
             config_manager.update_user_setting('whisper', 'engine_type', 'whisper_cpp')
+            config_manager.update_user_setting('whisper', 'runtime', 'vulkan')
             config_manager.update_user_setting('onboarding', 'gpu', 'complete')
             config_manager.update_user_setting('onboarding', 'gpu_class', gpu_class)
             print(f"{BOLD_GREEN}whisper.cpp engine selected. Vulkan GPU detection is automatic.{RESET}\n")
@@ -214,6 +220,7 @@ def run_gpu_onboarding(config_manager, whisper_config):
         if choice == CPU_ONLY:
             config_manager.update_user_setting('whisper', 'device', 'cpu')
             config_manager.update_user_setting('whisper', 'compute_type', 'int8')
+            config_manager.update_user_setting('whisper', 'runtime', 'cpu')
             config_manager.update_user_setting('onboarding', 'gpu_class', gpu_class)
             config_manager.update_user_setting('onboarding', 'gpu', 'skipped')
 
@@ -234,6 +241,7 @@ def _handle_whisper_cpp_failure(error, whisper_config, vad_manager, model_regist
 def _handle_gpu_failure(error, whisper_config, vad_manager, model_registry, config_manager):
     from .onboarding import handle_gpu_failure
     handle_gpu_failure(error, config_manager)
+    whisper_config['runtime'] = 'cpu'
     whisper_config['device'] = 'cpu'
     whisper_config['compute_type'] = 'int8'
     return setup_whisper_engine(whisper_config, vad_manager, model_registry)
