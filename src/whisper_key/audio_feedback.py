@@ -45,6 +45,9 @@ class AudioFeedback:
         if self.ready_sound_path and not os.path.isfile(self.ready_sound_path):
             self.logger.warning(f"Ready sound file not found: {self.ready_sound_path}")
 
+    def set_enabled(self, enabled: bool):
+        self.enabled = enabled
+
     def _play_sound_file_async(self, file_path: str):
         def play():
             try:
