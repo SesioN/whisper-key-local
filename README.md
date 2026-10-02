@@ -124,6 +124,8 @@ Delete this file and restart app to reset to defaults.
 | `vad.vad_min_speech_duration` | `0.1` | Min speech segment (seconds) |
 | `vad.vad_realtime_enabled` | `true` | Auto-stop on silence |
 | `vad.vad_silence_timeout_seconds` | `30.0` | Seconds before auto-stop |
+| `vad.auto_trigger_enabled` | `false` | Start recording when speech is detected, stop after a short silence (keeps the microphone open) |
+| `vad.auto_trigger_silence_seconds` | `1.5` | Silence that ends a voice-activated recording |
 | **Audio** |||
 | `audio.host` | `null` | Audio API (WASAPI, Core Audio, etc.) |
 | `audio.channels` | `1` | 1 = mono, 2 = stereo |

@@ -88,7 +88,8 @@ def setup_vad(vad_config):
         vad_onset_threshold=vad_config['vad_onset_threshold'],
         vad_offset_threshold=vad_config['vad_offset_threshold'],
         vad_min_speech_duration=vad_config['vad_min_speech_duration'],
-        vad_silence_timeout_seconds=vad_config['vad_silence_timeout_seconds']
+        vad_silence_timeout_seconds=vad_config['vad_silence_timeout_seconds'],
+        auto_trigger_silence_seconds=vad_config['auto_trigger_silence_seconds']
     )
 
 def setup_streaming(streaming_config, model_registry):

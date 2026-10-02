@@ -188,6 +188,13 @@ vad: # Voice Activity Detection (VAD)
     vad_realtime_enabled: true # Enables continuous silence detection and automatic recording stop
     vad_silence_timeout_seconds: 30.0 # Auto-stop recording after this many seconds of silence
 
+    # Voice-activated recording (requires vad_realtime_enabled)
+    # Starts recording when speech is detected and stops after a short silence.
+    # Hotkeys keep working as usual.
+    # NOTE: the microphone stays open the whole time the app is running
+    auto_trigger_enabled: false
+    auto_trigger_silence_seconds: 1.5 # Silence after speech that ends a voice-activated recording
+
 audio: # Audio Recording Settings
     # Sample rate is fixed at 16000 Hz for optimal Whisper and TEN VAD performance
 
