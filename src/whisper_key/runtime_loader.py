@@ -10,7 +10,8 @@ VULKAN = "vulkan"
 RUNTIME_KEYS = (CPU, CUDA, ROCM, VULKAN)
 CT2_RUNTIMES = (CUDA, ROCM)
 
-RUNTIME_FOLDERS = {CUDA: "ct2-cuda", ROCM: "ct2-rocm", VULKAN: "whisper.cpp-vulkan"}
+PYTHON_TAG = f"cp{sys.version_info.major}{sys.version_info.minor}"
+RUNTIME_FOLDERS = {CUDA: f"ct2-cuda-{PYTHON_TAG}", ROCM: f"ct2-rocm-{PYTHON_TAG}", VULKAN: "whisper.cpp-vulkan"}
 MARKER_FILE = "runtime.json"
 BUNDLED_DLL_GLOBS = ("_rocm_sdk_*/bin", "nvidia/*/bin")
 
