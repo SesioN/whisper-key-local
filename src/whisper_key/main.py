@@ -11,7 +11,7 @@ import signal
 import sys
 import threading
 
-from .platform import app, permissions, console
+from .platform import app, permissions, console, IS_WINDOWS
 from .config_manager import ConfigManager
 from .audio_recorder import AudioRecorder
 from .hotkey_listener import HotkeyListener
@@ -167,6 +167,22 @@ def setup_system_tray(tray_config, config_manager, state_manager, model_registry
         console_config=console_config
     )
 
+def setup_floating_widget(floating_widget_config, state_manager):
+    if not IS_WINDOWS:
+        return None
+    try:
+        from .floating_widget import FloatingWidget
+    except ImportError as e:
+        logging.getLogger(__name__).warning(f"Floating widget not available: {e}")
+        return None
+    return FloatingWidget(
+        on_click=state_manager.toggle_recording,
+        on_position_changed=state_manager.save_floating_widget_position,
+        size=floating_widget_config['size'],
+        save_position=floating_widget_config['save_position'],
+        position=floating_widget_config['position']
+    )
+
 def run_gpu_onboarding(config_manager, whisper_config):
     gpu_status = config_manager.config.get('onboarding', {}).get('gpu', 'pending')
     if gpu_status != 'pending':
@@ -255,6 +271,7 @@ def main():
         voice_commands_config = config_manager.get_voice_commands_config()
         post_processing_config = config_manager.get_post_processing_config()
         console_config = config_manager.get_console_config()
+        floating_widget_config = config_manager.get_floating_widget_config()
         log_config = config_manager.get_logging_config()
         log_transcriptions = log_config.get('log_transcriptions', False)
 
@@ -287,11 +304,14 @@ def main():
         )
         audio_recorder = setup_audio_recorder(audio_config, state_manager, vad_manager, streaming_manager)
         system_tray = setup_system_tray(tray_config, config_manager, state_manager, model_registry, console_config)
-        state_manager.attach_components(audio_recorder, system_tray)
+        floating_widget = setup_floating_widget(floating_widget_config, state_manager)
+        state_manager.attach_components(audio_recorder, system_tray, floating_widget)
         
         hotkey_listener = setup_hotkey_listener(hotkey_config, state_manager, voice_commands_config['enabled'])
 
         system_tray.start()
+        if floating_widget and floating_widget_config['enabled']:
+            floating_widget.show()
         terminal_title.start()
 
         if clipboard_config['auto_paste']:

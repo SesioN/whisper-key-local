@@ -2,7 +2,7 @@ import logging
 import time
 import threading
 import platform
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import sounddevice as sd
 
@@ -17,6 +17,9 @@ from .utils import OptionalComponent
 from .voice_activity_detection import VadEvent, VadManager
 from .voice_commands import VoiceCommandManager
 from .terminal_title import TerminalTitle
+
+if TYPE_CHECKING:
+    from .floating_widget import FloatingWidget
 
 class StateManager:
     def __init__(self,
@@ -41,6 +44,8 @@ class StateManager:
         self.text_postprocessor = text_postprocessor
         self.voice_command_manager = voice_command_manager
         self.terminal_title = OptionalComponent(terminal_title)
+        self.floating_widget = OptionalComponent(None)
+        self.floating_widget_available = False
 
         self.is_processing = False
         self.is_model_loading = False
@@ -57,14 +62,18 @@ class StateManager:
 
     def attach_components(self,
                           audio_recorder: AudioRecorder,
-                          system_tray: Optional[SystemTray]):
+                          system_tray: Optional[SystemTray],
+                          floating_widget: Optional["FloatingWidget"] = None):
         self.audio_recorder = audio_recorder
         self.system_tray = OptionalComponent(system_tray)
+        self.floating_widget = OptionalComponent(floating_widget)
+        self.floating_widget_available = floating_widget is not None
         self._ensure_audio_device_for_host(self._current_audio_host)
 
     def _update_ui_state(self, state: str):
         self.system_tray.update_state(state)
         self.terminal_title.update_state(state)
+        self.floating_widget.update_state(state)
 
     def handle_max_recording_duration_reached(self, audio_data):
         self.logger.info("Max recording duration reached - starting transcription")
@@ -134,6 +143,12 @@ class StateManager:
             return
 
         self._begin_recording()
+
+    def toggle_recording(self):
+        if self.audio_recorder.get_recording_status():
+            self.stop_recording()
+        else:
+            self.start_recording()
 
     def start_command_recording(self):
         if not self.can_start_recording():
@@ -273,6 +288,7 @@ class StateManager:
 
         self.system_tray.stop()
         self.terminal_title.stop()
+        self.floating_widget.stop()
     
     def set_model_loading(self, loading: bool):
         with self._state_lock:
@@ -331,6 +347,24 @@ class StateManager:
         self.logger.warning(f"Unexpected state for model change: {current_state}")
         return False
     
+    def update_floating_widget_enabled(self, enabled: bool):
+        self.config_manager.update_user_setting('floating_widget', 'enabled', enabled)
+        if enabled:
+            self.floating_widget.show()
+        else:
+            self.floating_widget.hide()
+
+    def update_floating_widget_size(self, size: str):
+        self.config_manager.update_user_setting('floating_widget', 'size', size)
+        self.floating_widget.set_size(size)
+
+    def update_floating_widget_save_position(self, save_position: bool):
+        self.config_manager.update_user_setting('floating_widget', 'save_position', save_position)
+        self.floating_widget.set_save_position(save_position)
+
+    def save_floating_widget_position(self, position: str):
+        self.config_manager.update_user_setting('floating_widget', 'position', position)
+
     def update_transcription_mode(self, value):
         self.config_manager.update_user_setting('clipboard', 'auto_paste', value)
         self.clipboard_manager.update_auto_paste(value)

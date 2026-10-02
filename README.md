@@ -158,6 +158,10 @@ Delete this file and restart app to reset to defaults.
 | **System Tray** |||
 | `system_tray.enabled` | `true` | Show tray icon |
 | `system_tray.tooltip` | `Whisper Key` | Hover text |
+| **Floating Button** |||
+| `floating_widget.enabled` | `false` | Always-on-top button to start/stop recording by mouse (Windows only) |
+| `floating_widget.size` | `big` | small, medium or big |
+| `floating_widget.save_position` | `false` | Restore the last dragged position on startup |
 | **Terminal Title** |||
 | `terminal_title.idle` | `""` | Tab title prefix when idle: static string or `[prefix, seconds]` animation frames |
 | `terminal_title.recording` | 🔴 blink | Tab title prefix while recording |

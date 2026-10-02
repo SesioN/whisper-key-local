@@ -113,6 +113,30 @@ class SystemTray:
 
         return items
 
+    def _build_floating_widget_menu_items(self) -> list:
+        if not self.state_manager.floating_widget_available:
+            return []
+
+        enabled = self.config_manager.get_setting('floating_widget', 'enabled')
+        save_position = self.config_manager.get_setting('floating_widget', 'save_position')
+        current_size = self.config_manager.get_setting('floating_widget', 'size')
+
+        def make_size_selector(size):
+            return lambda icon, item: self._set_floating_widget_size(size)
+
+        def make_is_current_size(size):
+            return lambda item: size == current_size
+
+        items = [
+            pystray.MenuItem("Show", lambda icon, item: self._set_floating_widget_enabled(not enabled), checked=lambda item: enabled),
+            pystray.MenuItem("Remember position", lambda icon, item: self._set_floating_widget_save_position(not save_position), checked=lambda item: save_position),
+            pystray.Menu.SEPARATOR,
+        ]
+        for size in ("small", "medium", "big"):
+            items.append(pystray.MenuItem(size.title(), make_size_selector(size), radio=True, checked=make_is_current_size(size)))
+
+        return items
+
     def _create_menu(self):
         try:
             app_state = self.state_manager.get_application_state()
@@ -169,6 +193,7 @@ class SystemTray:
                     )
 
             model_sub_menu_items = self._build_model_menu_items(current_model, is_model_loading)
+            floating_widget_menu_items = self._build_floating_widget_menu_items()
 
             voice_commands_enabled = self.config_manager.get_setting('voice_commands', 'enabled')
 
@@ -198,6 +223,7 @@ class SystemTray:
                 pystray.MenuItem("Auto-paste", lambda icon, item: self._set_transcription_mode(True), radio=True, checked=lambda item: auto_paste_enabled),
                 pystray.MenuItem("Copy to clipboard", lambda icon, item: self._set_transcription_mode(False), radio=True, checked=lambda item: not auto_paste_enabled),
                 pystray.Menu.SEPARATOR,
+                pystray.MenuItem("Floating button", pystray.Menu(*floating_widget_menu_items)) if floating_widget_menu_items else None,
                 pystray.MenuItem(f"Model: {current_model.title()}", pystray.Menu(*model_sub_menu_items)),
             ]
 
@@ -293,6 +319,18 @@ class SystemTray:
             self.icon.menu = self._create_menu()
         else:
             self.logger.warning(f"Request to change audio device to {device_id} was not accepted")
+
+    def _set_floating_widget_enabled(self, enabled: bool):
+        self.state_manager.update_floating_widget_enabled(enabled)
+        self.icon.menu = self._create_menu()
+
+    def _set_floating_widget_save_position(self, save_position: bool):
+        self.state_manager.update_floating_widget_save_position(save_position)
+        self.icon.menu = self._create_menu()
+
+    def _set_floating_widget_size(self, size: str):
+        self.state_manager.update_floating_widget_size(size)
+        self.icon.menu = self._create_menu()
 
     def _show_console(self, icon=None, item=None):
         console.show()

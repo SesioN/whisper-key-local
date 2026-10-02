@@ -316,6 +316,20 @@ system_tray: # System Tray Settings
     # Tooltip text when hovering over tray icon
     tooltip: Whisper Key
 
+floating_widget: # Floating Recording Button (Windows only)
+    # Show an always-on-top button that starts/stops recording with a mouse click
+    # Drag the icon to move it, click the label below it to lock it in place
+    enabled: false
+
+    # Button size: small, medium, big
+    size: big
+
+    # Restore the last dragged position on startup
+    save_position: false
+
+    # Last position as "+x+y" (managed automatically)
+    position: null
+
 terminal_title: # Terminal Tab Title Status
     # Tab title shows "<prefix> Whisper Key" based on app state
     # Each state is a static prefix string, or a list of [prefix, seconds]
