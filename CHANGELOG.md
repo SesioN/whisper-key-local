@@ -2,7 +2,12 @@
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
-## [0.8.3] - 2026-09-27
+## [Unreleased]
+
+### Changed
+- **Auto-paste and copy to clipboard are independent tray checkboxes** - New `clipboard.copy_to_clipboard` keeps the transcription on the clipboard after auto-paste in both delivery methods (disables `paste_preserve_clipboard`); voice-command text follows the same setting. Replaces `type_also_copy_to_clipboard`, which is migrated automatically
+
+ - 2026-09-27
 
 ### Fixed
 - NVIDIA GPU setup now checks that cuBLAS libraries can load and finds pip-installed CUDA DLLs at startup (#68)

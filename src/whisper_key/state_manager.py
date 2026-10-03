@@ -336,8 +336,8 @@ class StateManager:
         self.clipboard_manager.update_auto_paste(value)
 
     def update_copy_to_clipboard(self, value):
-        self.config_manager.update_user_setting('clipboard', 'copy_to_clipboard', value)
         self.clipboard_manager.update_copy_to_clipboard(value)
+        self.config_manager.update_user_setting('clipboard', 'copy_to_clipboard', value)
 
     def _execute_model_change(self, new_model_key: str):
         def progress_callback(message: str):

@@ -138,6 +138,15 @@ class ConfigManager:
         for section in sections_to_remove:
             del user_config[section]
     
+    def _migrate_legacy_keys(self, user_config: Dict[str, Any]):
+        clipboard = user_config.get('clipboard')
+        if not isinstance(clipboard, dict) or 'type_also_copy_to_clipboard' not in clipboard:
+            return
+        legacy = clipboard.get('type_also_copy_to_clipboard')
+        if 'copy_to_clipboard' not in clipboard and legacy and clipboard.get('delivery_method') == 'type':
+            clipboard['copy_to_clipboard'] = True
+            self.logger.info("Migrated clipboard.type_also_copy_to_clipboard to clipboard.copy_to_clipboard")
+
     def _load_config(self):
 
         default_config = self._load_default_config()
@@ -158,6 +167,7 @@ class ConfigManager:
                 if user_config is None:
                     user_config = {}
 
+                self._migrate_legacy_keys(user_config)
                 self._remove_unused_keys_from_user_config(user_config, default_config)
                 merged_config = deep_merge_config(default_config, user_config)
                 resolved_config = _resolve_platform_values(merged_config)
