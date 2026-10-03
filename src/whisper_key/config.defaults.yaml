@@ -248,6 +248,10 @@ clipboard: # Clipboard Behavior
     # false = only copy to clipboard (paste manually)
     auto_paste: true
 
+    # Keep the transcription on the clipboard after auto-paste
+    # Disables paste_preserve_clipboard; always on when auto_paste is false
+    copy_to_clipboard: false
+
     # Delivery method for auto-paste
     # "paste" = clipboard copy + simulated Ctrl+V paste
     # "type" = direct text injection (Windows only)
@@ -271,9 +275,6 @@ clipboard: # Clipboard Behavior
 
     # Delay before clipboard restore (seconds, paste mode)
     paste_clipboard_restore_delay: 0.5
-
-    # Also copy transcription to clipboard after delivery (type mode)
-    type_also_copy_to_clipboard: false
 
     # Delay before sending ENTER key after text injection (seconds, type mode)
     # Terminal apps need time to process typed characters before Enter submits

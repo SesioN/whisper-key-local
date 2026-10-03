@@ -156,7 +156,7 @@ def setup_clipboard_manager(clipboard_config):
         paste_pre_paste_delay=clipboard_config['paste_pre_paste_delay'],
         paste_preserve_clipboard=clipboard_config['paste_preserve_clipboard'],
         paste_clipboard_restore_delay=clipboard_config['paste_clipboard_restore_delay'],
-        type_also_copy_to_clipboard=clipboard_config['type_also_copy_to_clipboard'],
+        copy_to_clipboard=clipboard_config['copy_to_clipboard'],
         type_auto_enter_delay=clipboard_config['type_auto_enter_delay'],
         type_auto_enter_delay_per_100_chars=clipboard_config['type_auto_enter_delay_per_100_chars'],
         macos_key_simulation_delay=clipboard_config['macos_key_simulation_delay']
