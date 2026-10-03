@@ -119,7 +119,6 @@ class SystemTray:
             is_model_loading = app_state.get('model_loading', False)
 
             auto_paste_enabled = self.config_manager.get_setting('clipboard', 'auto_paste')
-            audio_feedback_enabled = self.config_manager.get_setting('audio_feedback', 'enabled')
             current_model = self.config_manager.get_setting('whisper', 'model')
 
             available_hosts = self.state_manager.get_available_audio_hosts()
@@ -195,7 +194,7 @@ class SystemTray:
                     f"Audio Source",
                     pystray.Menu(*audio_device_items)
                 ),
-                pystray.MenuItem("Audio feedback", lambda icon, item: self._set_audio_feedback(not audio_feedback_enabled), checked=lambda item: audio_feedback_enabled),
+                pystray.MenuItem("Audio feedback", lambda icon, item: self._set_audio_feedback(not self._is_audio_feedback_enabled()), checked=lambda item: self._is_audio_feedback_enabled()),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Auto-paste", lambda icon, item: self._set_transcription_mode(True), radio=True, checked=lambda item: auto_paste_enabled),
                 pystray.MenuItem("Copy to clipboard", lambda icon, item: self._set_transcription_mode(False), radio=True, checked=lambda item: not auto_paste_enabled),
@@ -264,8 +263,14 @@ class SystemTray:
         self.state_manager.update_transcription_mode(auto_paste)
         self.icon.menu = self._create_menu()
 
+    def _is_audio_feedback_enabled(self):
+        return bool(self.config_manager.get_setting('audio_feedback', 'enabled'))
+
     def _set_audio_feedback(self, enabled: bool):
-        self.state_manager.update_audio_feedback(enabled)
+        try:
+            self.state_manager.update_audio_feedback(enabled)
+        except Exception as e:
+            self.logger.error(f"Error setting audio feedback to {enabled}: {e}")
         self.icon.menu = self._create_menu()
 
     def _select_model(self, model_key: str):
