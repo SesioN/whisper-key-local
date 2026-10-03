@@ -6,7 +6,7 @@ import threading
 import tkinter as tk
 from typing import Callable, Optional
 
-from PIL import ImageTk
+from PIL import Image, ImageTk
 
 from .platform import icons, window_style
 
@@ -26,6 +26,7 @@ LOCKED_APPEARANCE = {"text": "Locked", "fg": "#FFFFFF", "bg": "#880000"}
 LOCK_LABEL_WIDTH = 9
 FONT_FAMILY = "Segoe UI"
 QUEUE_POLL_INTERVAL_MS = 100
+HIDDEN_QUEUE_POLL_INTERVAL_MS = 500
 STOP_TIMEOUT_SECONDS = 3.0
 
 SHOW = "show"
@@ -62,6 +63,8 @@ class FloatingWidget:
         self._icon_photos = {}
         self._locked = False
         self._dragging = False
+        self._press_x_root = 0
+        self._press_y_root = 0
         self._drag_offset_x = 0
         self._drag_offset_y = 0
 
@@ -152,6 +155,7 @@ class FloatingWidget:
 
         self._apply_size()
         self._apply_lock_appearance()
+        self._root.update_idletasks()
         self._root.geometry(self._initial_position())
         self._root.update_idletasks()
         window_style.prevent_focus_steal(self._root.winfo_id())
@@ -171,12 +175,15 @@ class FloatingWidget:
         match = POSITION_PATTERN.match(self.position)
         if not match:
             return False
-        return window_style.is_point_on_screen(int(match.group(1)), int(match.group(2)))
+        x, y = int(match.group(1)), int(match.group(2))
+        right = x + self._root.winfo_reqwidth() - 1
+        bottom = y + self._root.winfo_reqheight() - 1
+        return window_style.is_point_on_screen(x, y) and window_style.is_point_on_screen(right, bottom)
 
     def _load_icon_photos(self, icon_size: int) -> dict:
         photos = {}
         for state, image in icons.get_tray_icons().items():
-            resized = image.convert("RGBA").resize((icon_size, icon_size))
+            resized = image.convert("RGBA").resize((icon_size, icon_size), Image.LANCZOS)
             hard_edged_alpha = resized.getchannel("A").point(lambda alpha: 255 if alpha >= OPAQUE_ALPHA_THRESHOLD else 0)
             resized.putalpha(hard_edged_alpha)
             photos[state] = ImageTk.PhotoImage(resized, master=self._root)
@@ -210,7 +217,8 @@ class FloatingWidget:
                 self._handle_command_safely(command)
         except queue.Empty:
             pass
-        self._root.after(QUEUE_POLL_INTERVAL_MS, self._process_command_queue)
+        poll_interval = QUEUE_POLL_INTERVAL_MS if self._root.state() == "normal" else HIDDEN_QUEUE_POLL_INTERVAL_MS
+        self._root.after(poll_interval, self._process_command_queue)
 
     def _handle_command_safely(self, command: str):
         try:
@@ -231,6 +239,8 @@ class FloatingWidget:
             self._report_position()
 
     def _report_position(self):
+        if self._root.state() != "normal":
+            return
         self.position = f"+{self._root.winfo_x()}+{self._root.winfo_y()}"
         self.on_position_changed(self.position)
 
@@ -240,26 +250,33 @@ class FloatingWidget:
 
     def _on_icon_press(self, event):
         self._dragging = False
-        self._drag_offset_x = event.x
-        self._drag_offset_y = event.y
+        self._press_x_root = event.x_root
+        self._press_y_root = event.y_root
+        self._drag_offset_x = event.x_root - self._root.winfo_x()
+        self._drag_offset_y = event.y_root - self._root.winfo_y()
 
     def _on_icon_drag(self, event):
-        if self._locked:
-            return
-        delta_x = event.x - self._drag_offset_x
-        delta_y = event.y - self._drag_offset_y
-        if not self._dragging and max(abs(delta_x), abs(delta_y)) < DRAG_THRESHOLD_PIXELS:
-            return
-        self._dragging = True
-        self._root.geometry(f"+{self._root.winfo_x() + delta_x}+{self._root.winfo_y() + delta_y}")
+        if not self._dragging:
+            moved = max(abs(event.x_root - self._press_x_root), abs(event.y_root - self._press_y_root))
+            if moved < DRAG_THRESHOLD_PIXELS:
+                return
+            self._dragging = True
+        if not self._locked:
+            self._root.geometry(f"+{event.x_root - self._drag_offset_x}+{event.y_root - self._drag_offset_y}")
 
     def _on_icon_release(self, event):
         if self._dragging:
             self._dragging = False
-            if self.save_position:
+            if self.save_position and not self._locked:
                 self._handle_command_safely(SAVE_POSITION)
             return
         if self._click_thread and self._click_thread.is_alive():
             return
-        self._click_thread = threading.Thread(target=self.on_click, daemon=True, name="FloatingWidgetClick")
+        self._click_thread = threading.Thread(target=self._run_click_callback, daemon=True, name="FloatingWidgetClick")
         self._click_thread.start()
+
+    def _run_click_callback(self):
+        try:
+            self.on_click()
+        except Exception:
+            self.logger.exception("Floating widget click handler failed")
