@@ -154,7 +154,7 @@ class StateManager:
 
     def handle_vad_sensitivity_window_closed(self):
         self._vad_sensitivity_window_open = False
-        self._apply_auto_trigger()
+        threading.Thread(target=self._apply_auto_trigger, daemon=True).start()
 
     def handle_vad_probability(self, probability: float):
         if self._vad_sensitivity_window_open:
@@ -191,6 +191,10 @@ class StateManager:
 
     def is_auto_trigger_available(self) -> bool:
         return self.audio_recorder.continuous_vad is not None
+
+    def play_ready_sound(self):
+        self._auto_trigger_resume_time = time.monotonic() + self.AUTO_TRIGGER_COOLDOWN_SECONDS
+        self.audio_feedback.play_ready_sound()
 
     def update_auto_trigger(self, enabled: bool):
         self.auto_trigger_enabled = enabled
@@ -350,18 +354,20 @@ class StateManager:
                 self._auto_trigger_resume_time = time.monotonic() + self.AUTO_TRIGGER_COOLDOWN_SECONDS
                 pending_model = self._pending_model_change
                 pending_device = self._pending_device_change
+                self._pending_model_change = None
+                self._pending_device_change = None
+                if pending_model:
+                    self.is_model_loading = True
 
             if pending_device:
                 device_id, device_name = pending_device
                 self.logger.info(f"Executing pending device change to: {device_name}")
                 self._execute_audio_device_change(device_id, device_name)
-                self._pending_device_change = None
 
             if pending_model:
                 self.logger.info(f"Executing pending model change to: {pending_model}")
                 print(f"🔄 Processing complete, now switching to [{pending_model}] model...")
                 self._execute_model_change(pending_model)
-                self._pending_model_change = None
 
             if not (pending_device or pending_model):
                 self._update_ui_state("idle")
@@ -435,12 +441,9 @@ class StateManager:
         with self._state_lock:
             old_state = self.is_model_loading
             self.is_model_loading = loading
-            
-            if old_state != loading:
-                if loading:
-                    self._update_ui_state("processing")
-                else:
-                    self._update_ui_state("idle")
+
+        if old_state != loading:
+            self._update_ui_state("processing" if loading else "idle")
     
     def is_transcription_recording(self) -> bool:
         return self.audio_recorder.get_recording_status() and not self._command_mode
@@ -461,33 +464,27 @@ class StateManager:
                 return "idle"
     
     def request_model_change(self, new_model_key: str) -> bool:
-        current_state = self.get_current_state()
-        
         if new_model_key == self.whisper_engine.model_key:
             return True
-        
-        if current_state == "model_loading":
-            print("⏳ Model already loading, please wait...")
-            return False
-        
-        if current_state == "recording":
+
+        if self.get_current_state() == "recording":
             print(f"🎤 Cancelling recording to switch to [{new_model_key}] model...")
             self.cancel_active_recording()
-            self._execute_model_change(new_model_key)
-            return True
-        
-        if current_state == "processing":
-            print(f"⏳ Queueing model change to [{new_model_key}] until transcription completes...")
-            self._pending_model_change = new_model_key
-            return True
-        
-        if current_state == "idle":
-            self._execute_model_change(new_model_key)
-            return True
-        
-        self.logger.warning(f"Unexpected state for model change: {current_state}")
-        return False
-    
+
+        with self._state_lock:
+            if self.is_model_loading:
+                print("⏳ Model already loading, please wait...")
+                return False
+            if self.is_processing:
+                print(f"⏳ Queueing model change to [{new_model_key}] until transcription completes...")
+                self._pending_model_change = new_model_key
+                return True
+            self.is_model_loading = True
+
+        self._update_ui_state("processing")
+        self._execute_model_change(new_model_key)
+        return True
+
     def update_floating_widget_enabled(self, enabled: bool):
         self.config_manager.update_user_setting('floating_widget', 'enabled', enabled)
         if enabled:
@@ -513,7 +510,11 @@ class StateManager:
                 installed_binary, _ = whisper_cpp_runtime_paths()
                 whisper_cpp_binary = (self.config_manager.get_setting('whisper', 'cpp_binary')
                                       or installed_binary or find_whisper_cli())
-                self._runtimes = detect_runtimes(whisper_cpp_binary)
+                try:
+                    self._runtimes = detect_runtimes(whisper_cpp_binary)
+                except Exception as e:
+                    self.logger.error(f"Runtime detection failed: {e}")
+                    self._runtimes = []
             return self._runtimes
 
     def get_current_runtime(self) -> Optional[Runtime]:
@@ -719,6 +720,7 @@ class StateManager:
         def progress_callback(message: str):
             if "ready" in message.lower() or "already loaded" in message.lower():
                 print(f"✅ Successfully switched to [{new_model_key}] model")
+                self.config_manager.update_user_setting('whisper', 'model', new_model_key)
                 self.set_model_loading(False)
             elif "failed" in message.lower():
                 print(f"❌ Failed to change model: {message}")
