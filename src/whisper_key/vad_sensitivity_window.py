@@ -38,14 +38,23 @@ class VadSensitivityWindow:
 
         self._command_queue = queue.Queue()
         self._window_thread = None
+        self._window_closing = False
         self._thread_lock = threading.Lock()
 
     def open(self):
+        with self._thread_lock:
+            closing_thread = self._window_thread if self._window_closing else None
+            if self._window_thread and not closing_thread:
+                self._command_queue.put(RAISE)
+                return
+        if closing_thread:
+            closing_thread.join(timeout=STOP_TIMEOUT_SECONDS)
         with self._thread_lock:
             if self._window_thread:
                 self._command_queue.put(RAISE)
                 return
             self._command_queue = queue.Queue()
+            self._window_closing = False
             self._window_thread = threading.Thread(
                 target=self._run_window_thread, args=(self._command_queue,), daemon=True, name="VadSensitivityWindow"
             )
@@ -71,11 +80,13 @@ class VadSensitivityWindow:
     def _run_window_thread(self, command_queue):
         try:
             self.speech_probability = 0.0
-            self.on_opened()
             self._run_window(command_queue)
         except Exception as e:
             self.logger.error(f"VAD sensitivity window failed: {e}")
+            print(f"❌ Could not open the voice detection sensitivity window: {e}")
         finally:
+            with self._thread_lock:
+                self._window_closing = True
             gc.collect()
             self.speech_probability = 0.0
             self._notify_closed()
@@ -92,6 +103,7 @@ class VadSensitivityWindow:
         root = tk.Tk()
         try:
             self._build_window(root, command_queue)
+            self.on_opened()
             root.mainloop()
         finally:
             try:
@@ -102,7 +114,6 @@ class VadSensitivityWindow:
     def _build_window(self, root, command_queue):
         root.title("Whisper Key - Voice detection sensitivity")
         root.resizable(False, False)
-        root.protocol("WM_DELETE_WINDOW", root.quit)
 
         frame = ttk.Frame(root, padding=20)
         frame.pack()
@@ -137,16 +148,26 @@ class VadSensitivityWindow:
         slider.set(self.onset_threshold)
         slider.bind("<ButtonRelease-1>", select_threshold)
         slider.bind("<KeyRelease>", select_threshold)
+
+        def close_window():
+            select_threshold(None)
+            root.quit()
+
+        root.protocol("WM_DELETE_WINDOW", close_window)
         slider.pack(pady=(5, 10))
         meter.pack()
 
         ttk.Label(frame, text="Speak: the bar should pass the red line only while you talk").pack(pady=(10, 0))
 
+        drawn_meter = [None]
+
         def refresh_meter():
             probability = max(0.0, min(1.0, self.speech_probability))
-            color = METER_SPEECH_COLOR if probability > self.onset_threshold else METER_SILENCE_COLOR
-            meter.coords(level_bar, 0, 0, probability * METER_WIDTH, METER_HEIGHT)
-            meter.itemconfig(level_bar, fill=color)
+            if drawn_meter[0] != (probability, self.onset_threshold):
+                drawn_meter[0] = (probability, self.onset_threshold)
+                color = METER_SPEECH_COLOR if probability > self.onset_threshold else METER_SILENCE_COLOR
+                meter.coords(level_bar, 0, 0, probability * METER_WIDTH, METER_HEIGHT)
+                meter.itemconfig(level_bar, fill=color)
             root.after(METER_REFRESH_INTERVAL_MS, refresh_meter)
 
         def process_command_queue():
@@ -154,7 +175,7 @@ class VadSensitivityWindow:
                 while True:
                     command = command_queue.get_nowait()
                     if command == CLOSE:
-                        root.quit()
+                        close_window()
                         return
                     if command == RAISE:
                         root.deiconify()

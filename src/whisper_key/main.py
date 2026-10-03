@@ -83,7 +83,8 @@ def setup_audio_recorder(audio_config, state_manager, vad_manager, streaming_man
         streaming_manager=streaming_manager,
         on_streaming_result=state_manager.handle_streaming_result,
         on_vad_probability=state_manager.handle_vad_probability,
-        device=audio_config['input_device']
+        device=audio_config['input_device'],
+        on_monitoring_failed=state_manager.handle_monitoring_failed
     )
 
 def setup_vad(vad_config):

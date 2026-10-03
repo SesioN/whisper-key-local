@@ -211,15 +211,20 @@ class ContinuousVoiceDetector:
         try:
             audio_int16 = convert_audio_for_ten_vad(audio_chunk)
             probability, _ = self.ten_vad.process(audio_int16)
-            if self.probability_callback:
-                self.probability_callback(probability)
             speech_detected = self.hysteresis.detect_speech(probability)
             self.probability_buffer.append(probability)
-            return self._update_state(speech_detected)
+            event = self._update_state(speech_detected)
 
         except Exception as e:
             self.logger.error(f"Error processing VAD chunk: {e}")
             return VadEvent.NO_EVENT
+
+        if self.probability_callback:
+            try:
+                self.probability_callback(probability)
+            except Exception as e:
+                self.logger.error(f"VAD probability callback failed: {e}")
+        return event
 
     def _update_state(self, speech_detected: bool) -> VadEvent:
         with self._lock:
@@ -244,6 +249,7 @@ class ContinuousVoiceDetector:
                     self.silence_frame_count += 1
                     if self.silence_frame_count >= self.frames_for_timeout:
                         self.state = VadState.TIMEOUT_TRIGGERED
+                        self.speech_end_pending = False
                         event = VadEvent.SILENCE_TIMEOUT
                     elif self.speech_end_pending and self.silence_frame_count >= self.frames_for_speech_end:
                         self.speech_end_pending = False
@@ -262,7 +268,8 @@ class ContinuousVoiceDetector:
 
     def _count_speech_frame(self) -> VadEvent:
         self.speech_frame_count += 1
-        if self.speech_frame_count == self.frames_for_speech_start:
+        # speech_end_pending latches SPEECH_START once per utterance, so short dips don't re-fire it
+        if self.speech_frame_count >= self.frames_for_speech_start and not self.speech_end_pending:
             self.speech_end_pending = True
             return VadEvent.SPEECH_START
         return VadEvent.NO_EVENT

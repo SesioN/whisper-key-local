@@ -25,9 +25,10 @@ if TYPE_CHECKING:
     from .floating_widget import FloatingWidget
 
 class StateManager:
-    VAD_HYSTERESIS_GAP = 0.15
+    MIN_VAD_HYSTERESIS_GAP = 0.05
     MIN_VAD_OFFSET_THRESHOLD = 0.05
     MAX_VAD_ONSET_THRESHOLD = 0.95
+    AUTO_TRIGGER_COOLDOWN_SECONDS = 1.0  # Lets feedback sounds die out before the VAD may start a recording
 
     def __init__(self,
                  audio_recorder: AudioRecorder,
@@ -70,6 +71,8 @@ class StateManager:
         self.vad_sensitivity_window = OptionalComponent(None)
         self.vad_sensitivity_window_attached = False
         self._vad_sensitivity_window_open = False
+        self._vad_hysteresis_gap = None
+        self._auto_trigger_resume_time = 0.0
 
         self._runtimes = None
         self._runtime_install_running = False
@@ -117,6 +120,10 @@ class StateManager:
     def _handle_auto_trigger_speech_start(self):
         if not self.auto_trigger_enabled or self._vad_sensitivity_window_open or not self.can_start_recording():
             return
+        # Don't let our own feedback sounds trigger a new recording
+        if time.monotonic() < self._auto_trigger_resume_time:
+            self.logger.debug("Auto-trigger: ignoring speech during feedback cooldown")
+            return
         self.logger.info("Auto-trigger: speech detected, starting recording")
         self._begin_recording(auto_triggered=True)
 
@@ -134,6 +141,7 @@ class StateManager:
         return self.vad_sensitivity_window_attached and self.audio_recorder.continuous_vad is not None
 
     def open_vad_sensitivity_window(self):
+        self._vad_sensitivity_window_open = True
         self.vad_sensitivity_window.open()
 
     def handle_vad_sensitivity_window_opened(self):
@@ -150,7 +158,9 @@ class StateManager:
 
     def update_vad_onset_threshold(self, onset_threshold: float):
         onset_threshold = round(min(onset_threshold, self.MAX_VAD_ONSET_THRESHOLD), 2)
-        offset_threshold = round(max(self.MIN_VAD_OFFSET_THRESHOLD, onset_threshold - self.VAD_HYSTERESIS_GAP), 2)
+        if self._vad_hysteresis_gap is None:
+            self._vad_hysteresis_gap = max(self.MIN_VAD_HYSTERESIS_GAP, self.vad_manager.vad_onset_threshold - self.vad_manager.vad_offset_threshold)
+        offset_threshold = round(max(self.MIN_VAD_OFFSET_THRESHOLD, onset_threshold - self._vad_hysteresis_gap), 2)
         self.vad_manager.vad_onset_threshold = onset_threshold
         self.vad_manager.vad_offset_threshold = offset_threshold
         if self.audio_recorder.continuous_vad:
@@ -164,14 +174,26 @@ class StateManager:
                 self.audio_recorder.stop_monitoring()
             elif not self.audio_recorder.start_monitoring():
                 self.logger.warning("Microphone monitoring needs real-time VAD (vad.vad_realtime_enabled) and ten-vad")
+                return False
+            return True
+
+    def handle_monitoring_failed(self, error: Exception):
+        # Runtime-only switch-off: the saved setting stays on so a restart retries
+        self.logger.error(f"Voice-activated recording stopped: {error}")
+        print("❌ Voice-activated recording turned off (microphone stream failed). Re-enable it from the tray menu.")
+        self.auto_trigger_enabled = False
+        self.vad_sensitivity_window.update_probability(0.0)
+        self.system_tray.refresh_menu()
 
     def is_auto_trigger_available(self) -> bool:
         return self.audio_recorder.continuous_vad is not None
 
     def update_auto_trigger(self, enabled: bool):
-        self.config_manager.update_user_setting('vad', 'auto_trigger_enabled', enabled)
         self.auto_trigger_enabled = enabled
-        self._apply_auto_trigger()
+        if self._apply_auto_trigger():
+            self.config_manager.update_user_setting('vad', 'auto_trigger_enabled', enabled)
+        else:
+            self.auto_trigger_enabled = False
 
     def handle_streaming_result(self, text: str, is_final: bool):
         if is_final:
@@ -258,10 +280,13 @@ class StateManager:
             self._update_ui_state("recording")
 
     def _begin_recording(self, auto_triggered: bool = False):
+        # Set before starting so a quick SPEECH_END on another thread already sees it
+        self._auto_triggered_recording = auto_triggered
         success = self.audio_recorder.start_recording(voice_activated=auto_triggered)
 
-        if success:
-            self._auto_triggered_recording = auto_triggered
+        if not success:
+            self._auto_triggered_recording = False
+        else:
             print("\n🎤 Recording started! Speak now...")
             if not auto_triggered:
                 self.config_manager.print_stop_instructions_based_on_config()
@@ -313,6 +338,8 @@ class StateManager:
         finally:
             with self._state_lock:
                 self.is_processing = False
+                self._auto_triggered_recording = False
+                self._auto_trigger_resume_time = time.monotonic() + self.AUTO_TRIGGER_COOLDOWN_SECONDS
                 pending_model = self._pending_model_change
                 pending_device = self._pending_device_change
 
@@ -764,7 +791,8 @@ class StateManager:
                 streaming_manager=streaming_manager,
                 on_streaming_result=on_streaming_result,
                 on_vad_probability=self.handle_vad_probability,
-                device=device_id if device_id != -1 else None
+                device=device_id if device_id != -1 else None,
+                on_monitoring_failed=self.handle_monitoring_failed
             )
 
             previous_recorder = self.audio_recorder

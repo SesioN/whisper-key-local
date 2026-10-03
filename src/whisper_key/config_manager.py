@@ -439,6 +439,16 @@ def validate_config(config, default_config, logger):
     if runtime not in ('cpu', 'cuda', 'rocm', 'vulkan'):
         _set_to_default(config, default_config, 'whisper.runtime', runtime, logger)
 
+    auto_trigger_enabled = _get_config_value_at_path(config, 'vad.auto_trigger_enabled')
+    if not isinstance(auto_trigger_enabled, bool):
+        _set_to_default(config, default_config, 'vad.auto_trigger_enabled', auto_trigger_enabled, logger)
+
+    auto_trigger_silence = _get_config_value_at_path(config, 'vad.auto_trigger_silence_seconds')
+    silence_timeout = _get_config_value_at_path(config, 'vad.vad_silence_timeout_seconds')
+    if auto_trigger_silence >= silence_timeout:
+        logger.warning(f"vad.auto_trigger_silence_seconds ({auto_trigger_silence}) must be below vad.vad_silence_timeout_seconds ({silence_timeout})")
+        _set_to_default(config, default_config, 'vad.auto_trigger_silence_seconds', auto_trigger_silence, logger)
+
     recording_mode = _get_config_value_at_path(config, 'hotkey.recording_mode')
     if recording_mode not in ('toggle', 'push_to_talk'):
         _set_to_default(config, default_config, 'hotkey.recording_mode', recording_mode, logger)
