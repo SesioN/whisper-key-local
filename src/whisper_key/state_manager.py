@@ -57,6 +57,7 @@ class StateManager:
         self._runtime_key = None
         self._runtimes_lock = threading.Lock()
         self._fallback_runtime = None
+        self._failed_runtime_key = None
 
         self.logger = logging.getLogger(__name__)
         self._current_audio_host = None
@@ -194,9 +195,11 @@ class StateManager:
                 fallback = self._fallback_runtime
                 if fallback and engine is self.whisper_engine:
                     self._fallback_runtime = None
+                    self._failed_runtime_key = self._runtime_key
                     fallback_to = fallback
                 raise
             self._fallback_runtime = None
+            self._failed_runtime_key = None
 
             if not transcribed_text:
                 return
@@ -440,7 +443,8 @@ class StateManager:
             with self._state_lock:
                 self.whisper_engine = new_engine
                 self._runtime_key = runtime.key
-                self._fallback_runtime = (old_runtime, old_compute_type) if old_runtime else None
+                retry_allowed = old_runtime and old_runtime.key != self._failed_runtime_key
+                self._fallback_runtime = (old_runtime, old_compute_type) if retry_allowed else None
             old_engine.unload()
             del old_engine
             gc.collect()
@@ -485,6 +489,7 @@ class StateManager:
                 print(f"🔄 {message}")
                 self.set_model_loading(True)
         
+        self._fallback_runtime = None
         try:
             print(f"🔄 Switching to [{new_model_key}] model...")
             
