@@ -129,6 +129,15 @@ class WhisperCppEngine:
         self.logger.info("whisper.cpp model [%s] at %s", self.model_key, model_path)
         print(f"   ✓ whisper.cpp model [{self.model_key}] ready")
 
+    def unload(self):
+        pass
+
+    def reload(self):
+        self._load_model()
+
+    def warm_up(self):
+        pass
+
     def _load_model_async(self,
                           new_model_key: str,
                           progress_callback: Optional[Callable[[str], None]] = None):

@@ -1,4 +1,5 @@
 import logging
+import sys
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -53,13 +54,15 @@ def detect_runtimes(whisper_cpp_binary: Optional[str]) -> list:
 
     ct2_variant = gpu.detect_ct2_variant()
 
-    return [
-        Runtime(CPU, "CPU", FASTER_WHISPER, "cpu", bool(cpu_types),
-                "CTranslate2 not available", cpu_types),
-        _gpu_runtime(CUDA, "NVIDIA CUDA", ct2_variant, gpu_device_count, gpu_types),
-        _gpu_runtime(ROCM, "AMD ROCm", ct2_variant, gpu_device_count, gpu_types),
-        _whisper_cpp_runtime(whisper_cpp_binary),
-    ]
+    runtimes = [Runtime(CPU, "CPU", FASTER_WHISPER, "cpu", bool(cpu_types),
+                        "CTranslate2 not available", cpu_types)]
+    if sys.platform != "darwin":
+        runtimes += [
+            _gpu_runtime(CUDA, "NVIDIA CUDA", ct2_variant, gpu_device_count, gpu_types),
+            _gpu_runtime(ROCM, "AMD ROCm", ct2_variant, gpu_device_count, gpu_types),
+        ]
+    runtimes.append(_whisper_cpp_runtime(whisper_cpp_binary))
+    return runtimes
 
 
 def _gpu_runtime(key: str, label: str, ct2_variant: str, gpu_device_count: int, gpu_types: frozenset) -> Runtime:
@@ -95,4 +98,4 @@ def choose_compute_type(runtime: Runtime, requested: Optional[str]) -> Optional[
     for compute_type in PREFERRED_COMPUTE_TYPES.get(runtime.device, ()):
         if compute_type in runtime.compute_types:
             return compute_type
-    return sorted(runtime.compute_types)[0]
+    return next(compute_type for compute_type in COMPUTE_TYPES + tuple(sorted(runtime.compute_types)) if compute_type in runtime.compute_types)

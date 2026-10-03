@@ -346,6 +346,7 @@ def main():
         
         hotkey_listener = setup_hotkey_listener(hotkey_config, state_manager, voice_commands_config['enabled'])
 
+        state_manager.get_runtimes()
         system_tray.start()
         terminal_title.start()
 
