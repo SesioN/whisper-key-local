@@ -244,6 +244,7 @@ class ContinuousVoiceDetector:
                     self.silence_frame_count += 1
                     if self.silence_frame_count >= self.frames_for_timeout:
                         self.state = VadState.TIMEOUT_TRIGGERED
+                        self.speech_end_pending = False
                         event = VadEvent.SILENCE_TIMEOUT
                     elif self.speech_end_pending and self.silence_frame_count >= self.frames_for_speech_end:
                         self.speech_end_pending = False
@@ -262,7 +263,8 @@ class ContinuousVoiceDetector:
 
     def _count_speech_frame(self) -> VadEvent:
         self.speech_frame_count += 1
-        if self.speech_frame_count == self.frames_for_speech_start:
+        # speech_end_pending latches SPEECH_START once per utterance, so short dips don't re-fire it
+        if self.speech_frame_count >= self.frames_for_speech_start and not self.speech_end_pending:
             self.speech_end_pending = True
             return VadEvent.SPEECH_START
         return VadEvent.NO_EVENT

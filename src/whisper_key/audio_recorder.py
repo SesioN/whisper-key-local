@@ -28,13 +28,15 @@ class AudioRecorder:
                  streaming_manager = None,
                  on_streaming_result: Callable[[str, bool], None] = None,
                  on_vad_probability: Callable[[float], None] = None,
-                 device = None):
+                 device = None,
+                 on_monitoring_failed: Callable[[Exception], None] = None):
 
         self.sample_rate = self.WHISPER_SAMPLE_RATE
         self.channels = channels
         self.dtype = dtype
         self.max_duration = max_duration
         self.on_max_duration_reached = on_max_duration_reached
+        self.on_monitoring_failed = on_monitoring_failed
         self.is_recording = False
         self.is_monitoring = False
         self.audio_data = []
@@ -134,11 +136,20 @@ class AudioRecorder:
     def _handle_vad_event(self, event: VadEvent):
         self.on_vad_event(event)
 
-    def _wait_for_thread_finish(self):
-        if self.recording_thread:
-            self.recording_thread.join(timeout=self.THREAD_JOIN_TIMEOUT)
-            if self.recording_thread.is_alive():
+    def _wait_for_thread_finish(self, thread: Optional[threading.Thread]):
+        if thread and thread is not threading.current_thread():
+            thread.join(timeout=self.THREAD_JOIN_TIMEOUT)
+            if thread.is_alive():
                 self.logger.warning("Recording thread did not exit within timeout")
+
+    def _take_recorded_chunks(self) -> Optional[list]:
+        # Flag flip and list swap under the callback's lock so no chunk lands after the snapshot
+        with self._pre_roll_lock:
+            if not self.is_recording:
+                return None
+            self.is_recording = False
+            recorded_chunks, self.audio_data = self.audio_data, []
+        return recorded_chunks
     
     def _test_audio_source(self):
         try:
@@ -177,9 +188,10 @@ class AudioRecorder:
                 self.is_monitoring = False
                 self.pre_roll_chunks.clear()
             stream_no_longer_needed = not self.is_recording
+            stream_thread = self.recording_thread
 
         if stream_no_longer_needed:
-            self._wait_for_thread_finish()
+            self._wait_for_thread_finish(stream_thread)
 
     def _stream_is_running(self) -> bool:
         stream_is_wanted = self.is_recording or self.is_monitoring
@@ -227,17 +239,17 @@ class AudioRecorder:
             if not self.is_recording:
                 return None
 
-            self.is_recording = False
-            recorded_chunks = self.audio_data
+            recorded_chunks = self._take_recorded_chunks()
             stream_no_longer_needed = not self.is_monitoring
+            stream_thread = self.recording_thread
 
         if stream_no_longer_needed:
-            self._wait_for_thread_finish()
+            self._wait_for_thread_finish(stream_thread)
 
         return self._process_audio_data(recorded_chunks)
     
-    def _process_audio_data(self, recorded_chunks: list) -> Optional[np.ndarray]:
-        if len(recorded_chunks) == 0:
+    def _process_audio_data(self, recorded_chunks: Optional[list]) -> Optional[np.ndarray]:
+        if not recorded_chunks:
             print("   ✗ No audio data recorded!")
             return None
 
@@ -257,13 +269,13 @@ class AudioRecorder:
             if not self.is_recording:
                 return
 
-            self.is_recording = False
-            self.audio_data = []
+            self._take_recorded_chunks()
             self.recording_start_time = None
             stream_no_longer_needed = not self.is_monitoring
+            stream_thread = self.recording_thread
 
         if stream_no_longer_needed:
-            self._wait_for_thread_finish()
+            self._wait_for_thread_finish(stream_thread)
     
     def _record_audio(self):
         stream_thread = threading.current_thread()
@@ -320,7 +332,7 @@ class AudioRecorder:
                 while (self.is_recording or self.is_monitoring) and self.recording_thread is stream_thread:
                     if self.is_recording:
                         self._check_max_duration_exceeded()
-                    elif not stream.active:
+                    if not stream.active:
                         raise sd.PortAudioError("Audio input stream stopped unexpectedly")
 
                     sd.sleep(self.RECORDING_SLEEP_INTERVAL)
@@ -329,9 +341,14 @@ class AudioRecorder:
             self.logger.error(f"Error during audio recording: {e}")
             print(f"❌ Recording failed: {e}")
             with self._lifecycle_lock:
+                monitoring_failed = self.recording_thread is stream_thread and self.is_monitoring
                 if self.recording_thread is stream_thread:
-                    self.is_recording = False
-                    self.is_monitoring = False
+                    with self._pre_roll_lock:
+                        self.is_recording = False
+                        self.is_monitoring = False
+                        self.pre_roll_chunks.clear()
+            if monitoring_failed and self.on_monitoring_failed:
+                self.on_monitoring_failed(e)
     
     def _check_max_duration_exceeded(self) -> bool:
         recording_start_time = self.recording_start_time
@@ -341,8 +358,11 @@ class AudioRecorder:
                 self.logger.info(f"Maximum recording duration of {self.max_duration}s reached")
                 print(f"⏰ Maximum recording duration of {self.max_duration}s reached - stopping recording")
                 
-                self.is_recording = False
-                audio_data = self._process_audio_data(self.audio_data)
+                # Only the callback lock here: this runs on the stream thread (see WASAPI note)
+                recorded_chunks = self._take_recorded_chunks()
+                if recorded_chunks is None:
+                    return False
+                audio_data = self._process_audio_data(recorded_chunks)
                 
                 if self.on_max_duration_reached:
                     if self.is_monitoring:
