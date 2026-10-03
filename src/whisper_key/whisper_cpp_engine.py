@@ -171,9 +171,13 @@ class WhisperCppEngine:
                                 "(reinstall the Vulkan runtime to keep the model loaded)", self._binary)
             return False
 
+        model_path = self._get_model_path(model_key)
+        if not model_path:
+            self.logger.warning("whisper.cpp model [%s] not found, not starting whisper-server", model_key)
+            return False
         port = _free_local_port()
         request_path = f"/{secrets.token_urlsafe(16)}"
-        command = [server_binary, "-m", self._get_model_path(model_key), "--host", SERVER_HOST, "--port", str(port),
+        command = [server_binary, "-m", model_path, "--host", SERVER_HOST, "--port", str(port),
                    "--request-path", request_path, "-nt", "-l", self.language or "auto"]
         if self.beam_size:
             command.extend(["-bs", str(self.beam_size)])
@@ -246,7 +250,7 @@ class WhisperCppEngine:
                     return
                 self._restarts += 1
             self._stop_server(process)
-            if self._start_server(self.model_key):
+            if self._start_server(self.model_key) or not self._server_enabled:
                 return
         print("   ⚠ whisper-server could not be restarted, using whisper-cli (slower)")
 
@@ -272,6 +276,8 @@ class WhisperCppEngine:
                 process.wait(timeout=1)
             except subprocess.TimeoutExpired:
                 self.logger.warning("whisper-server request failed, using whisper-cli for this recording: %s", e)
+                return None
+            if self._server_process is not process:
                 return None
             self.logger.warning("whisper-server exited with code %s:\n%s", process.returncode,
                                 _log_tail(self._server_log))

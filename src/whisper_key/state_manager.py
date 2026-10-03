@@ -436,12 +436,15 @@ class StateManager:
             old_engine.unload()
             gc.collect()
 
+        new_engine = None
         try:
             new_engine = create_whisper_engine(runtime.engine_type, whisper_config, self.vad_manager, old_engine.registry)
             new_engine.warm_up()
         except Exception as e:
             self.logger.error(f"Failed to switch runtime to {description}: {e}")
             print(f"❌ Failed to switch runtime: {e}")
+            if new_engine:
+                new_engine.close()
             new_engine = None
             gc.collect()
             if release_first:
