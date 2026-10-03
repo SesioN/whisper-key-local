@@ -2,6 +2,7 @@ import gc
 import logging
 import queue
 import threading
+import time
 import tkinter as tk
 
 from PIL import Image, ImageTk
@@ -18,6 +19,7 @@ FONT_FAMILY = "Segoe UI"
 QUEUE_POLL_INTERVAL_MS = 50
 CLOSE_TIMEOUT_SECONDS = 3.0
 CLOSE_REQUEST = object()
+ELAPSED_HINT_AFTER_SECONDS = 5
 
 
 # All Tk objects are created, used and destroyed on the LoadingScreen thread only;
@@ -31,6 +33,8 @@ class LoadingScreen:
         self._message_queue = queue.Queue()
         self._window_thread = None
         self._icon_photo = None
+        self._status_text = "Starting..."
+        self._status_since = time.monotonic()
 
     def show(self):
         if self._window_thread and self._window_thread.is_alive():
@@ -121,7 +125,15 @@ class LoadingScreen:
                 if message is CLOSE_REQUEST:
                     root.quit()
                     return
-                status_label.config(text=message)
+                self._status_text = message
+                self._status_since = time.monotonic()
         except queue.Empty:
             pass
+        status_label.config(text=self._format_status())
         root.after(QUEUE_POLL_INTERVAL_MS, self._process_message_queue, root, status_label)
+
+    def _format_status(self):
+        elapsed = int(time.monotonic() - self._status_since)
+        if elapsed < ELAPSED_HINT_AFTER_SECONDS:
+            return self._status_text
+        return f"{self._status_text} ({elapsed} s)"
