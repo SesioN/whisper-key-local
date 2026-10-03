@@ -211,15 +211,20 @@ class ContinuousVoiceDetector:
         try:
             audio_int16 = convert_audio_for_ten_vad(audio_chunk)
             probability, _ = self.ten_vad.process(audio_int16)
-            if self.probability_callback:
-                self.probability_callback(probability)
             speech_detected = self.hysteresis.detect_speech(probability)
             self.probability_buffer.append(probability)
-            return self._update_state(speech_detected)
+            event = self._update_state(speech_detected)
 
         except Exception as e:
             self.logger.error(f"Error processing VAD chunk: {e}")
             return VadEvent.NO_EVENT
+
+        if self.probability_callback:
+            try:
+                self.probability_callback(probability)
+            except Exception as e:
+                self.logger.error(f"VAD probability callback failed: {e}")
+        return event
 
     def _update_state(self, speech_detected: bool) -> VadEvent:
         with self._lock:

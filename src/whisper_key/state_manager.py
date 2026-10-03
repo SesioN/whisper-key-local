@@ -19,7 +19,7 @@ from .voice_commands import VoiceCommandManager
 from .terminal_title import TerminalTitle
 
 class StateManager:
-    VAD_HYSTERESIS_GAP = 0.15
+    MIN_VAD_HYSTERESIS_GAP = 0.05
     MIN_VAD_OFFSET_THRESHOLD = 0.05
     MAX_VAD_ONSET_THRESHOLD = 0.95
     AUTO_TRIGGER_COOLDOWN_SECONDS = 1.0  # Lets feedback sounds die out before the VAD may start a recording
@@ -124,6 +124,7 @@ class StateManager:
         return self.vad_sensitivity_window_attached and self.audio_recorder.continuous_vad is not None
 
     def open_vad_sensitivity_window(self):
+        self._vad_sensitivity_window_open = True
         self.vad_sensitivity_window.open()
 
     def handle_vad_sensitivity_window_opened(self):
@@ -140,7 +141,8 @@ class StateManager:
 
     def update_vad_onset_threshold(self, onset_threshold: float):
         onset_threshold = round(min(onset_threshold, self.MAX_VAD_ONSET_THRESHOLD), 2)
-        offset_threshold = round(max(self.MIN_VAD_OFFSET_THRESHOLD, onset_threshold - self.VAD_HYSTERESIS_GAP), 2)
+        hysteresis_gap = max(self.MIN_VAD_HYSTERESIS_GAP, self.vad_manager.vad_onset_threshold - self.vad_manager.vad_offset_threshold)
+        offset_threshold = round(max(self.MIN_VAD_OFFSET_THRESHOLD, onset_threshold - hysteresis_gap), 2)
         self.vad_manager.vad_onset_threshold = onset_threshold
         self.vad_manager.vad_offset_threshold = offset_threshold
         if self.audio_recorder.continuous_vad:
@@ -162,6 +164,7 @@ class StateManager:
         self.logger.error(f"Voice-activated recording stopped: {error}")
         print("❌ Voice-activated recording turned off (microphone stream failed). Re-enable it from the tray menu.")
         self.auto_trigger_enabled = False
+        self.vad_sensitivity_window.update_probability(0.0)
         self.system_tray.refresh_menu()
 
     def is_auto_trigger_available(self) -> bool:
