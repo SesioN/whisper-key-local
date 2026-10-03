@@ -167,7 +167,7 @@ def setup_system_tray(tray_config, config_manager, state_manager, model_registry
 
 def run_gpu_onboarding(config_manager, whisper_config):
     gpu_status = config_manager.config.get('onboarding', {}).get('gpu', 'pending')
-    if gpu_status != 'pending':
+    if gpu_status != 'pending' or whisper_config.get('engine_type') == 'whisper_cpp':
         return whisper_config
 
     gpu_class, gpu_name, ct2_works = detect_hardware(whisper_config['device'])
