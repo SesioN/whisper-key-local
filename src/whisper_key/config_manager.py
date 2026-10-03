@@ -432,6 +432,10 @@ def validate_config(config, default_config, logger):
     if runtime not in ('cpu', 'cuda', 'rocm', 'vulkan'):
         _set_to_default(config, default_config, 'whisper.runtime', runtime, logger)
 
+    engine_type = _get_config_value_at_path(config, 'whisper.engine_type')
+    if engine_type not in ('faster_whisper', 'whisper_cpp'):
+        _set_to_default(config, default_config, 'whisper.engine_type', engine_type, logger)
+
     recording_mode = _get_config_value_at_path(config, 'hotkey.recording_mode')
     if recording_mode not in ('toggle', 'push_to_talk'):
         _set_to_default(config, default_config, 'hotkey.recording_mode', recording_mode, logger)

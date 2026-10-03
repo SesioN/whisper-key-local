@@ -1,8 +1,8 @@
 import logging
 import os
 import shutil
+import re
 import subprocess
-import sys
 import tempfile
 import threading
 import time
@@ -12,13 +12,15 @@ from typing import Optional, Callable
 
 import numpy as np
 
+from .audio_recorder import AudioRecorder
+
 
 def find_whisper_cli():
     env = os.environ.get("WHISPER_CPP_BINARY", "")
     if env and os.path.isfile(env):
         return env
     candidates = [
-        Path(__file__).parent.parent.parent.parent / "tools" / "whisper.cpp" / "build" / "bin" / "whisper-cli.exe",
+        Path(__file__).parents[2] / "tools" / "whisper.cpp" / "build" / "bin" / "whisper-cli.exe",
         Path.home() / "tools" / "whisper.cpp" / "build" / "bin" / "whisper-cli.exe",
     ]
     for p in candidates:
@@ -42,7 +44,7 @@ def _find_model_dir():
     candidates = [
         Path.home() / "tools" / "whisper.cpp",
         Path.home() / "tools" / "whisper.cpp" / "models",
-        Path(__file__).parent.parent.parent.parent / "tools" / "whisper.cpp",
+        Path(__file__).parents[2] / "tools" / "whisper.cpp",
     ]
     for p in candidates:
         if p.is_dir():
@@ -50,19 +52,8 @@ def _find_model_dir():
     return None
 
 
-_MODEL_FILE_MAP = {
-    "tiny": "ggml-tiny.bin",
-    "tiny.en": "ggml-tiny.en.bin",
-    "base": "ggml-base.bin",
-    "base.en": "ggml-base.en.bin",
-    "small": "ggml-small.bin",
-    "small.en": "ggml-small.en.bin",
-    "medium": "ggml-medium.bin",
-    "medium.en": "ggml-medium.en.bin",
-    "large": "ggml-large.bin",
-    "large-v3": "ggml-large-v3.bin",
-    "large-v3-turbo": "ggml-large-v3-turbo.bin",
-}
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+_NON_SPEECH_TAG = re.compile(r"\[[A-Z]+(?:_[A-Z]+)+\]|[\[(](?:music|laughs|laughter|applause|silence|inaudible|no speech)[\])]", re.IGNORECASE)
 
 
 class WhisperCppEngine:
@@ -86,9 +77,11 @@ class WhisperCppEngine:
         self.beam_size = beam_size
         self.initial_prompt = initial_prompt or None
         self.hotwords = ", ".join(hotwords) if hotwords else None
+        self.logger = logging.getLogger(__name__)
+        if self.hotwords:
+            self.logger.warning("hotwords are not supported by whisper.cpp and will be ignored")
         self.vad_manager = vad_manager
         self.registry = model_registry
-        self.logger = logging.getLogger(__name__)
 
         self._binary = binary_path or find_whisper_cli()
         self._model_dir = model_dir or _find_model_dir()
@@ -101,13 +94,15 @@ class WhisperCppEngine:
                 "whisper-cli not found. Set WHISPER_CPP_BINARY env var "
                 "or install whisper.cpp (https://github.com/ggerganov/whisper.cpp)"
             )
+        if not os.path.isfile(self._binary):
+            raise RuntimeError(f"whisper-cli not found at: {self._binary}")
 
         self.logger.info("WhisperCppEngine: binary=%s model_dir=%s", self._binary, self._model_dir)
         self._load_model()
 
     def _get_model_path(self, model_key: str = None):
         key = model_key or self.model_key
-        filename = _MODEL_FILE_MAP.get(key, f"ggml-{key}.bin")
+        filename = f"ggml-{key}.bin"
 
         if self._model_dir:
             candidate = os.path.join(self._model_dir, filename)
@@ -119,23 +114,29 @@ class WhisperCppEngine:
             if source and os.path.isfile(source):
                 return source
 
-        return filename
+        return None
 
     def _is_model_cached(self, model_key: str = None):
-        path = self._get_model_path(model_key)
-        return os.path.isfile(path)
+        return self._get_model_path(model_key) is not None
 
     def _load_model(self):
         model_path = self._get_model_path()
-        print(f"[WhisperCpp] Loading model [{self.model_key}]...")
-        if not os.path.isfile(model_path):
-            print(f"[!] Model file not found: {model_path}")
+        if not model_path:
             raise FileNotFoundError(
-                f"Model file not found: {model_path}\n"
+                f"Model file not found: ggml-{self.model_key}.bin in {self._model_dir or '(no model dir found)'}\n"
                 f"Download models with: cd whisper.cpp && ./models/download-ggml-model.cmd {self.model_key}"
             )
-        print(f"   OK WhisperCpp model [{self.model_key}] ready at {model_path}")
-        print(f"   OK Binary: {self._binary}")
+        self.logger.info("whisper.cpp model [%s] at %s", self.model_key, model_path)
+        print(f"   ✓ whisper.cpp model [{self.model_key}] ready")
+
+    def unload(self):
+        pass
+
+    def reload(self):
+        self._load_model()
+
+    def warm_up(self):
+        pass
 
     def _load_model_async(self,
                           new_model_key: str,
@@ -169,8 +170,14 @@ class WhisperCppEngine:
             self.logger.warning("Model loading already in progress, ignoring new request")
             return
 
+        def _run_and_clear():
+            try:
+                _background_loader()
+            finally:
+                self._loading_thread = None
+
         self._progress_callback = progress_callback
-        self._loading_thread = threading.Thread(target=_background_loader, daemon=True)
+        self._loading_thread = threading.Thread(target=_run_and_clear, daemon=True)
         self._loading_thread.start()
 
     def is_loading(self) -> bool:
@@ -195,46 +202,30 @@ class WhisperCppEngine:
             self._write_wav(tmp_path, audio_data)
 
             model_path = self._get_model_path()
-            cmd = [
-                self._binary,
-                "-m", model_path,
-                "-f", tmp_path,
-                "-nt",
-            ]
-            if self.language:
-                cmd.extend(["-l", self.language])
-            if self.beam_size:
-                cmd.extend(["-bs", str(self.beam_size)])
+            if not model_path:
+                self.logger.error("whisper.cpp model [%s] not found", self.model_key)
+                return None
 
-            self.logger.info("Running: %s", " ".join(cmd))
+            cmd = self._build_command(model_path, tmp_path)
+            self.logger.debug("Running: %s", " ".join(cmd))
+            audio_seconds = len(audio_data) / AudioRecorder.WHISPER_SAMPLE_RATE
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=120,
+                timeout=max(120, audio_seconds * 4),
+                creationflags=_NO_WINDOW,
             )
 
-            stderr = result.stderr.strip()
-            if stderr:
-                for line in stderr.splitlines():
-                    if "ggml_vulkan" in line.lower() or "vulkan" in line.lower() or "amd" in line.lower() or "radeon" in line.lower():
-                        self.logger.debug("Vulkan: %s", line)
+            if result.returncode != 0:
+                stderr_tail = "\n".join(result.stderr.strip().splitlines()[-20:])
+                self.logger.error("whisper-cli exited with code %s:\n%s", result.returncode, stderr_tail)
+                print(f"   ✗ whisper.cpp failed (exit code {result.returncode}), see log for details")
+                return None
 
-            transcribed = result.stdout.strip()
-
-            if transcribed and transcribed.startswith("["):
-                lines = transcribed.splitlines()
-                text_lines = []
-                for line in lines:
-                    if "]   " in line:
-                        text_lines.append(line.split("]   ", 1)[1])
-                    elif line.startswith("[") and "-->" in line:
-                        continue
-                    elif line.strip() and not line.startswith("whisper_"):
-                        text_lines.append(line)
-                transcribed = " ".join(text_lines).strip()
+            transcribed = self._clean_output(result.stdout)
 
             elapsed = time.time() - start_time
             self.logger.info(f"Transcription completed in {elapsed:.2f}s")
@@ -245,8 +236,9 @@ class WhisperCppEngine:
             self.logger.info("Transcription was empty")
             return None
 
-        except subprocess.TimeoutExpired:
-            self.logger.error("Transcription timed out")
+        except subprocess.TimeoutExpired as e:
+            self.logger.error("Transcription timed out after %.0fs", e.timeout)
+            print(f"   ✗ whisper.cpp timed out after {e.timeout:.0f}s")
             return None
         except Exception as e:
             self.logger.error("Transcription failed: %s", e)
@@ -265,17 +257,36 @@ class WhisperCppEngine:
             return
         self._load_model_async(new_model_key, progress_callback)
 
+    def _build_command(self, model_path: str, audio_path: str) -> list:
+        cmd = [
+            self._binary,
+            "-m", model_path,
+            "-f", audio_path,
+            "-nt",
+            "-l", self.language or "auto",
+        ]
+        if self.beam_size:
+            cmd.extend(["-bs", str(self.beam_size)])
+        if self.initial_prompt:
+            cmd.extend(["--prompt", self.initial_prompt])
+        return cmd
+
+    @staticmethod
+    def _clean_output(stdout: str) -> str:
+        text = " ".join(line.strip() for line in stdout.splitlines() if line.strip())
+        text = _NON_SPEECH_TAG.sub(" ", text)
+        return " ".join(text.split())
+
     @staticmethod
     def _write_wav(path: str, audio_data: np.ndarray):
         if len(audio_data.shape) > 1:
             audio_data = audio_data.ravel()
-        if audio_data.dtype == np.float32:
+        if np.issubdtype(audio_data.dtype, np.floating):
             audio_data = (audio_data * 32767).clip(-32768, 32767).astype(np.int16)
         elif audio_data.dtype != np.int16:
-            audio_data = audio_data.astype(np.int16)
-        rate = 16000
+            audio_data = audio_data.clip(-32768, 32767).astype(np.int16)
         with wave.open(path, "wb") as wf:
             wf.setnchannels(1)
             wf.setsampwidth(2)
-            wf.setframerate(rate)
+            wf.setframerate(AudioRecorder.WHISPER_SAMPLE_RATE)
             wf.writeframes(audio_data.tobytes())
