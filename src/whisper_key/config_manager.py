@@ -420,6 +420,10 @@ def validate_config(config, default_config, logger):
     if not isinstance(auto_trigger_enabled, bool):
         _set_to_default(config, default_config, 'vad.auto_trigger_enabled', auto_trigger_enabled, logger)
 
+    auto_trigger_paste = _get_config_value_at_path(config, 'vad.auto_trigger_paste')
+    if not isinstance(auto_trigger_paste, bool):
+        _set_to_default(config, default_config, 'vad.auto_trigger_paste', auto_trigger_paste, logger)
+
     auto_trigger_silence = _get_config_value_at_path(config, 'vad.auto_trigger_silence_seconds')
     silence_timeout = _get_config_value_at_path(config, 'vad.vad_silence_timeout_seconds')
     if auto_trigger_silence >= silence_timeout:

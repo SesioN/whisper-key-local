@@ -1,6 +1,7 @@
 import logging
 import os
 import signal
+import threading
 from typing import Optional, TYPE_CHECKING
 from pathlib import Path
 
@@ -279,9 +280,11 @@ class SystemTray:
             self.logger.error(f"Error selecting model {model_key}: {e}")
 
     def _set_auto_trigger(self, enabled: bool):
+        threading.Thread(target=self._apply_auto_trigger_toggle, args=(enabled,), daemon=True).start()
+
+    def _apply_auto_trigger_toggle(self, enabled: bool):
         try:
             self.state_manager.update_auto_trigger(enabled)
-            self.icon.menu = self._create_menu()
         except Exception as e:
             self.logger.error(f"Error toggling voice-activated recording: {e}")
 
@@ -326,6 +329,7 @@ class SystemTray:
         try:
             self.icon.icon = self.icons[new_state]
             self.icon.menu = self._create_menu()
+            self.icon.title = self._get_title()
         except Exception as e:
             self.logger.error(f"Failed to update tray icon: {e}")
 
@@ -335,8 +339,14 @@ class SystemTray:
 
         try:
             self.icon.menu = self._create_menu()
+            self.icon.title = self._get_title()
         except Exception as e:
             self.logger.error(f"Failed to refresh tray menu: {e}")
+
+    def _get_title(self) -> str:
+        if self.state_manager.auto_trigger_enabled:
+            return "Whisper Key - listening for speech"
+        return "Whisper Key"
     
     def start(self):
         if not self.available:
@@ -353,7 +363,7 @@ class SystemTray:
             self.icon = pystray.Icon(
                 name="whisper-key",
                 icon=idle_icon,
-                title="Whisper Key",
+                title=self._get_title(),
                 menu=menu
             )
 

@@ -267,6 +267,10 @@ class ContinuousVoiceDetector:
             self.probability_buffer.clear()
             self.hysteresis.speech_detected = False
 
+    def is_speech_active(self) -> bool:
+        with self._lock:
+            return self.speech_end_pending
+
     def get_state(self) -> VadState:
         with self._lock:
             return self.state
