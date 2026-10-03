@@ -1,4 +1,5 @@
 import ctypes
+import os
 import subprocess
 import sys
 
@@ -18,7 +19,8 @@ def main():
     process_id = int(sys.argv[1])
     command = sys.argv[2:]
     wait_for_process_exit(process_id)
-    subprocess.Popen(command, creationflags=subprocess.CREATE_NEW_CONSOLE)
+    console_flag = subprocess.DETACHED_PROCESS if os.environ.get("PYAPP") else subprocess.CREATE_NEW_CONSOLE
+    subprocess.Popen(command, creationflags=console_flag)
 
 
 if __name__ == "__main__":
