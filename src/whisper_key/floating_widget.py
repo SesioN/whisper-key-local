@@ -191,7 +191,7 @@ class FloatingWidget:
         )
         if self._hit_target.state() != "normal":
             self._hit_target.deiconify()
-        self._root.lift()
+            self._root.lift()
 
     def _initial_position(self) -> str:
         if self.save_position and self._saved_position_is_on_screen():
