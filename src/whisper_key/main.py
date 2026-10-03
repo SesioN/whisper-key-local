@@ -184,7 +184,7 @@ def run_gpu_onboarding(config_manager, whisper_config):
             "GPU acceleration available",
             [
                 ("Setup GPU with ROCm (faster_whisper)", "Install ROCm packages"),
-                ("Use whisper.cpp with Vulkan", "Auto-detects GPU, no extra install"),
+                ("Use whisper.cpp with Vulkan", "Requires a Vulkan whisper-cli build and ggml model"),
                 ("Skip for now", "Use CPU this session"),
                 ("Use CPU only", "Don't ask again"),
             ],
@@ -203,7 +203,10 @@ def run_gpu_onboarding(config_manager, whisper_config):
                                  binary_path=whisper_config.get('cpp_binary'),
                                  model_dir=whisper_config.get('cpp_model_dir'))
             except (RuntimeError, OSError) as e:
-                print(f"{BOLD_RED}whisper.cpp is not ready: {e}{RESET}\n")
+                print(f"{BOLD_RED}whisper.cpp is not ready: {e}{RESET}")
+                print("This prompt will not be shown again. To use whisper.cpp later, set whisper.engine_type: whisper_cpp (and cpp_binary/cpp_model_dir if needed) in your user config.\n")
+                config_manager.update_user_setting('onboarding', 'gpu_class', gpu_class)
+                config_manager.update_user_setting('onboarding', 'gpu', 'skipped')
                 return whisper_config
             config_manager.update_user_setting('whisper', 'engine_type', 'whisper_cpp')
             config_manager.update_user_setting('onboarding', 'gpu', 'complete')
