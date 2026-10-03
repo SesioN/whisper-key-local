@@ -40,6 +40,7 @@ class LoadingScreen:
         if self._window_thread and self._window_thread.is_alive():
             return
         self._message_queue = queue.Queue()
+        self._status_since = time.monotonic()
         self._window_thread = threading.Thread(target=self._run_window_thread, daemon=True, name="LoadingScreen")
         self._window_thread.start()
 
