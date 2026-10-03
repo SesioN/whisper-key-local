@@ -60,6 +60,7 @@ Open the system tray / menu bar icon to:
 - Toggle auto-paste vs clipboard-only
 - Change transcription model
 - Select audio device
+- Turn audio feedback sounds on or off
 
 ## 🗣️ Voice Commands
 
@@ -147,7 +148,7 @@ Delete this file and restart app to reset to defaults.
 | `logging.console.enabled` | `true` | Print to console |
 | `logging.console.level` | `WARNING` | Console verbosity |
 | **Audio Feedback** |||
-| `audio_feedback.enabled` | `true` | Play sounds on record/stop |
+| `audio_feedback.enabled` | `true` | Play sounds on record/stop (also toggled from the tray) |
 | `audio_feedback.transcription_complete_enabled` | `false` | Play sound on transcription complete |
 | `audio_feedback.ready_enabled` | `true` | Play sound when app finishes loading |
 | `audio_feedback.start_sound` | `assets/sounds/...` | Custom sound file path |
