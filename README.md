@@ -57,7 +57,7 @@ python whisper-key.py
 | Voice command mode | `Alt+Win` | `Fn+Command` |
 
 Open the system tray / menu bar icon to:
-- Toggle auto-paste vs clipboard-only
+- Toggle auto-paste and copy to clipboard independently
 - Change transcription model
 - Select audio device
 
@@ -132,12 +132,12 @@ Delete this file and restart app to reset to defaults.
 | `audio.input_device` | `default` | Device ID or "default" |
 | **Clipboard** |||
 | `clipboard.auto_paste` | `true` | false = clipboard only |
+| `clipboard.copy_to_clipboard` | `false` | Keep transcription on clipboard after auto-paste |
 | `clipboard.delivery_method` | `paste` | paste (Ctrl+V) or type (direct injection) |
 | `clipboard.paste_hotkey` | `ctrl+v` / `cmd+v` | Paste key simulation |
 | `clipboard.paste_pre_paste_delay` | `0.05` | Delay after copy, before paste hotkey (seconds) |
 | `clipboard.paste_preserve_clipboard` | `true` | Restore clipboard after paste |
 | `clipboard.paste_clipboard_restore_delay` | `0.5` | Delay before clipboard restore (seconds) |
-| `clipboard.type_also_copy_to_clipboard` | `false` | Also copy to clipboard in type mode |
 | `clipboard.type_auto_enter_delay` | `0.15` | Delay before ENTER after typing (seconds) |
 | `clipboard.type_auto_enter_delay_per_100_chars` | `0.1` | Extra ENTER delay per 100 typed chars (seconds) |
 | **Logging** |||

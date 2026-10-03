@@ -119,6 +119,7 @@ class SystemTray:
             is_model_loading = app_state.get('model_loading', False)
 
             auto_paste_enabled = self.config_manager.get_setting('clipboard', 'auto_paste')
+            copy_enabled = self.config_manager.get_setting('clipboard', 'copy_to_clipboard') or not auto_paste_enabled
             current_model = self.config_manager.get_setting('whisper', 'model')
 
             available_hosts = self.state_manager.get_available_audio_hosts()
@@ -195,8 +196,8 @@ class SystemTray:
                     pystray.Menu(*audio_device_items)
                 ),
                 pystray.Menu.SEPARATOR,
-                pystray.MenuItem("Auto-paste", lambda icon, item: self._set_transcription_mode(True), radio=True, checked=lambda item: auto_paste_enabled),
-                pystray.MenuItem("Copy to clipboard", lambda icon, item: self._set_transcription_mode(False), radio=True, checked=lambda item: not auto_paste_enabled),
+                pystray.MenuItem("Auto-paste", lambda icon, item: self._set_transcription_mode(not auto_paste_enabled), checked=lambda item: auto_paste_enabled),
+                pystray.MenuItem("Copy to clipboard", lambda icon, item: self._set_copy_to_clipboard(not copy_enabled), checked=lambda item: copy_enabled, enabled=auto_paste_enabled),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem(f"Model: {current_model.title()}", pystray.Menu(*model_sub_menu_items)),
             ]
@@ -260,6 +261,10 @@ class SystemTray:
                 auto_paste = False
 
         self.state_manager.update_transcription_mode(auto_paste)
+        self.icon.menu = self._create_menu()
+
+    def _set_copy_to_clipboard(self, enabled: bool):
+        self.state_manager.update_copy_to_clipboard(enabled)
         self.icon.menu = self._create_menu()
 
     def _select_model(self, model_key: str):
