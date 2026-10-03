@@ -245,8 +245,8 @@ class AudioRecorder:
 
         return self._process_audio_data(recorded_chunks)
     
-    def _process_audio_data(self, recorded_chunks: list) -> Optional[np.ndarray]:
-        if len(recorded_chunks) == 0:
+    def _process_audio_data(self, recorded_chunks: Optional[list]) -> Optional[np.ndarray]:
+        if not recorded_chunks:
             print("   ✗ No audio data recorded!")
             return None
 
