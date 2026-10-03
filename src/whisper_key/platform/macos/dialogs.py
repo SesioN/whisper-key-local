@@ -7,4 +7,4 @@ def choose(title: str, text: str):
 
 
 def show_error(title: str, text: str):
-    pass
+    print(f"❌ {title}: {text}")

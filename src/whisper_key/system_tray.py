@@ -234,7 +234,7 @@ class SystemTray:
                 pystray.MenuItem("Voice detection sensitivity...", self._open_vad_sensitivity_window) if vad_sensitivity_window_available else None,
             ]
 
-            menu_items += self._build_runtime_menu_items(is_model_loading)
+            menu_items += self._build_runtime_menu_items(is_model_loading or app_state.get('processing', False))
 
             menu_items.extend([
                 pystray.Menu.SEPARATOR,
@@ -249,7 +249,7 @@ class SystemTray:
             self.logger.error(f"Error in _create_menu: {e}")
             raise
 
-    def _build_runtime_menu_items(self, is_model_loading: bool) -> list:
+    def _build_runtime_menu_items(self, is_busy: bool) -> list:
         current_runtime = self.state_manager.get_current_runtime()
         current_compute_type = self.state_manager.get_current_compute_type()
 
@@ -257,7 +257,7 @@ class SystemTray:
             return lambda icon, item: self.state_manager.request_runtime_change(runtime_key)
 
         def make_compute_type_selector(compute_type):
-            return lambda icon, item: self.state_manager.request_runtime_change(current_runtime.key, compute_type)
+            return lambda icon, item: self.state_manager.request_compute_type_change(compute_type)
 
         def make_is_current_runtime(runtime_key):
             return lambda item: current_runtime is not None and runtime_key == current_runtime.key
@@ -271,7 +271,7 @@ class SystemTray:
                 make_runtime_selector(runtime.key),
                 radio=True,
                 checked=make_is_current_runtime(runtime.key),
-                enabled=runtime.selectable and not is_model_loading
+                enabled=runtime.selectable and not is_busy
             )
             for runtime in self.state_manager.get_runtimes()
         ]
@@ -283,9 +283,9 @@ class SystemTray:
                     make_compute_type_selector(compute_type),
                     radio=True,
                     checked=make_is_current_compute_type(compute_type),
-                    enabled=compute_type in current_runtime.compute_types and not is_model_loading
+                    enabled=not is_busy
                 )
-                for compute_type in COMPUTE_TYPES
+                for compute_type in COMPUTE_TYPES if compute_type in current_runtime.compute_types
             ]
             precision_label = f"Precision: {current_compute_type}"
         else:

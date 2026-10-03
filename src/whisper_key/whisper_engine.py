@@ -6,6 +6,8 @@ from typing import Optional, Callable
 import numpy as np
 from faster_whisper import WhisperModel
 
+from .runtime_options import WHISPER_CPP
+
 
 class WhisperEngine:
     ENGINE_TYPE = "faster_whisper"
@@ -77,6 +79,19 @@ class WhisperEngine:
             self.logger.error(f"Failed to load Whisper model: {e}")
             raise
     
+    def unload(self):
+        self.model = None
+
+    def close(self):
+        pass
+
+    def reload(self):
+        self._load_model()
+
+    def warm_up(self):
+        segments, _ = self.model.transcribe(np.zeros(16000, dtype=np.float32), beam_size=1, language=self.language or "en")
+        list(segments)
+
     def _load_model_async(self,
                           new_model_key: str,
                           progress_callback: Optional[Callable[[str], None]] = None):
@@ -209,7 +224,7 @@ class WhisperEngine:
 
 def create_whisper_engine(engine_type: str, whisper_config: dict, vad_manager, model_registry):
 
-    if engine_type == "whisper_cpp":
+    if engine_type == WHISPER_CPP:
         from .whisper_cpp_engine import WhisperCppEngine
         return WhisperCppEngine(
             model_key=whisper_config['model'],

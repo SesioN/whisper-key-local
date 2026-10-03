@@ -1,8 +1,10 @@
 import glob
 import hashlib
+import importlib.util
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -12,27 +14,34 @@ import time
 import urllib.request
 import wave
 import zipfile
+from collections import deque
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from importlib import metadata
 from pathlib import Path
 from typing import Callable, Optional
 
 from .onboarding import CT2_WHEEL_URLS, NVIDIA_PACKAGES, ROCM_72_PACKAGES
-from .runtime_loader import CUDA, MARKER_FILE, ROCM, VULKAN, active_ct2_runtime, get_runtime_dir, get_runtimes_dir
+from .runtime_loader import CUDA, MARKER_FILE, ROCM, VULKAN, active_ct2_runtime, get_runtime_dir
 
 ROCM_SYSTEM_SDK_VERSION = "7.2"
 ROCM_SYSTEM_DLLS = ("amdhip64_7.dll", "hipblas.dll", "rocblas.dll")
 CUDA_SYSTEM_DLLS = ("cublas64_12.dll", "cudnn64_9.dll")
+CT2_FALLBACK_VERSION = "4.7.1"
 
 WHISPER_CPP_VERSION = "v1.9.4"
 WHISPER_CPP_SOURCE_SHA256 = "873e67727d51213d3a14a6700c7415900a6645b78c4e6edad9328eea90e53572"
 WHISPER_CPP_SOURCE_URL = "https://github.com/ggml-org/whisper.cpp/archive/refs/tags/{tag}.zip"
-GGML_MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{file_name}"
+GGML_MODEL_REVISION = "5359861c739e955e79d9a303bcbc70fb988958b1"
+GGML_MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/{revision}/{file_name}"
 GGML_MODEL_NAMES = (
     "large-v3-turbo", "large-v3", "large-v2", "large-v1", "medium.en", "medium",
     "small.en", "small", "base.en", "base", "tiny.en", "tiny",
 )
-GGML_MODEL_ALIASES = {"large": "large-v3"}
+GGML_MODEL_ALIASES = {
+    "large": "large-v3", "distil-small.en": "small.en", "distil-medium.en": "medium.en",
+    "distil-large-v2": "large-v2", "distil-large-v3": "large-v3", "distil-large-v3.5": "large-v3",
+}
 GGML_MODEL_SHA256 = {
     "ggml-tiny.bin": "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
     "ggml-tiny.en.bin": "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
@@ -58,6 +67,10 @@ WINGET_PACKAGES = {
 DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 PIP_TIMEOUT_SECONDS = 3600
 BUILD_TIMEOUT_SECONDS = 3600
+WINGET_REBOOT_REQUIRED = 0x8A150109
+WINGET_SUCCESS_CODES = (0, 3010, WINGET_REBOOT_REQUIRED, WINGET_REBOOT_REQUIRED - 2**32)
+OUTPUT_TAIL_LINES = 2000
+RENAME_ATTEMPTS = 10
 NO_WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
 
 
@@ -76,7 +89,9 @@ def find_system_rocm_bin() -> Optional[str]:
     candidates = [os.environ.get(f"HIP_PATH_{ROCM_SYSTEM_SDK_VERSION.replace('.', '')}"), os.environ.get("HIP_PATH")]
     for hip_path in filter(None, candidates):
         bin_dir = os.path.join(hip_path, "bin")
-        if ROCM_SYSTEM_SDK_VERSION in hip_path and all(os.path.isfile(os.path.join(bin_dir, dll)) for dll in ROCM_SYSTEM_DLLS):
+        version_matches = any(part == ROCM_SYSTEM_SDK_VERSION or part.startswith(ROCM_SYSTEM_SDK_VERSION + ".")
+                              for part in Path(hip_path).parts)
+        if version_matches and all(os.path.isfile(os.path.join(bin_dir, dll)) for dll in ROCM_SYSTEM_DLLS):
             return bin_dir
     return None
 
@@ -116,9 +131,8 @@ def install_options(runtime_key: str) -> list:
 
 def ggml_model_file_name(model_key: str) -> str:
     key = GGML_MODEL_ALIASES.get(model_key, model_key).lower()
-    for name in GGML_MODEL_NAMES:
-        if name in key:
-            return f"ggml-{name}.bin"
+    if key in GGML_MODEL_NAMES:
+        return f"ggml-{key}.bin"
     raise RuntimeInstallError(f"No whisper.cpp (ggml) model matches '{model_key}'")
 
 
@@ -126,8 +140,18 @@ class RuntimeInstaller:
     def __init__(self, on_progress: Callable[[str], None]):
         self.on_progress = on_progress
         self.logger = logging.getLogger(__name__)
+        self._process = None
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+        process = self._process
+        if process and process.poll() is None:
+            self._kill_process_tree(process)
 
     def install(self, runtime_key: str, option: InstallOption, model_key: Optional[str] = None) -> Path:
+        if self._cancelled:
+            raise RuntimeInstallError("Installation cancelled")
         if runtime_key == active_ct2_runtime():
             raise RuntimeInstallError("This runtime is in use; switch to another runtime and restart first")
         final_dir = get_runtime_dir(runtime_key)
@@ -140,7 +164,7 @@ class RuntimeInstaller:
                 marker = self._install_whisper_cpp(staging_dir, model_key)
             else:
                 marker = self._install_ct2_runtime(runtime_key, option, staging_dir)
-            marker["installed_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+            marker["installed_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
             (staging_dir / MARKER_FILE).write_text(json.dumps(marker, indent=2), encoding="utf-8")
             self._swap_into_place(staging_dir, final_dir)
         except Exception:
@@ -155,26 +179,51 @@ class RuntimeInstaller:
         shutil.rmtree(previous_dir, ignore_errors=True)
         if final_dir.exists():
             try:
-                final_dir.rename(previous_dir)
+                self._rename_with_retry(final_dir, previous_dir)
             except OSError as e:
                 raise RuntimeInstallError(f"The existing runtime is in use and cannot be replaced: {e}")
+            self._keep_downloaded_models(previous_dir, staging_dir)
         try:
-            staging_dir.rename(final_dir)
+            self._rename_with_retry(staging_dir, final_dir)
         except OSError:
             if previous_dir.exists():
                 previous_dir.rename(final_dir)
             raise
         shutil.rmtree(previous_dir, ignore_errors=True)
 
+    def _rename_with_retry(self, source: Path, destination: Path):
+        for attempt in range(RENAME_ATTEMPTS):
+            try:
+                source.rename(destination)
+                return
+            except PermissionError:
+                if attempt == RENAME_ATTEMPTS - 1:
+                    raise
+                time.sleep(0.5 * (attempt + 1))
+
+    def _keep_downloaded_models(self, previous_dir: Path, staging_dir: Path):
+        previous_models = previous_dir / "models"
+        if not previous_models.is_dir():
+            return
+        staging_models = staging_dir / "models"
+        staging_models.mkdir(exist_ok=True)
+        for model_file in previous_models.glob("*.bin"):
+            if not (staging_models / model_file.name).exists():
+                shutil.move(str(model_file), staging_models / model_file.name)
+
     def _report(self, message: str):
         self.logger.info(f"Runtime install: {message}")
         self.on_progress(message)
 
-    def _run(self, command: list, timeout: int, env: Optional[dict] = None, cwd: Optional[str] = None) -> str:
+    def _run(self, command: list, timeout: int, env: Optional[dict] = None, cwd: Optional[str] = None,
+             success_codes: tuple = (0,)) -> str:
+        if self._cancelled:
+            raise RuntimeInstallError("Installation cancelled")
         self.logger.info(f"Running: {' '.join(command)}")
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                   encoding="utf-8", errors="replace", env=env, cwd=cwd, **NO_WINDOW)
-        output_lines = []
+        process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                   text=True, encoding="utf-8", errors="replace", env=env, cwd=cwd, **NO_WINDOW)
+        self._process = process
+        output_lines = deque(maxlen=OUTPUT_TAIL_LINES)
 
         def collect_output():
             for line in process.stdout:
@@ -191,8 +240,12 @@ class RuntimeInstaller:
         except subprocess.TimeoutExpired:
             self._kill_process_tree(process)
             raise RuntimeInstallError(f"Timed out after {timeout}s: {command[0]}")
-        reader.join(timeout=5)
-        if process.returncode != 0:
+        finally:
+            self._process = None
+        reader.join()
+        if self._cancelled:
+            raise RuntimeInstallError("Installation cancelled")
+        if process.returncode not in success_codes:
             error_lines = [line for line in output_lines if " error " in line.lower() or "error:" in line.lower()]
             tail = "\n".join((error_lines or output_lines)[-15:])
             raise RuntimeInstallError(f"Command failed ({process.returncode}): {' '.join(command[:4])}...\n{tail}")
@@ -209,6 +262,8 @@ class RuntimeInstaller:
             pass
 
     def _pip_install(self, target_dir: Path, packages: list, no_deps: bool = False):
+        if importlib.util.find_spec("pip") is None:
+            raise RuntimeInstallError("pip is not available in this Python environment; run 'python -m ensurepip' and try again")
         command = [sys.executable, "-m", "pip", "install", "--no-cache-dir", "--disable-pip-version-check",
                    "--progress-bar", "off", "--target", str(target_dir)]
         if no_deps:
@@ -227,7 +282,11 @@ class RuntimeInstaller:
                 self._report("Downloading ROCm runtime libraries (1.1 GB)...")
                 self._pip_install(staging_dir, ROCM_72_PACKAGES)
         else:
-            ct2_package = f"ctranslate2=={metadata.version('ctranslate2').split('+')[0]}"
+            try:
+                ct2_version = metadata.version("ctranslate2").split("+")[0]
+            except metadata.PackageNotFoundError:
+                ct2_version = CT2_FALLBACK_VERSION
+            ct2_package = f"ctranslate2=={ct2_version}"
             if option.use_system_sdk:
                 system_dll_dirs = find_system_cuda_dirs()
             else:
@@ -252,11 +311,16 @@ class RuntimeInstaller:
             "    os.add_dll_directory(d)\n"
             "    os.environ['PATH'] = d + os.pathsep + os.environ['PATH']\n"
             "import ctranslate2\n"
+            "print('CT2_FILE', ctranslate2.__file__)\n"
             "print('CT2_DEVICES', ctranslate2.get_cuda_device_count())\n"
+            "print('CT2_TYPES', len(ctranslate2.get_supported_compute_types('cuda')))\n"
         )
-        output = self._run([sys.executable, "-c", script], timeout=300)
-        device_line = next((line for line in output.splitlines() if line.startswith("CT2_DEVICES")), "CT2_DEVICES 0")
-        if int(device_line.split()[1]) < 1:
+        env = {name: value for name, value in os.environ.items() if name not in ("PYTHONPATH", "PYTHONHOME")}
+        output = self._run([sys.executable, "-s", "-c", script], timeout=300, env=env)
+        values = dict(line.split(" ", 1) for line in output.splitlines() if line.startswith("CT2_") and " " in line)
+        if not Path(values.get("CT2_FILE", "")).resolve().is_relative_to(runtime_dir.resolve()):
+            raise RuntimeInstallError(f"The check loaded CTranslate2 from outside the runtime: {values.get('CT2_FILE')}")
+        if int(values.get("CT2_DEVICES", 0)) < 1 or int(values.get("CT2_TYPES", 0)) < 1:
             raise RuntimeInstallError("The runtime was installed but found no usable GPU")
 
     def _install_whisper_cpp(self, staging_dir: Path, model_key: Optional[str]) -> dict:
@@ -267,12 +331,12 @@ class RuntimeInstaller:
         build_env = self._prepare_build_tools()
         tag = WHISPER_CPP_VERSION
 
-        work_dir = get_runtimes_dir() / ".build"
+        work_dir = Path(tempfile.gettempdir()) / "wkb"
         shutil.rmtree(work_dir, ignore_errors=True)
         work_dir.mkdir(parents=True)
         try:
             source_dir = self._download_whisper_cpp_source(tag, work_dir)
-            build_dir = work_dir / "build"
+            build_dir = work_dir / "b"
             self._report(f"Configuring whisper.cpp {tag} with Vulkan...")
             self._run([build_env["CMAKE"], "-S", str(source_dir), "-B", str(build_dir), "-DGGML_VULKAN=ON",
                        "-DWHISPER_BUILD_TESTS=OFF", "-DWHISPER_BUILD_SERVER=ON"], BUILD_TIMEOUT_SECONDS, env=build_env)
@@ -285,8 +349,9 @@ class RuntimeInstaller:
             built_files = glob.glob(str(build_dir / "bin" / "**" / "*.dll"), recursive=True)
             for executable in ("whisper-cli.exe", "whisper-server.exe"):
                 built_files += glob.glob(str(build_dir / "bin" / "**" / executable), recursive=True)
-            if not any(name.endswith("whisper-cli.exe") for name in built_files):
-                raise RuntimeInstallError("The whisper.cpp build did not produce whisper-cli.exe")
+            for executable in ("whisper-cli.exe", "whisper-server.exe"):
+                if not any(name.endswith(executable) for name in built_files):
+                    raise RuntimeInstallError(f"The whisper.cpp build did not produce {executable}")
             for built_file in built_files:
                 shutil.copy2(built_file, bin_dir)
         finally:
@@ -294,7 +359,7 @@ class RuntimeInstaller:
 
         model_dir = staging_dir / "models"
         model_dir.mkdir()
-        self._download_file(GGML_MODEL_URL.format(file_name=model_file_name), model_dir / model_file_name,
+        self._download_file(GGML_MODEL_URL.format(revision=GGML_MODEL_REVISION, file_name=model_file_name), model_dir / model_file_name,
                             GGML_MODEL_SHA256[model_file_name])
 
         binary = bin_dir / "whisper-cli.exe"
@@ -334,19 +399,24 @@ class RuntimeInstaller:
 
     def _find_vulkan_sdk(self) -> Optional[str]:
         candidates = [os.environ.get("VULKAN_SDK"), self._machine_environment_variable("VULKAN_SDK")]
-        candidates += sorted(glob.glob(r"C:\VulkanSDK\*"), reverse=True)
+        candidates += sorted(glob.glob(r"C:\VulkanSDK\*"), key=self._version_key, reverse=True)
         for candidate in filter(None, candidates):
             if os.path.isfile(os.path.join(candidate, "Bin", "glslc.exe")):
                 return candidate
         return None
 
+    @staticmethod
+    def _version_key(path: str) -> tuple:
+        return tuple(int(part) for part in re.findall(r"\d+", os.path.basename(path)))
+
     def _machine_environment_variable(self, name: str) -> Optional[str]:
         try:
             import winreg
-            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment")
-            return winreg.QueryValueEx(key, name)[0]
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment") as key:
+                value, value_type = winreg.QueryValueEx(key, name)
         except OSError:
             return None
+        return winreg.ExpandEnvironmentStrings(value) if value_type == winreg.REG_EXPAND_SZ else value
 
     def _has_cpp_build_tools(self) -> bool:
         vswhere = os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
@@ -359,16 +429,20 @@ class RuntimeInstaller:
 
     def _winget_install(self, tool: str):
         package_id, *extra_arguments = WINGET_PACKAGES[tool]
+        winget = shutil.which("winget")
+        if not winget:
+            raise RuntimeInstallError(f"winget is not available; install {package_id} manually and try again")
         self._report(f"Installing {package_id} (approve the Windows prompt if one appears)...")
-        self._run(["winget", "install", "--id", package_id, "-e", "--silent", "--accept-package-agreements",
-                   "--accept-source-agreements", *extra_arguments], BUILD_TIMEOUT_SECONDS)
+        self._run([winget, "install", "--id", package_id, "-e", "--source", "winget", "--silent",
+                   "--accept-package-agreements", "--accept-source-agreements", *extra_arguments],
+                  BUILD_TIMEOUT_SECONDS, success_codes=WINGET_SUCCESS_CODES)
 
     def _download_whisper_cpp_source(self, tag: str, work_dir: Path) -> Path:
         archive = work_dir / "whisper.cpp.zip"
         self._download_file(WHISPER_CPP_SOURCE_URL.format(tag=tag), archive, WHISPER_CPP_SOURCE_SHA256)
         with zipfile.ZipFile(archive) as source_zip:
-            source_zip.extractall(work_dir / "src")
-        top_level_dirs = [path for path in (work_dir / "src").iterdir() if path.is_dir()]
+            source_zip.extractall(work_dir / "s")
+        top_level_dirs = [path for path in (work_dir / "s").iterdir() if path.is_dir()]
         if len(top_level_dirs) != 1:
             raise RuntimeInstallError("Unexpected whisper.cpp source archive layout")
         return top_level_dirs[0]
@@ -403,5 +477,5 @@ class RuntimeInstaller:
                 wav_file.setframerate(16000)
                 wav_file.writeframes(b"\x00\x00" * 16000)
             output = self._run([str(binary), "-m", str(model_path), "-f", str(silent_wav), "-nt"], timeout=300)
-        if "ggml_vulkan" not in output.lower():
+        if not re.search(r"ggml_vulkan: Found [1-9]\d* Vulkan devices?", output):
             raise RuntimeInstallError("whisper.cpp was built but did not find a Vulkan GPU")
