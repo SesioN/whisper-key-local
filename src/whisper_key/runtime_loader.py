@@ -16,6 +16,7 @@ MARKER_FILE = "runtime.json"
 BUNDLED_DLL_GLOBS = ("_rocm_sdk_*/bin", "nvidia/*/bin")
 
 _active_ct2_runtime = CPU
+_activation_warning = None
 
 
 def get_runtimes_dir() -> Path:
@@ -89,19 +90,19 @@ def read_selected_runtime() -> str:
 
 
 def activate_selected_runtime():
-    global _active_ct2_runtime
+    global _active_ct2_runtime, _activation_warning
     runtime = read_selected_runtime()
     if runtime not in CT2_RUNTIMES:
         return
 
     marker = read_runtime_marker(runtime)
     if marker is None:
-        print(f"⚠ Runtime [{runtime}] is selected but not installed, using CPU")
+        _activation_warning = (runtime, f"Runtime [{runtime}] is selected but not installed, using CPU")
         return
 
     missing_system_dirs = [directory for directory in marker.get("system_dll_dirs", []) if not os.path.isdir(directory)]
     if missing_system_dirs:
-        print(f"⚠ Runtime [{runtime}] needs {missing_system_dirs[0]}, which no longer exists. Using CPU")
+        _activation_warning = (None, f"Runtime [{runtime}] needs {missing_system_dirs[0]}, which no longer exists. Using CPU")
         return
 
     runtime_dir = get_runtime_dir(runtime)
@@ -112,3 +113,14 @@ def activate_selected_runtime():
 
 def active_ct2_runtime() -> str:
     return _active_ct2_runtime
+
+
+def runtime_activation_warning():
+    if _activation_warning is None:
+        return None
+    runtime, message = _activation_warning
+    if runtime:
+        from .platform import gpu
+        if gpu.detect_ct2_variant() == runtime:
+            return None
+    return message

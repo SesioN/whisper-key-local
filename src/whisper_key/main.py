@@ -4,7 +4,7 @@ from .utils import setup_portaudio_path, setup_nvidia_dll_path
 setup_portaudio_path()
 setup_nvidia_dll_path()
 
-from .runtime_loader import activate_selected_runtime
+from .runtime_loader import ROCM, VULKAN, activate_selected_runtime, runtime_activation_warning
 activate_selected_runtime()
 
 import argparse
@@ -172,14 +172,13 @@ def setup_system_tray(tray_config, config_manager, state_manager, model_registry
 
 def run_gpu_onboarding(config_manager, whisper_config):
     gpu_status = config_manager.config.get('onboarding', {}).get('gpu', 'pending')
-    if gpu_status != 'pending' or whisper_config.get('engine_type') == 'whisper_cpp':
-        return whisper_config
+    if gpu_status != 'pending' or whisper_config.get('runtime') == VULKAN:
+        return whisper_config, None
 
     gpu_class, gpu_name, ct2_works = detect_hardware(whisper_config['device'])
 
     if gpu_class and gpu_class.startswith('amd') and not ct2_works:
-        from .terminal_ui import BOLD_GREEN, BOLD_RED, RESET, prompt_choice
-        from .onboarding import install_gpu_runtime
+        from .terminal_ui import BOLD_GREEN, RESET, prompt_choice
 
         INSTALL_ROCM = 1
         USE_WHISPER_CPP = 2
@@ -188,8 +187,8 @@ def run_gpu_onboarding(config_manager, whisper_config):
         choice = prompt_choice(
             "GPU acceleration available",
             [
-                ("Setup GPU with ROCm (faster_whisper)", "Install ROCm packages"),
-                ("Use whisper.cpp with Vulkan", "Requires a Vulkan whisper-cli build and ggml model"),
+                ("Use AMD ROCm (faster_whisper)", "Installs the ROCm runtime after startup"),
+                ("Use whisper.cpp with Vulkan", "Installs the Vulkan runtime after startup"),
                 ("Skip for now", "Use CPU this session"),
                 ("Use CPU only", "Don't ask again"),
             ],
@@ -197,28 +196,16 @@ def run_gpu_onboarding(config_manager, whisper_config):
         )
         print()
 
-        if choice == INSTALL_ROCM:
+        if choice == INSTALL_ROCM and gpu_class == 'amd_rdna1':
+            from .onboarding import install_gpu_runtime
             install_gpu_runtime(gpu_class, gpu_name, config_manager)
-            return config_manager.get_whisper_config()
+            return config_manager.get_whisper_config(), None
 
-        if choice == USE_WHISPER_CPP:
-            from .whisper_cpp_engine import WhisperCppEngine
-            try:
-                WhisperCppEngine(model_key=whisper_config['model'],
-                                 binary_path=whisper_config.get('cpp_binary'),
-                                 model_dir=whisper_config.get('cpp_model_dir'))
-            except (RuntimeError, OSError) as e:
-                print(f"{BOLD_RED}whisper.cpp is not ready: {e}{RESET}")
-                print("This prompt will not be shown again. To use whisper.cpp later, set whisper.engine_type: whisper_cpp (and cpp_binary/cpp_model_dir if needed) in your user config.\n")
-                config_manager.update_user_setting('onboarding', 'gpu_class', gpu_class)
-                config_manager.update_user_setting('onboarding', 'gpu', 'skipped')
-                return whisper_config
-            config_manager.update_user_setting('whisper', 'engine_type', 'whisper_cpp')
-            config_manager.update_user_setting('whisper', 'runtime', 'vulkan')
-            config_manager.update_user_setting('onboarding', 'gpu', 'complete')
+        if choice in (INSTALL_ROCM, USE_WHISPER_CPP):
             config_manager.update_user_setting('onboarding', 'gpu_class', gpu_class)
-            print(f"{BOLD_GREEN}whisper.cpp engine selected. Vulkan GPU detection is automatic.{RESET}\n")
-            return config_manager.get_whisper_config()
+            config_manager.update_user_setting('onboarding', 'gpu', 'complete')
+            print(f"{BOLD_GREEN}The runtime is set up after startup. You can change it later in the tray Runtime menu.{RESET}\n")
+            return whisper_config, ROCM if choice == INSTALL_ROCM else VULKAN
 
         if choice == CPU_ONLY:
             config_manager.update_user_setting('whisper', 'device', 'cpu')
@@ -227,10 +214,10 @@ def run_gpu_onboarding(config_manager, whisper_config):
             config_manager.update_user_setting('onboarding', 'gpu_class', gpu_class)
             config_manager.update_user_setting('onboarding', 'gpu', 'skipped')
 
-        return whisper_config
+        return whisper_config, None
 
     check_gpu(gpu_class, gpu_name, ct2_works, whisper_config['device'], config_manager)
-    return config_manager.get_whisper_config()
+    return config_manager.get_whisper_config(), None
 
 
 def _handle_whisper_cpp_failure(error, whisper_config, vad_manager, model_registry):
@@ -324,7 +311,12 @@ def main():
         log_config = config_manager.get_logging_config()
         log_transcriptions = log_config.get('log_transcriptions', False)
 
-        whisper_config = run_gpu_onboarding(config_manager, whisper_config)
+        activation_warning = runtime_activation_warning()
+        if activation_warning:
+            logger.warning(activation_warning)
+            print(f"⚠ {activation_warning}")
+
+        whisper_config, onboarding_runtime = run_gpu_onboarding(config_manager, whisper_config)
 
         model_registry = ModelRegistry(
             whisper_models_config=whisper_config.get('models', {}),
@@ -369,11 +361,14 @@ def main():
                 clipboard_manager.update_auto_paste(False)
 
         print("🚀 Whisper Key ready!")
-        audio_feedback.play_ready_sound()
+        state_manager.play_ready_sound()
         config_manager.print_startup_hotkey_instructions()
         print("   [CTRL+C] to quit", flush=True)
 
         system_tray.apply_console_settings()
+
+        if onboarding_runtime and not state_manager.request_runtime_change(onboarding_runtime):
+            print("⚠ The selected GPU runtime is not available on this system. Choose another one in the tray Runtime menu.")
 
         app.run_event_loop(shutdown_event)
             
