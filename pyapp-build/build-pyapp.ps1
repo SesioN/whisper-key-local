@@ -150,71 +150,71 @@ Write-Host "Starting pyapp build for $AppName v$AppVersion..." -ForegroundColor 
 Write-Host "PyApp source: $PyAppSourcePath" -ForegroundColor Gray
 Write-Host "Distribution: $DistPath" -ForegroundColor Gray
 
-if ($FromSource) {
-    $env:PYAPP_PROJECT_PATH = Build-SourceWheel $ProjectRoot $AppVersion $DistPath
-    Write-Host "Embedding $($env:PYAPP_PROJECT_PATH)" -ForegroundColor Gray
-    Remove-Item Env:\PYAPP_PROJECT_NAME -ErrorAction SilentlyContinue
-    Remove-Item Env:\PYAPP_PROJECT_VERSION -ErrorAction SilentlyContinue
-} else {
-    Remove-Item Env:\PYAPP_PROJECT_PATH -ErrorAction SilentlyContinue
-    $env:PYAPP_PROJECT_NAME = "whisper-key-local"
-    $env:PYAPP_PROJECT_VERSION = $AppVersion
-}
-$env:PYAPP_PYTHON_VERSION = "3.12"
-$env:PYAPP_EXEC_CODE = 'from whisper_key.main import main; main()'
-$env:PYAPP_SELF_COMMAND = "self"
-$env:PYAPP_PASS_LOCATION = "true"
+$PyAppVars = "PYAPP_PROJECT_NAME", "PYAPP_PROJECT_VERSION", "PYAPP_PROJECT_PATH", "PYAPP_PYTHON_VERSION", "PYAPP_EXEC_CODE", "PYAPP_SELF_COMMAND", "PYAPP_PASS_LOCATION", "PYAPP_IS_GUI"
+$SavedEnv = @{}
+foreach ($Var in $PyAppVars) { $SavedEnv[$Var] = [Environment]::GetEnvironmentVariable($Var) }
+$PushedLocation = $false
 
-if ($Clean) {
-    $TargetDir = Join-Path $PyAppSourcePath "target"
-    if (Test-Path $TargetDir) {
-        Write-Host "Cleaning previous Rust build..." -ForegroundColor Yellow
-        Remove-Item -Recurse -Force $TargetDir
+try {
+    if ($FromSource) {
+        $env:PYAPP_PROJECT_PATH = Build-SourceWheel $ProjectRoot $AppVersion $DistPath
+        Write-Host "Embedding $($env:PYAPP_PROJECT_PATH)" -ForegroundColor Gray
+        Remove-Item Env:\PYAPP_PROJECT_NAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\PYAPP_PROJECT_VERSION -ErrorAction SilentlyContinue
+    } else {
+        Remove-Item Env:\PYAPP_PROJECT_PATH -ErrorAction SilentlyContinue
+        $env:PYAPP_PROJECT_NAME = "whisper-key-local"
+        $env:PYAPP_PROJECT_VERSION = $AppVersion
     }
-}
+    $env:PYAPP_PYTHON_VERSION = "3.12"
+    $env:PYAPP_EXEC_CODE = 'from whisper_key.main import main; main()'
+    $env:PYAPP_SELF_COMMAND = "self"
+    $env:PYAPP_PASS_LOCATION = "true"
 
-if (-not (Test-Path $DistPath)) {
-    New-Item -ItemType Directory -Path $DistPath -Force | Out-Null
-}
-
-$Builds = @(
-    @{ Name = "$AppName";      IsGui = $false; Label = "console" },
-    @{ Name = "$AppName-hideable"; IsGui = $true;  Label = "hideable (GUI subsystem)" }
-)
-
-Push-Location $PyAppSourcePath
-
-foreach ($Build in $Builds) {
-    Write-Host "`nBuilding $($Build.Label): $($Build.Name).exe..." -ForegroundColor Yellow
-
-    if ($Build.IsGui) { $env:PYAPP_IS_GUI = "true" }
-    else { Remove-Item Env:\PYAPP_IS_GUI -ErrorAction SilentlyContinue }
-
-    # pyapp's build.rs declares no rerun-if-env-changed, so force it to pick up the current PYAPP_* variables
-    (Get-Item (Join-Path $PyAppSourcePath "build.rs")).LastWriteTime = Get-Date
-
-    cargo build --release
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Build failed for $($Build.Name)!" -ForegroundColor Red
-        exit 1
+    if ($Clean) {
+        $TargetDir = Join-Path $PyAppSourcePath "target"
+        if (Test-Path $TargetDir) {
+            Write-Host "Cleaning previous Rust build..." -ForegroundColor Yellow
+            Remove-Item -Recurse -Force $TargetDir
+        }
     }
 
-    $SourceExe = Join-Path $PyAppSourcePath "target\release\pyapp.exe"
-    $DestExe = Join-Path $DistPath "$($Build.Name).exe"
-    Copy-Item $SourceExe $DestExe -Force
+    if (-not (Test-Path $DistPath)) {
+        New-Item -ItemType Directory -Path $DistPath -Force | Out-Null
+    }
 
-    $ExeSize = (Get-Item $DestExe).Length / 1MB
-    Write-Host ("  -> $DestExe ({0:N2} MB)" -f $ExeSize) -ForegroundColor Green
+    $Builds = @(
+        @{ Name = "$AppName";      IsGui = $false; Label = "console" },
+        @{ Name = "$AppName-hideable"; IsGui = $true;  Label = "hideable (GUI subsystem)" }
+    )
+
+    Push-Location $PyAppSourcePath
+    $PushedLocation = $true
+
+    foreach ($Build in $Builds) {
+        Write-Host "`nBuilding $($Build.Label): $($Build.Name).exe..." -ForegroundColor Yellow
+
+        if ($Build.IsGui) { $env:PYAPP_IS_GUI = "true" }
+        else { Remove-Item Env:\PYAPP_IS_GUI -ErrorAction SilentlyContinue }
+
+        (Get-Item (Join-Path $PyAppSourcePath "build.rs")).LastWriteTime = Get-Date
+
+        cargo build --release
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Build failed for $($Build.Name)!" -ForegroundColor Red
+            exit 1
+        }
+
+        $SourceExe = Join-Path $PyAppSourcePath "target\release\pyapp.exe"
+        $DestExe = Join-Path $DistPath "$($Build.Name).exe"
+        Copy-Item $SourceExe $DestExe -Force
+
+        $ExeSize = (Get-Item $DestExe).Length / 1MB
+        Write-Host ("  -> $DestExe ({0:N2} MB)" -f $ExeSize) -ForegroundColor Green
+    }
+
+    Write-Host "`nBuild complete!" -ForegroundColor Green
+} finally {
+    if ($PushedLocation) { Pop-Location }
+    foreach ($Var in $PyAppVars) { [Environment]::SetEnvironmentVariable($Var, $SavedEnv[$Var]) }
 }
-
-Pop-Location
-Write-Host "`nBuild complete!" -ForegroundColor Green
-
-Remove-Item Env:\PYAPP_PROJECT_NAME -ErrorAction SilentlyContinue
-Remove-Item Env:\PYAPP_PROJECT_VERSION -ErrorAction SilentlyContinue
-Remove-Item Env:\PYAPP_PROJECT_PATH -ErrorAction SilentlyContinue
-Remove-Item Env:\PYAPP_PYTHON_VERSION -ErrorAction SilentlyContinue
-Remove-Item Env:\PYAPP_EXEC_CODE -ErrorAction SilentlyContinue
-Remove-Item Env:\PYAPP_SELF_COMMAND -ErrorAction SilentlyContinue
-Remove-Item Env:\PYAPP_PASS_LOCATION -ErrorAction SilentlyContinue
-Remove-Item Env:\PYAPP_IS_GUI -ErrorAction SilentlyContinue
