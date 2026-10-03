@@ -25,41 +25,66 @@ function Get-ProjectVersion {
 function Build-SourceWheel {
     param($ProjectRoot, $AppVersion, $DistPath)
 
-    $Commit = (git -C $ProjectRoot rev-parse --short HEAD).Trim()
+    foreach ($Tool in "git", "python") {
+        if (-not (Get-Command $Tool -ErrorAction SilentlyContinue)) {
+            Write-Host "Error: -FromSource needs $Tool on PATH" -ForegroundColor Red
+            exit 1
+        }
+    }
+
+    $Commit = git -C $ProjectRoot rev-parse --short HEAD
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Error: -FromSource needs a git checkout" -ForegroundColor Red
         exit 1
     }
+    $Commit = $Commit.Trim()
     if (git -C $ProjectRoot status --porcelain) {
         Write-Host "Warning: uncommitted changes are not included (building commit $Commit)" -ForegroundColor Yellow
     }
 
     $WheelVersion = "$AppVersion+g$Commit"
-    $StagingDir = Join-Path ([System.IO.Path]::GetTempPath()) "whisper-key-wheel-$Commit"
+    $StagingDir = Join-Path ([System.IO.Path]::GetTempPath()) "whisper-key-wheel-$([guid]::NewGuid())"
     $WheelDir = Join-Path $DistPath "wheel"
-    if (Test-Path $StagingDir) { Remove-Item -Recurse -Force $StagingDir }
     if (Test-Path $WheelDir) { Remove-Item -Recurse -Force $WheelDir }
     New-Item -ItemType Directory -Path $StagingDir, $WheelDir -Force | Out-Null
 
-    $Archive = Join-Path $StagingDir "source.zip"
-    git -C $ProjectRoot archive --format=zip --output=$Archive HEAD
-    Expand-Archive -Path $Archive -DestinationPath $StagingDir
-    Remove-Item $Archive
+    try {
+        $Archive = Join-Path $StagingDir "source.zip"
+        git -C $ProjectRoot archive --format=zip --output=$Archive HEAD
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Error: git archive failed" -ForegroundColor Red
+            exit 1
+        }
+        Expand-Archive -Path $Archive -DestinationPath $StagingDir -ErrorAction Stop
+        Remove-Item $Archive
 
-    $PyProjectFile = Join-Path $StagingDir "pyproject.toml"
-    $PyProject = Get-Content $PyProjectFile -Raw
-    $PyProject = $PyProject -replace "(?m)^version\s*=\s*`"[^`"]+`"", "version = `"$WheelVersion`""
-    Set-Content $PyProjectFile $PyProject -NoNewline
+        $PyProjectFile = Join-Path $StagingDir "pyproject.toml"
+        $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        $PyProject = [System.IO.File]::ReadAllText($PyProjectFile, $Utf8NoBom)
+        $VersionPattern = [regex]'(?m)^version\s*=\s*"[^"]+"'
+        $PatchedPyProject = $VersionPattern.Replace($PyProject, "version = `"$WheelVersion`"", 1)
+        if ($PatchedPyProject -eq $PyProject) {
+            Write-Host "Error: Could not set wheel version in pyproject.toml" -ForegroundColor Red
+            exit 1
+        }
+        [System.IO.File]::WriteAllText($PyProjectFile, $PatchedPyProject, $Utf8NoBom)
 
-    Write-Host "Building wheel $WheelVersion from commit $Commit..." -ForegroundColor Yellow
-    python -m pip wheel $StagingDir --no-deps --wheel-dir $WheelDir --quiet | Out-Host
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Wheel build failed!" -ForegroundColor Red
+        Write-Host "Building wheel $WheelVersion from commit $Commit..." -ForegroundColor Yellow
+        python -m pip wheel $StagingDir --no-deps --wheel-dir $WheelDir --quiet | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Wheel build failed!" -ForegroundColor Red
+            exit 1
+        }
+    } finally {
+        Remove-Item -Recurse -Force $StagingDir -ErrorAction SilentlyContinue
+    }
+
+    $Wheel = Get-ChildItem $WheelDir -Filter "*+g$Commit-*.whl" | Select-Object -First 1
+    if (-not $Wheel) {
+        Write-Host "Error: No wheel for $WheelVersion found in $WheelDir" -ForegroundColor Red
         exit 1
     }
-    Remove-Item -Recurse -Force $StagingDir
-
-    return (Get-ChildItem $WheelDir -Filter "*.whl" | Select-Object -First 1).FullName
+    return $Wheel.FullName
 }
 
 function Patch-IconSupport {
@@ -164,6 +189,9 @@ foreach ($Build in $Builds) {
 
     if ($Build.IsGui) { $env:PYAPP_IS_GUI = "true" }
     else { Remove-Item Env:\PYAPP_IS_GUI -ErrorAction SilentlyContinue }
+
+    # pyapp's build.rs declares no rerun-if-env-changed, so force it to pick up the current PYAPP_* variables
+    (Get-Item (Join-Path $PyAppSourcePath "build.rs")).LastWriteTime = Get-Date
 
     cargo build --release
     if ($LASTEXITCODE -ne 0) {

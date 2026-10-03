@@ -1,7 +1,7 @@
 ---
 name: build-pyapp-exe
 description: "Build pyapp executable"
-argument-hint: "[-Clean] [-Test]"
+argument-hint: "[-Clean] [-FromSource]"
 ---
 [FLAGS]=$ARGUMENTS
 
