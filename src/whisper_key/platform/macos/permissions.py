@@ -62,5 +62,7 @@ def handle_missing_permission(config_manager) -> bool:
         print()
         return True
     else:
+        if choice == -1:
+            logger.error("Accessibility permission missing and no terminal to ask; exiting")
         os.kill(os.getpid(), signal.SIGINT)
         return False
