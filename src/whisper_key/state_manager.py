@@ -150,7 +150,7 @@ class StateManager:
 
     def handle_vad_sensitivity_window_closed(self):
         self._vad_sensitivity_window_open = False
-        self._apply_auto_trigger()
+        threading.Thread(target=self._apply_auto_trigger, daemon=True).start()
 
     def handle_vad_probability(self, probability: float):
         if self._vad_sensitivity_window_open:
