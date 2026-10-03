@@ -204,7 +204,7 @@ def run_gpu_onboarding(config_manager, whisper_config):
                                  model_dir=whisper_config.get('cpp_model_dir'))
             except (RuntimeError, OSError) as e:
                 print(f"{BOLD_RED}whisper.cpp is not ready: {e}{RESET}")
-                print("Set whisper.engine_type to whisper_cpp in your config once it is installed.\n")
+                print("This prompt will not be shown again. To use whisper.cpp later, set whisper.engine_type: whisper_cpp (and cpp_binary/cpp_model_dir if needed) in your user config.\n")
                 config_manager.update_user_setting('onboarding', 'gpu_class', gpu_class)
                 config_manager.update_user_setting('onboarding', 'gpu', 'skipped')
                 return whisper_config
