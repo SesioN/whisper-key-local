@@ -418,6 +418,10 @@ def validate_config(config, default_config, logger):
     _validate_numeric_range(config, default_config, 'vad.vad_min_speech_duration', logger, min_val=0.001, max_val=5.0)
     _validate_numeric_range(config, default_config, 'vad.vad_silence_timeout_seconds', logger, min_val=1.0, max_val=36000.0)
 
+    engine_type = _get_config_value_at_path(config, 'whisper.engine_type')
+    if engine_type not in ('faster_whisper', 'whisper_cpp'):
+        _set_to_default(config, default_config, 'whisper.engine_type', engine_type, logger)
+
     recording_mode = _get_config_value_at_path(config, 'hotkey.recording_mode')
     if recording_mode not in ('toggle', 'push_to_talk'):
         _set_to_default(config, default_config, 'hotkey.recording_mode', recording_mode, logger)
