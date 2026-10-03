@@ -73,12 +73,14 @@ def detect_runtimes(whisper_cpp_binary: Optional[str]) -> list:
     gpu_class, gpu_name = gpu.detect_gpu_class()
     cpu_state = INSTALLED if cpu_types else UNSUPPORTED
 
-    return [
-        Runtime(CPU, "CPU", FASTER_WHISPER, "cpu", cpu_state, "CTranslate2 not available", cpu_types),
-        _gpu_runtime(CUDA, loaded_ct2_variant, gpu_device_count, gpu_types, gpu_class),
-        _gpu_runtime(ROCM, loaded_ct2_variant, gpu_device_count, gpu_types, gpu_class),
-        _whisper_cpp_runtime(whisper_cpp_binary, gpu_class or gpu_name),
-    ]
+    runtimes = [Runtime(CPU, "CPU", FASTER_WHISPER, "cpu", cpu_state, "CTranslate2 not available", cpu_types)]
+    if sys.platform != "darwin":
+        runtimes += [
+            _gpu_runtime(CUDA, loaded_ct2_variant, gpu_device_count, gpu_types, gpu_class),
+            _gpu_runtime(ROCM, loaded_ct2_variant, gpu_device_count, gpu_types, gpu_class),
+        ]
+    runtimes.append(_whisper_cpp_runtime(whisper_cpp_binary, gpu_class or gpu_name))
+    return runtimes
 
 
 def _install_size(runtime_key: str) -> str:
@@ -91,6 +93,8 @@ def _gpu_runtime(key: str, loaded_ct2_variant: str, gpu_device_count: int, gpu_t
     label = GPU_RUNTIME_LABELS[key]
     if loaded_ct2_variant == key and gpu_device_count > 0 and gpu_types:
         return Runtime(key, label, FASTER_WHISPER, "cuda", INSTALLED, compute_types=gpu_types)
+    if loaded_ct2_variant == key:
+        return Runtime(key, label, FASTER_WHISPER, "cuda", UNSUPPORTED, "no usable GPU found")
     if is_runtime_installed(key) and active_ct2_runtime() != key:
         return Runtime(key, label, FASTER_WHISPER, "cuda", INSTALLED, needs_restart=True)
     if gpu_class in GPU_RUNTIME_HARDWARE[key] and sys.platform == "win32":
@@ -156,4 +160,4 @@ def choose_compute_type(runtime: Runtime, requested: Optional[str]) -> Optional[
     for compute_type in PREFERRED_COMPUTE_TYPES.get(runtime.device, ()):
         if compute_type in runtime.compute_types:
             return compute_type
-    return sorted(runtime.compute_types)[0]
+    return next(compute_type for compute_type in COMPUTE_TYPES + tuple(sorted(runtime.compute_types)) if compute_type in runtime.compute_types)

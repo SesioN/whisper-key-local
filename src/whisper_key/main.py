@@ -172,7 +172,7 @@ def setup_system_tray(tray_config, config_manager, state_manager, model_registry
 
 def run_gpu_onboarding(config_manager, whisper_config):
     gpu_status = config_manager.config.get('onboarding', {}).get('gpu', 'pending')
-    if gpu_status != 'pending':
+    if gpu_status != 'pending' or whisper_config.get('engine_type') == 'whisper_cpp':
         return whisper_config
 
     gpu_class, gpu_name, ct2_works = detect_hardware(whisper_config['device'])
@@ -354,6 +354,7 @@ def main():
         
         hotkey_listener = setup_hotkey_listener(hotkey_config, state_manager, voice_commands_config['enabled'])
 
+        state_manager.get_runtimes()
         system_tray.start()
         terminal_title.start()
 

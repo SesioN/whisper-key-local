@@ -18,8 +18,12 @@ def _get_job():
 
 
 def tie_to_current_process(process):
+    process_handle = None
     try:
         process_handle = win32api.OpenProcess(win32con.PROCESS_SET_QUOTA | win32con.PROCESS_TERMINATE, False, process.pid)
         win32job.AssignProcessToJobObject(_get_job(), process_handle)
     except Exception as e:
         logging.getLogger(__name__).warning(f"Could not tie child process {process.pid} to the app: {e}")
+    finally:
+        if process_handle:
+            win32api.CloseHandle(process_handle)
