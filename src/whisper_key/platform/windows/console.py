@@ -84,10 +84,14 @@ def _configure_console():
 
 
 def _redirect_missing_streams_to_devnull():
-    if sys.stdout is None:
-        sys.stdout = open(os.devnull, "w", encoding="utf-8")
-    if sys.stderr is None:
-        sys.stderr = open(os.devnull, "w", encoding="utf-8")
+    if sys.stdin is None:
+        sys.stdin = open(os.devnull, "r")
+    if sys.stdout is None or sys.stderr is None:
+        devnull = open(os.devnull, "w", encoding="utf-8", errors="replace")
+        if sys.stdout is None:
+            sys.stdout = devnull
+        if sys.stderr is None:
+            sys.stderr = devnull
 
 
 def setup():

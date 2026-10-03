@@ -16,7 +16,10 @@ def setup():
 
 def has_interactive_terminal():
     import sys
-    return sys.stdin is not None and sys.stdin.isatty()
+    try:
+        return sys.stdin is not None and sys.stdin.isatty()
+    except ValueError:
+        return False
 
 def getch():
     import tty
