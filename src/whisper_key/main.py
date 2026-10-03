@@ -119,7 +119,7 @@ def setup_streaming(streaming_config, model_registry):
         model_registry=model_registry
     )
 
-def setup_whisper_engine(whisper_config, vad_manager, model_registry, config_manager=None):
+def setup_whisper_engine(whisper_config, vad_manager, model_registry, config_manager=None, loading_screen=None):
     whisper_config = apply_runtime_selection(whisper_config)
     engine_type = whisper_config['engine_type']
     try:
@@ -133,6 +133,8 @@ def setup_whisper_engine(whisper_config, vad_manager, model_registry, config_man
         if engine_type == 'whisper_cpp':
             return _handle_whisper_cpp_failure(e, whisper_config, vad_manager, model_registry)
         if isinstance(e, RuntimeError) and whisper_config.get('device') == 'cuda' and config_manager:
+            if loading_screen:
+                loading_screen.close()
             return _handle_gpu_failure(e, whisper_config, vad_manager, model_registry, config_manager)
         raise
 
@@ -179,6 +181,7 @@ def setup_voice_commands(voice_commands_config, clipboard_manager, log_transcrip
     )
 
 def setup_loading_screen(loading_screen_config):
+    # Windows only: Tk on macOS must run on the main thread, which the app event loop owns
     if not IS_WINDOWS or not loading_screen_config.get('enabled', False):
         return None
     try:
@@ -378,7 +381,7 @@ def main():
         vad_manager = setup_vad(vad_config)
         streaming_manager = setup_streaming(streaming_config, model_registry)
         loading_screen.set_status("Loading Whisper model...")
-        whisper_engine = setup_whisper_engine(whisper_config, vad_manager, model_registry, config_manager)
+        whisper_engine = setup_whisper_engine(whisper_config, vad_manager, model_registry, config_manager, loading_screen)
         loading_screen.set_status("Loading streaming model...")
         streaming_manager.initialize()
         loading_screen.set_status("Finishing startup...")
@@ -411,6 +414,7 @@ def main():
         if floating_widget and floating_widget_config['enabled']:
             floating_widget.show()
         terminal_title.start()
+        loading_screen.close()
 
         if clipboard_config['auto_paste']:
             if not permissions.check_accessibility_permission():
@@ -419,7 +423,6 @@ def main():
                     return
                 clipboard_manager.update_auto_paste(False)
 
-        loading_screen.close()
         print("🚀 Whisper Key ready!")
         audio_feedback.play_ready_sound()
         config_manager.print_startup_hotkey_instructions()

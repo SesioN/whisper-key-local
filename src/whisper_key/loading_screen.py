@@ -4,7 +4,7 @@ import queue
 import threading
 import tkinter as tk
 
-from PIL import ImageTk
+from PIL import Image, ImageTk
 
 from .platform import icons
 
@@ -20,22 +20,28 @@ CLOSE_TIMEOUT_SECONDS = 3.0
 CLOSE_REQUEST = object()
 
 
+# All Tk objects are created, used and destroyed on the LoadingScreen thread only;
+# other threads talk to it exclusively through the message queue.
+
+
 class LoadingScreen:
     def __init__(self, version: str):
         self.version = version
         self.logger = logging.getLogger(__name__)
         self._message_queue = queue.Queue()
         self._window_thread = None
+        self._icon_photo = None
 
     def show(self):
-        if self._window_thread:
+        if self._window_thread and self._window_thread.is_alive():
             return
         self._message_queue = queue.Queue()
         self._window_thread = threading.Thread(target=self._run_window_thread, daemon=True, name="LoadingScreen")
         self._window_thread.start()
 
     def set_status(self, text: str):
-        self._message_queue.put(text)
+        if self._window_thread and self._window_thread.is_alive():
+            self._message_queue.put(text)
 
     def close(self):
         if not self._window_thread:
@@ -44,18 +50,16 @@ class LoadingScreen:
         self._window_thread.join(timeout=CLOSE_TIMEOUT_SECONDS)
         if self._window_thread.is_alive():
             self.logger.warning("Loading screen did not close within timeout")
+            return
         self._window_thread = None
 
     def _run_window_thread(self):
         try:
             self._run_window()
         except Exception as e:
-            self.logger.error(f"Loading screen failed: {e}")
+            self.logger.error(f"Loading screen failed: {e}", exc_info=True)
         finally:
-            self._free_tk_objects_on_owning_thread()
-
-    def _free_tk_objects_on_owning_thread(self):
-        gc.collect()
+            gc.collect()
 
     def _run_window(self):
         root = tk.Tk()
@@ -63,6 +67,7 @@ class LoadingScreen:
             self._build_window(root)
             root.mainloop()
         finally:
+            self._icon_photo = None
             try:
                 root.destroy()
             except tk.TclError:
@@ -84,9 +89,10 @@ class LoadingScreen:
             font=(FONT_FAMILY, 8)
         ).pack(anchor="ne", padx=10, pady=5)
 
-        icon_image = icons.get_tray_icons()["idle"].convert("RGBA").resize((ICON_SIZE, ICON_SIZE))
-        icon_photo = ImageTk.PhotoImage(icon_image, master=root)
-        tk.Label(root, image=icon_photo, bg=BACKGROUND_COLOR).pack(pady=10)
+        icon_image = icons.get_tray_icons()["idle"].convert("RGBA").resize((ICON_SIZE, ICON_SIZE), Image.Resampling.LANCZOS)
+        # Tk labels do not keep a Python reference; without this the icon is freed and goes blank
+        self._icon_photo = ImageTk.PhotoImage(icon_image, master=root)
+        tk.Label(root, image=self._icon_photo, bg=BACKGROUND_COLOR).pack(pady=10)
 
         status_label = tk.Label(
             root,
@@ -97,6 +103,8 @@ class LoadingScreen:
             wraplength=WINDOW_WIDTH - 20
         )
         status_label.pack(pady=10)
+
+        root.bind("<Button-1>", lambda event: root.quit())
 
         self._bring_to_front_once(root)
         self._process_message_queue(root, status_label)
