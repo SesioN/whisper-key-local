@@ -622,8 +622,8 @@ class StateManager:
         self.clipboard_manager.update_auto_paste(value)
 
     def update_audio_feedback(self, enabled: bool):
-        self.config_manager.update_user_setting('audio_feedback', 'enabled', enabled)
         self.audio_feedback.set_enabled(enabled)
+        self.config_manager.update_user_setting('audio_feedback', 'enabled', enabled)
 
     def _execute_model_change(self, new_model_key: str):
         def progress_callback(message: str):
