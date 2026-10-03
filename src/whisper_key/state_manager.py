@@ -408,6 +408,9 @@ class StateManager:
     def save_floating_widget_position(self, position: str):
         self.config_manager.update_user_setting('floating_widget', 'position', position)
 
+    def save_floating_widget_locked(self, locked: bool):
+        self.config_manager.update_user_setting('floating_widget', 'locked', locked)
+
     def update_transcription_mode(self, value):
         self.config_manager.update_user_setting('clipboard', 'auto_paste', value)
         self.clipboard_manager.update_auto_paste(value)
