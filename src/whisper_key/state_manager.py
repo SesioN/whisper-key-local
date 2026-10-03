@@ -482,12 +482,12 @@ class StateManager:
     def _install_and_switch_runtime(self, runtime: Runtime):
         from .runtime_installer import RuntimeInstaller
 
+        self._runtime_installer = RuntimeInstaller(on_progress=self._report_install_progress)
         try:
             option = self._choose_install_option(runtime)
             if option is None:
                 return
             print(f"📦 Installing [{runtime.label}]: {option.description}")
-            self._runtime_installer = RuntimeInstaller(on_progress=self._report_install_progress)
             self._runtime_installer.install(runtime.key, option, model_key=self.whisper_engine.model_key)
         except Exception as e:
             self.logger.error(f"Failed to install runtime {runtime.key}: {e}")

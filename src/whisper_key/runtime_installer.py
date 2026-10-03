@@ -35,7 +35,10 @@ GGML_MODEL_NAMES = (
     "large-v3-turbo", "large-v3", "large-v2", "large-v1", "medium.en", "medium",
     "small.en", "small", "base.en", "base", "tiny.en", "tiny",
 )
-GGML_MODEL_ALIASES = {"large": "large-v3"}
+GGML_MODEL_ALIASES = {
+    "large": "large-v3", "distil-small.en": "small.en", "distil-medium.en": "medium.en",
+    "distil-large-v2": "large-v2", "distil-large-v3": "large-v3", "distil-large-v3.5": "large-v3",
+}
 
 WINGET_PACKAGES = {
     "cmake": ["Kitware.CMake"],
@@ -130,6 +133,8 @@ class RuntimeInstaller:
             self._kill_process_tree(process)
 
     def install(self, runtime_key: str, option: InstallOption, model_key: Optional[str] = None) -> Path:
+        if self._cancelled:
+            raise RuntimeInstallError("Installation cancelled")
         if runtime_key == active_ct2_runtime():
             raise RuntimeInstallError("This runtime is in use; switch to another runtime and restart first")
         final_dir = get_runtime_dir(runtime_key)
@@ -295,7 +300,7 @@ class RuntimeInstaller:
         )
         env = {name: value for name, value in os.environ.items() if name not in ("PYTHONPATH", "PYTHONHOME")}
         output = self._run([sys.executable, "-s", "-c", script], timeout=300, env=env)
-        values = dict(line.split(" ", 1) for line in output.splitlines() if line.startswith("CT2_"))
+        values = dict(line.split(" ", 1) for line in output.splitlines() if line.startswith("CT2_") and " " in line)
         if not Path(values.get("CT2_FILE", "")).resolve().is_relative_to(runtime_dir.resolve()):
             raise RuntimeInstallError(f"The check loaded CTranslate2 from outside the runtime: {values.get('CT2_FILE')}")
         if int(values.get("CT2_DEVICES", 0)) < 1 or int(values.get("CT2_TYPES", 0)) < 1:
