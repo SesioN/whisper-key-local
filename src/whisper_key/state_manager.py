@@ -49,12 +49,14 @@ class StateManager:
 
         self.is_processing = False
         self.is_model_loading = False
+        self.is_muted = False
         self.last_transcription = None
         self._pending_model_change = None
         self._pending_device_change = None
         self._command_mode = False
         self._state_lock = threading.Lock()
         self._toggle_lock = threading.Lock()
+        self._mute_lock = threading.Lock()
         self._streaming_display_active = False
 
         self.logger = logging.getLogger(__name__)
@@ -72,6 +74,8 @@ class StateManager:
         self._ensure_audio_device_for_host(self._current_audio_host)
 
     def _update_ui_state(self, state: str):
+        if state == "idle" and self.is_muted:
+            state = "muted"
         self.system_tray.update_state(state)
         self.terminal_title.update_state(state)
         self.floating_widget.update_state(state)
@@ -135,7 +139,9 @@ class StateManager:
     def start_recording(self):
         if not self.can_start_recording():
             current_state = self.get_current_state()
-            if self.is_processing:
+            if self.is_muted:
+                print("🔇 Microphone is muted - unmute to record")
+            elif self.is_processing:
                 print("⏳ Still processing previous recording...")
             elif self.is_model_loading:
                 print("⏳ Still loading model...")
@@ -160,6 +166,8 @@ class StateManager:
 
     def start_command_recording(self):
         if not self.can_start_recording():
+            if self.is_muted:
+                print("🔇 Microphone is muted - unmute to record")
             return
 
         with self._state_lock:
@@ -175,6 +183,10 @@ class StateManager:
 
     def _begin_recording(self):
         success = self.audio_recorder.start_recording()
+
+        if success and self.is_muted:
+            self.audio_recorder.cancel_recording()
+            return
 
         if success:
             print("\n🎤 Recording started! Speak now...")
@@ -314,7 +326,7 @@ class StateManager:
 
     def can_start_recording(self) -> bool:
         with self._state_lock:
-            return not (self.is_processing or self.is_model_loading or self.audio_recorder.get_recording_status())
+            return not (self.is_muted or self.is_processing or self.is_model_loading or self.audio_recorder.get_recording_status())
     
     def get_current_state(self) -> str:
         with self._state_lock:
@@ -355,6 +367,24 @@ class StateManager:
         self.logger.warning(f"Unexpected state for model change: {current_state}")
         return False
     
+    def toggle_mute(self):
+        self.set_muted(not self.is_muted)
+
+    def set_muted(self, muted: bool):
+        with self._mute_lock:
+            with self._state_lock:
+                if self.is_muted == muted:
+                    return
+                self.is_muted = muted
+            if muted:
+                print("🔇 Microphone muted - recording disabled")
+                if self.audio_recorder.get_recording_status():
+                    self.cancel_active_recording()
+            else:
+                print("🎤 Microphone unmuted")
+            self.floating_widget.set_muted(muted)
+            self._update_ui_state(self.get_current_state())
+
     def update_floating_widget_enabled(self, enabled: bool):
         self.config_manager.update_user_setting('floating_widget', 'enabled', enabled)
         if enabled:

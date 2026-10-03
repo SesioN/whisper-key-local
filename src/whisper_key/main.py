@@ -178,6 +178,7 @@ def setup_floating_widget(floating_widget_config, state_manager):
     return FloatingWidget(
         on_click=state_manager.toggle_recording,
         on_position_changed=state_manager.save_floating_widget_position,
+        on_mute_click=state_manager.toggle_mute,
         size=floating_widget_config['size'],
         save_position=floating_widget_config['save_position'],
         position=floating_widget_config['position']

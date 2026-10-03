@@ -63,13 +63,15 @@ class SystemTray:
                 "idle": self._create_fallback_icon("idle"),
                 "recording": self._create_fallback_icon("recording"),
                 "processing": self._create_fallback_icon("processing"),
+                "muted": self._create_fallback_icon("muted"),
             }
         
     def _create_fallback_icon(self, state: str) -> Image.Image:
         colors = {
             'idle': (128, 128, 128),      # Gray
             'recording': (34, 139, 34),   # Green  
-            'processing': (255, 165, 0)   # Orange
+            'processing': (255, 165, 0),  # Orange
+            'muted': (200, 30, 30)
         }
         
         color = colors.get(state, (128, 128, 128))  # Default to gray
@@ -204,6 +206,8 @@ class SystemTray:
                 menu_items.append(pystray.Menu.SEPARATOR)
 
             menu_items += [
+                pystray.MenuItem("Mute microphone", self._toggle_mute, checked=lambda item: self.state_manager.is_muted),
+                pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Open log file...", self._open_log_file),
                 pystray.MenuItem("Open model cache...", self._open_model_cache),
                 pystray.Menu.SEPARATOR,
@@ -332,6 +336,9 @@ class SystemTray:
         self.state_manager.update_floating_widget_size(size)
         self.icon.menu = self._create_menu()
 
+    def _toggle_mute(self, icon=None, item=None):
+        self.state_manager.toggle_mute()
+
     def _show_console(self, icon=None, item=None):
         console.show()
 
@@ -353,6 +360,7 @@ class SystemTray:
         
         try:
             self.icon.icon = self.icons[new_state]
+            self.icon.title = "Whisper Key (muted)" if new_state == "muted" else "Whisper Key"
             self.icon.menu = self._create_menu()
         except Exception as e:
             self.logger.error(f"Failed to update tray icon: {e}")
