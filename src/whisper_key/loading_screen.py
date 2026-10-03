@@ -40,7 +40,6 @@ class LoadingScreen:
         self._window_thread.start()
 
     def set_status(self, text: str):
-        # Drop messages once the window thread has failed or been dismissed
         if self._window_thread and self._window_thread.is_alive():
             self._message_queue.put(text)
 
@@ -60,7 +59,6 @@ class LoadingScreen:
         except Exception as e:
             self.logger.error(f"Loading screen failed: {e}", exc_info=True)
         finally:
-            # Collect Tk/PhotoImage garbage here so __del__ never runs on another thread
             gc.collect()
 
     def _run_window(self):
@@ -106,7 +104,6 @@ class LoadingScreen:
         )
         status_label.pack(pady=10)
 
-        # Borderless window has no close button or focus; allow click-to-dismiss
         root.bind("<Button-1>", lambda event: root.quit())
 
         self._bring_to_front_once(root)

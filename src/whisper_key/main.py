@@ -115,7 +115,7 @@ def setup_whisper_engine(whisper_config, vad_manager, model_registry, config_man
         if whisper_config['device'] != 'cuda' or not config_manager:
             raise
         if loading_screen:
-            loading_screen.close()  # do not cover the console prompt
+            loading_screen.close()
         return _handle_gpu_failure(e, whisper_config, vad_manager, model_registry, config_manager)
 
 def setup_terminal_title(terminal_title_config):
