@@ -93,6 +93,8 @@ def _gpu_runtime(key: str, loaded_ct2_variant: str, gpu_device_count: int, gpu_t
     label = GPU_RUNTIME_LABELS[key]
     if loaded_ct2_variant == key and gpu_device_count > 0 and gpu_types:
         return Runtime(key, label, FASTER_WHISPER, "cuda", INSTALLED, compute_types=gpu_types)
+    if loaded_ct2_variant == key:
+        return Runtime(key, label, FASTER_WHISPER, "cuda", UNSUPPORTED, "no usable GPU found")
     if is_runtime_installed(key) and active_ct2_runtime() != key:
         return Runtime(key, label, FASTER_WHISPER, "cuda", INSTALLED, needs_restart=True)
     if gpu_class in GPU_RUNTIME_HARDWARE[key] and sys.platform == "win32":

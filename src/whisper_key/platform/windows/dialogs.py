@@ -1,4 +1,5 @@
 import ctypes
+from ctypes import wintypes
 
 MB_OK = 0x0
 MB_OKCANCEL = 0x1
@@ -12,6 +13,8 @@ IDYES = 6
 IDNO = 7
 
 user32 = ctypes.WinDLL("user32")
+user32.MessageBoxW.argtypes = (wintypes.HWND, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.UINT)
+user32.MessageBoxW.restype = ctypes.c_int
 
 
 def _message_box(title: str, text: str, flags: int) -> int:

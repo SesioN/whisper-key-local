@@ -57,6 +57,7 @@ class StateManager:
 
         self._runtimes = None
         self._runtime_install_running = False
+        self._runtime_installer = None
         self._runtime_key = None
         self._runtimes_lock = threading.Lock()
 
@@ -284,6 +285,10 @@ class StateManager:
         if self.audio_recorder.get_recording_status():
             self.audio_recorder.stop_recording()
 
+        installer = self._runtime_installer
+        if installer:
+            installer.cancel()
+
         self.system_tray.stop()
         self.terminal_title.stop()
     
@@ -376,9 +381,11 @@ class StateManager:
             return False
 
         if runtime.state == INSTALLABLE:
-            if self._runtime_install_running:
-                print("⏳ A runtime is already being installed...")
-                return False
+            with self._state_lock:
+                if self._runtime_install_running:
+                    print("⏳ A runtime is already being installed...")
+                    return False
+                self._runtime_install_running = True
             threading.Thread(target=self._install_and_switch_runtime, args=(runtime,), daemon=True).start()
             return True
 
@@ -475,20 +482,13 @@ class StateManager:
     def _install_and_switch_runtime(self, runtime: Runtime):
         from .runtime_installer import RuntimeInstaller
 
-        option = self._choose_install_option(runtime)
-        if option is None:
-            return
-
-        with self._state_lock:
-            if self._runtime_install_running:
-                print("⏳ A runtime is already being installed...")
-                return
-            self._runtime_install_running = True
-
-        print(f"📦 Installing [{runtime.label}]: {option.description}")
         try:
-            RuntimeInstaller(on_progress=self._report_install_progress).install(
-                runtime.key, option, model_key=self.whisper_engine.model_key)
+            option = self._choose_install_option(runtime)
+            if option is None:
+                return
+            print(f"📦 Installing [{runtime.label}]: {option.description}")
+            self._runtime_installer = RuntimeInstaller(on_progress=self._report_install_progress)
+            self._runtime_installer.install(runtime.key, option, model_key=self.whisper_engine.model_key)
         except Exception as e:
             self.logger.error(f"Failed to install runtime {runtime.key}: {e}")
             print(f"❌ Failed to install {runtime.label}: {e}")
@@ -497,10 +497,12 @@ class StateManager:
         finally:
             with self._state_lock:
                 self._runtime_install_running = False
+                self._runtime_installer = None
             self.system_tray.set_status_text(None)
 
         print(f"✅ {runtime.label} installed")
-        self._runtimes = None
+        with self._runtimes_lock:
+            self._runtimes = None
         installed_runtime = next(candidate for candidate in self.get_runtimes() if candidate.key == runtime.key)
         if installed_runtime.needs_restart:
             self._restart_into_runtime(installed_runtime)

@@ -34,9 +34,10 @@ def read_runtime_marker(runtime_key: str):
         return None
     marker_path = get_runtime_dir(runtime_key) / MARKER_FILE
     try:
-        return json.loads(marker_path.read_text(encoding="utf-8"))
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+    return marker if isinstance(marker, dict) else None
 
 
 def is_runtime_installed(runtime_key: str) -> bool:
