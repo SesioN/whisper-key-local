@@ -91,10 +91,10 @@ def restart_app():
     pyapp_exe = os.environ.get('PYAPP', '')
     command = [pyapp_exe] if os.path.isfile(pyapp_exe) else list(sys.orig_argv)
     restart_helper = str(Path(__file__).with_name('restart_helper.py'))
-    subprocess.Popen([sys.executable, restart_helper, str(os.getpid()), *command],
-                     creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+    creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
+    subprocess.Popen([sys.executable, restart_helper, str(os.getpid()), *command], creationflags=creationflags)
     import signal
-    os.kill(os.getpid(), signal.SIGINT)
+    signal.raise_signal(signal.SIGINT)
 
 
 def get_version():
