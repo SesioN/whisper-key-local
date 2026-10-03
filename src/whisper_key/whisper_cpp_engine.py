@@ -53,7 +53,7 @@ def _find_model_dir():
 
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-_NON_SPEECH_TAG = re.compile(r"\[[A-Z_ ]+\]|\[(?:[Mm]usic|[Ll]aughter|[Aa]pplause|[Ss]ilence)\]|\([^()]*\)")
+_NON_SPEECH_TAG = re.compile(r"\[[A-Z]+(?:_[A-Z]+)+\]|[\[(](?:music|laughs|laughter|applause|silence|inaudible|no speech)[\])]", re.IGNORECASE)
 
 
 class WhisperCppEngine:
@@ -122,7 +122,7 @@ class WhisperCppEngine:
         model_path = self._get_model_path()
         if not model_path:
             raise FileNotFoundError(
-                f"Model file not found: ggml-{self.model_key}.bin in {self._model_dir}\n"
+                f"Model file not found: ggml-{self.model_key}.bin in {self._model_dir or '(no model dir found)'}\n"
                 f"Download models with: cd whisper.cpp && ./models/download-ggml-model.cmd {self.model_key}"
             )
         self.logger.info("whisper.cpp model [%s] at %s", self.model_key, model_path)
