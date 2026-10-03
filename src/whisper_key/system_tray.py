@@ -171,7 +171,6 @@ class SystemTray:
             model_sub_menu_items = self._build_model_menu_items(current_model, is_model_loading)
 
             voice_commands_enabled = self.config_manager.get_setting('voice_commands', 'enabled')
-            auto_trigger_enabled = self.config_manager.get_setting('vad', 'auto_trigger_enabled')
             auto_trigger_available = self.state_manager.is_auto_trigger_available()
 
             menu_items = []
@@ -202,7 +201,7 @@ class SystemTray:
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem(f"Model: {current_model.title()}", pystray.Menu(*model_sub_menu_items)),
                 pystray.Menu.SEPARATOR if auto_trigger_available else None,
-                pystray.MenuItem("Voice-activated recording", lambda icon, item: self._set_auto_trigger(not auto_trigger_enabled), checked=lambda item: auto_trigger_enabled) if auto_trigger_available else None,
+                pystray.MenuItem("Voice-activated recording", lambda icon, item: self._set_auto_trigger(not self.state_manager.auto_trigger_enabled), checked=lambda item: self.state_manager.auto_trigger_enabled) if auto_trigger_available else None,
             ]
 
             menu_items.extend([
@@ -280,8 +279,11 @@ class SystemTray:
             self.logger.error(f"Error selecting model {model_key}: {e}")
 
     def _set_auto_trigger(self, enabled: bool):
-        self.state_manager.update_auto_trigger(enabled)
-        self.icon.menu = self._create_menu()
+        try:
+            self.state_manager.update_auto_trigger(enabled)
+            self.icon.menu = self._create_menu()
+        except Exception as e:
+            self.logger.error(f"Error toggling voice-activated recording: {e}")
 
     def _select_audio_host(self, host_name: str):
         try:

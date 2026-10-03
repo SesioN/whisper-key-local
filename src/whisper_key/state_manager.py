@@ -19,6 +19,8 @@ from .voice_commands import VoiceCommandManager
 from .terminal_title import TerminalTitle
 
 class StateManager:
+    AUTO_TRIGGER_COOLDOWN_SECONDS = 1.0  # Lets feedback sounds die out before the VAD may start a recording
+
     def __init__(self,
                  audio_recorder: AudioRecorder,
                  whisper_engine: WhisperEngine,
@@ -53,6 +55,7 @@ class StateManager:
         self._streaming_display_active = False
         self.auto_trigger_enabled = config_manager.get_setting('vad', 'auto_trigger_enabled')
         self._auto_triggered_recording = False
+        self._auto_trigger_resume_time = 0.0
 
         self.logger = logging.getLogger(__name__)
         self._current_audio_host = None
@@ -93,6 +96,10 @@ class StateManager:
     def _handle_auto_trigger_speech_start(self):
         if not self.auto_trigger_enabled or not self.can_start_recording():
             return
+        # Don't let our own feedback sounds trigger a new recording
+        if time.monotonic() < self._auto_trigger_resume_time:
+            self.logger.debug("Auto-trigger: ignoring speech during feedback cooldown")
+            return
         self.logger.info("Auto-trigger: speech detected, starting recording")
         self._begin_recording(auto_triggered=True)
 
@@ -107,14 +114,25 @@ class StateManager:
             self.audio_recorder.stop_monitoring()
         elif not self.audio_recorder.start_monitoring():
             self.logger.warning("Auto-trigger needs real-time VAD (vad.vad_realtime_enabled) and ten-vad")
+            return False
+        return True
+
+    def handle_monitoring_failed(self, error: Exception):
+        # Runtime-only switch-off: the saved setting stays on so a restart retries
+        self.logger.error(f"Voice-activated recording stopped: {error}")
+        print("❌ Voice-activated recording turned off (microphone stream failed). Re-enable it from the tray menu.")
+        self.auto_trigger_enabled = False
+        self.system_tray.refresh_menu()
 
     def is_auto_trigger_available(self) -> bool:
         return self.audio_recorder.continuous_vad is not None
 
     def update_auto_trigger(self, enabled: bool):
-        self.config_manager.update_user_setting('vad', 'auto_trigger_enabled', enabled)
         self.auto_trigger_enabled = enabled
-        self._apply_auto_trigger()
+        if self._apply_auto_trigger():
+            self.config_manager.update_user_setting('vad', 'auto_trigger_enabled', enabled)
+        else:
+            self.auto_trigger_enabled = False
 
     def handle_streaming_result(self, text: str, is_final: bool):
         if is_final:
@@ -188,10 +206,13 @@ class StateManager:
             self._update_ui_state("recording")
 
     def _begin_recording(self, auto_triggered: bool = False):
+        # Set before starting so a quick SPEECH_END on another thread already sees it
+        self._auto_triggered_recording = auto_triggered
         success = self.audio_recorder.start_recording(voice_activated=auto_triggered)
 
-        if success:
-            self._auto_triggered_recording = auto_triggered
+        if not success:
+            self._auto_triggered_recording = False
+        else:
             print("\n🎤 Recording started! Speak now...")
             if not auto_triggered:
                 self.config_manager.print_stop_instructions_based_on_config()
@@ -243,6 +264,8 @@ class StateManager:
         finally:
             with self._state_lock:
                 self.is_processing = False
+                self._auto_triggered_recording = False
+                self._auto_trigger_resume_time = time.monotonic() + self.AUTO_TRIGGER_COOLDOWN_SECONDS
                 pending_model = self._pending_model_change
                 pending_device = self._pending_device_change
 
@@ -507,7 +530,8 @@ class StateManager:
                 vad_manager=vad_manager,
                 streaming_manager=streaming_manager,
                 on_streaming_result=on_streaming_result,
-                device=device_id if device_id != -1 else None
+                device=device_id if device_id != -1 else None,
+                on_monitoring_failed=self.handle_monitoring_failed
             )
 
             previous_recorder = self.audio_recorder

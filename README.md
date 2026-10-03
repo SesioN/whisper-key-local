@@ -121,10 +121,10 @@ Delete this file and restart app to reset to defaults.
 | `vad.vad_precheck_enabled` | `true` | Prevent hallucinations on silence |
 | `vad.vad_onset_threshold` | `0.7` | Speech detection start (0.0-1.0) |
 | `vad.vad_offset_threshold` | `0.55` | Speech detection end (0.0-1.0) |
-| `vad.vad_min_speech_duration` | `0.1` | Min speech segment (seconds) |
+| `vad.vad_min_speech_duration` | `0.1` | Min speech segment (seconds); also how long speech must last to start a voice-activated recording |
 | `vad.vad_realtime_enabled` | `true` | Auto-stop on silence |
 | `vad.vad_silence_timeout_seconds` | `30.0` | Seconds before auto-stop |
-| `vad.auto_trigger_enabled` | `false` | Start recording when speech is detected, stop after a short silence (keeps the microphone open) |
+| `vad.auto_trigger_enabled` | `false` | Start recording when speech is detected, stop after a short silence. Keeps the microphone open and the VAD running (small constant CPU use); any nearby speech (TV, calls) is transcribed and delivered like a hotkey recording, including auto-paste |
 | `vad.auto_trigger_silence_seconds` | `1.5` | Silence that ends a voice-activated recording |
 | **Audio** |||
 | `audio.host` | `null` | Audio API (WASAPI, Core Audio, etc.) |
