@@ -21,6 +21,8 @@ POSITION_PATTERN = re.compile(r"^\+(-?\d+)\+(-?\d+)$")
 DRAG_THRESHOLD_PIXELS = 4
 TRANSPARENT_KEY_COLOR = "#010203"
 OPAQUE_ALPHA_THRESHOLD = 128
+HIT_TARGET_ALPHA = 0.01
+HIT_TARGET_COLOR = "#000000"
 MOVABLE_APPEARANCE = {"text": "Movable", "fg": "#FFD700", "bg": "#222222"}
 LOCKED_APPEARANCE = {"text": "Locked", "fg": "#FFFFFF", "bg": "#880000"}
 LOCK_LABEL_WIDTH = 9
@@ -60,6 +62,7 @@ class FloatingWidget:
         self._root = None
         self._icon_label = None
         self._lock_label = None
+        self._hit_target = None
         self._icon_photos = {}
         self._locked = False
         self._dragging = False
@@ -132,6 +135,7 @@ class FloatingWidget:
         self._root = None
         self._icon_label = None
         self._lock_label = None
+        self._hit_target = None
         self._icon_photos = {}
         gc.collect()
 
@@ -145,9 +149,7 @@ class FloatingWidget:
 
         self._icon_label = tk.Label(self._root, bg=TRANSPARENT_KEY_COLOR, bd=0, highlightthickness=0, cursor="hand2")
         self._icon_label.pack()
-        self._icon_label.bind("<Button-1>", self._on_icon_press)
-        self._icon_label.bind("<B1-Motion>", self._on_icon_drag)
-        self._icon_label.bind("<ButtonRelease-1>", self._on_icon_release)
+        self._bind_icon_mouse_handlers(self._icon_label)
 
         self._lock_label = tk.Label(self._root, bd=0, cursor="hand2", width=LOCK_LABEL_WIDTH)
         self._lock_label.pack()
@@ -159,8 +161,37 @@ class FloatingWidget:
         self._root.geometry(self._initial_position())
         self._root.update_idletasks()
         window_style.prevent_focus_steal(self._root.winfo_id())
+        self._build_hit_target()
 
         self._root.after(QUEUE_POLL_INTERVAL_MS, self._process_command_queue)
+
+    def _bind_icon_mouse_handlers(self, widget: tk.Misc):
+        widget.bind("<Button-1>", self._on_icon_press)
+        widget.bind("<B1-Motion>", self._on_icon_drag)
+        widget.bind("<ButtonRelease-1>", self._on_icon_release)
+
+    def _build_hit_target(self):
+        self._hit_target = tk.Toplevel(self._root, bg=HIT_TARGET_COLOR, cursor="hand2")
+        self._hit_target.withdraw()
+        self._hit_target.overrideredirect(True)
+        self._hit_target.attributes("-topmost", True)
+        self._hit_target.attributes("-alpha", HIT_TARGET_ALPHA)
+        self._bind_icon_mouse_handlers(self._hit_target)
+        self._hit_target.update_idletasks()
+        window_style.prevent_focus_steal(self._hit_target.winfo_id())
+
+    def _sync_hit_target(self):
+        if self._root.state() != "normal":
+            self._hit_target.withdraw()
+            return
+        self._root.update_idletasks()
+        self._hit_target.geometry(
+            f"{self._icon_label.winfo_width()}x{self._icon_label.winfo_height()}"
+            f"+{self._icon_label.winfo_rootx()}+{self._icon_label.winfo_rooty()}"
+        )
+        if self._hit_target.state() != "normal":
+            self._hit_target.deiconify()
+        self._root.lift()
 
     def _initial_position(self) -> str:
         if self.save_position and self._saved_position_is_on_screen():
@@ -229,12 +260,15 @@ class FloatingWidget:
     def _handle_command(self, command: str):
         if command == SHOW:
             self._root.deiconify()
+            self._sync_hit_target()
         elif command == HIDE:
             self._root.withdraw()
+            self._sync_hit_target()
         elif command == REFRESH_ICON:
             self._apply_icon()
         elif command == RESIZE:
             self._apply_size()
+            self._sync_hit_target()
         elif command == SAVE_POSITION:
             self._report_position()
 
@@ -263,6 +297,7 @@ class FloatingWidget:
             self._dragging = True
         if not self._locked:
             self._root.geometry(f"+{event.x_root - self._drag_offset_x}+{event.y_root - self._drag_offset_y}")
+            self._sync_hit_target()
 
     def _on_icon_release(self, event):
         if self._dragging:
