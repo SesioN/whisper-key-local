@@ -10,7 +10,8 @@
 
 whisper: # Whisper AI Model Settings
     # Engine backend
-    # Options: faster_whisper (default, uses CTranslate2), whisper_cpp (uses whisper-cli.exe with Vulkan)
+    # Derived from runtime at startup (vulkan selects whisper_cpp), set runtime instead
+    # Options: faster_whisper (CTranslate2), whisper_cpp (whisper-server/whisper-cli with Vulkan)
     engine_type: faster_whisper
 
     # Model selection
