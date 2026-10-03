@@ -58,6 +58,7 @@ class StateManager:
 
         self.is_processing = False
         self.is_model_loading = False
+        self.is_muted = False
         self.last_transcription = None
         self._pending_model_change = None
         self._pending_device_change = None
@@ -66,6 +67,7 @@ class StateManager:
         self._recording_stop_lock = threading.Lock()
         self._monitoring_lock = threading.Lock()
         self._toggle_lock = threading.Lock()
+        self._mute_lock = threading.Lock()
         self._streaming_display_active = False
         self.auto_trigger_enabled = config_manager.get_setting('vad', 'auto_trigger_enabled')
         self._auto_triggered_recording = False
@@ -97,6 +99,8 @@ class StateManager:
         self._apply_auto_trigger()
 
     def _update_ui_state(self, state: str):
+        if state == "idle" and self.is_muted:
+            state = "muted"
         self.system_tray.update_state(state)
         self.terminal_title.update_state(state)
         self.floating_widget.update_state(state)
@@ -248,7 +252,9 @@ class StateManager:
     def start_recording(self):
         if not self.can_start_recording():
             current_state = self.get_current_state()
-            if self.is_processing:
+            if self.is_muted:
+                print("🔇 Microphone is muted - unmute to record")
+            elif self.is_processing:
                 print("⏳ Still processing previous recording...")
             elif self.is_model_loading:
                 print("⏳ Still loading model...")
@@ -273,6 +279,8 @@ class StateManager:
 
     def start_command_recording(self):
         if not self.can_start_recording():
+            if self.is_muted:
+                print("🔇 Microphone is muted - unmute to record")
             return
 
         with self._state_lock:
@@ -281,6 +289,11 @@ class StateManager:
 
         self.logger.info("Starting command mode recording")
         success = self.audio_recorder.start_recording()
+        if success and self.is_muted:
+            self.audio_recorder.cancel_recording()
+            with self._state_lock:
+                self._command_mode = False
+            return
         if success:
             print("\n🎤 Command mode activated! Speak a command...")
             self.config_manager.print_command_stop_instructions()
@@ -294,6 +307,9 @@ class StateManager:
 
         if not success:
             self._auto_triggered_recording = False
+        elif self.is_muted:
+            self._auto_triggered_recording = False
+            self.audio_recorder.cancel_recording()
         else:
             print("\n🎤 Recording started! Speak now...")
             if not auto_triggered:
@@ -450,7 +466,7 @@ class StateManager:
 
     def can_start_recording(self) -> bool:
         with self._state_lock:
-            return not (self.is_processing or self.is_model_loading or self.audio_recorder.get_recording_status())
+            return not (self.is_muted or self.is_processing or self.is_model_loading or self.audio_recorder.get_recording_status())
     
     def get_current_state(self) -> str:
         with self._state_lock:
@@ -484,6 +500,24 @@ class StateManager:
         self._update_ui_state("processing")
         self._execute_model_change(new_model_key)
         return True
+
+    def toggle_mute(self):
+        self.set_muted(not self.is_muted)
+
+    def set_muted(self, muted: bool):
+        with self._mute_lock:
+            with self._state_lock:
+                if self.is_muted == muted:
+                    return
+                self.is_muted = muted
+            if muted:
+                print("🔇 Microphone muted - recording disabled")
+                if self.audio_recorder.get_recording_status():
+                    self.cancel_active_recording()
+            else:
+                print("🎤 Microphone unmuted")
+            self.floating_widget.set_muted(muted)
+            self._update_ui_state(self.get_current_state())
 
     def update_floating_widget_enabled(self, enabled: bool):
         self.config_manager.update_user_setting('floating_widget', 'enabled', enabled)
