@@ -15,6 +15,8 @@ user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
 user32.GetWindowLongW.restype = wintypes.LONG
 user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.LONG]
 user32.SetWindowLongW.restype = wintypes.LONG
+user32.GetSystemMetrics.argtypes = [ctypes.c_int]
+user32.GetSystemMetrics.restype = ctypes.c_int
 
 
 def prevent_focus_steal(tk_window_id: int):

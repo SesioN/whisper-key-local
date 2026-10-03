@@ -129,8 +129,8 @@ class SystemTray:
             return lambda item: size == current_size
 
         items = [
-            pystray.MenuItem("Show", lambda icon, item: self._set_floating_widget_enabled(not enabled), checked=lambda item: enabled),
-            pystray.MenuItem("Remember position", lambda icon, item: self._set_floating_widget_save_position(not save_position), checked=lambda item: save_position),
+            pystray.MenuItem("Show", lambda icon, item: self._set_floating_widget_enabled(not self.config_manager.get_setting('floating_widget', 'enabled')), checked=lambda item: enabled),
+            pystray.MenuItem("Remember position", lambda icon, item: self._set_floating_widget_save_position(not self.config_manager.get_setting('floating_widget', 'save_position')), checked=lambda item: save_position),
             pystray.Menu.SEPARATOR,
         ]
         for size in ("small", "medium", "big"):

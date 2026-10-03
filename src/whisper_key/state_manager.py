@@ -63,6 +63,7 @@ class StateManager:
         self._state_lock = threading.Lock()
         self._recording_stop_lock = threading.Lock()
         self._monitoring_lock = threading.Lock()
+        self._toggle_lock = threading.Lock()
         self._streaming_display_active = False
         self.auto_trigger_enabled = config_manager.get_setting('vad', 'auto_trigger_enabled')
         self._auto_triggered_recording = False
@@ -228,10 +229,17 @@ class StateManager:
         self._begin_recording()
 
     def toggle_recording(self):
-        if self.audio_recorder.get_recording_status():
-            self.stop_recording()
-        else:
-            self.start_recording()
+        if not self._toggle_lock.acquire(blocking=False):
+            return
+        try:
+            if self.audio_recorder.get_recording_status():
+                self.stop_recording()
+            else:
+                self.start_recording()
+        except Exception:
+            self.logger.exception("Toggle recording failed")
+        finally:
+            self._toggle_lock.release()
 
     def start_command_recording(self):
         if not self.can_start_recording():

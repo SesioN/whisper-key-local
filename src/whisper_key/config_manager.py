@@ -312,7 +312,7 @@ class ConfigManager:
         return self.config['system_tray'].copy()
     
     def get_floating_widget_config(self) -> Dict[str, Any]:
-        return self.config.get('floating_widget', {}).copy()
+        return self.config['floating_widget'].copy()
 
     def get_audio_feedback_config(self) -> Dict[str, Any]:
         return self.config['audio_feedback'].copy()
@@ -446,6 +446,15 @@ def validate_config(config, default_config, logger):
     floating_widget_size = _get_config_value_at_path(config, 'floating_widget.size')
     if floating_widget_size not in ('small', 'medium', 'big'):
         _set_to_default(config, default_config, 'floating_widget.size', floating_widget_size, logger)
+
+    for floating_widget_flag in ('floating_widget.enabled', 'floating_widget.save_position'):
+        flag_value = _get_config_value_at_path(config, floating_widget_flag)
+        if not isinstance(flag_value, bool):
+            _set_to_default(config, default_config, floating_widget_flag, flag_value, logger)
+
+    floating_widget_position = _get_config_value_at_path(config, 'floating_widget.position')
+    if floating_widget_position is not None and not isinstance(floating_widget_position, str):
+        _set_to_default(config, default_config, 'floating_widget.position', floating_widget_position, logger)
 
     stop_key = _get_config_value_at_path(config, 'hotkey.stop_key')
     auto_send_key = _get_config_value_at_path(config, 'hotkey.auto_send_key')
