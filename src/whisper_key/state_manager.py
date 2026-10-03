@@ -62,6 +62,7 @@ class StateManager:
         self.vad_sensitivity_window = OptionalComponent(None)
         self.vad_sensitivity_window_attached = False
         self._vad_sensitivity_window_open = False
+        self._vad_hysteresis_gap = None
         self._auto_trigger_resume_time = 0.0
 
         self.logger = logging.getLogger(__name__)
@@ -141,8 +142,9 @@ class StateManager:
 
     def update_vad_onset_threshold(self, onset_threshold: float):
         onset_threshold = round(min(onset_threshold, self.MAX_VAD_ONSET_THRESHOLD), 2)
-        hysteresis_gap = max(self.MIN_VAD_HYSTERESIS_GAP, self.vad_manager.vad_onset_threshold - self.vad_manager.vad_offset_threshold)
-        offset_threshold = round(max(self.MIN_VAD_OFFSET_THRESHOLD, onset_threshold - hysteresis_gap), 2)
+        if self._vad_hysteresis_gap is None:
+            self._vad_hysteresis_gap = max(self.MIN_VAD_HYSTERESIS_GAP, self.vad_manager.vad_onset_threshold - self.vad_manager.vad_offset_threshold)
+        offset_threshold = round(max(self.MIN_VAD_OFFSET_THRESHOLD, onset_threshold - self._vad_hysteresis_gap), 2)
         self.vad_manager.vad_onset_threshold = onset_threshold
         self.vad_manager.vad_offset_threshold = offset_threshold
         if self.audio_recorder.continuous_vad:
