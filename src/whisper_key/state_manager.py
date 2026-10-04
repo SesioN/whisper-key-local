@@ -604,8 +604,8 @@ class StateManager:
             return None
         if engine._is_model_cached(model_key):
             return "ready"
-        from .runtime_installer import GGML_MODEL_NAMES, GGML_MODEL_ALIASES
-        if self._ggml_model_dir() and GGML_MODEL_ALIASES.get(model_key, model_key).lower() in GGML_MODEL_NAMES:
+        from .runtime_installer import ggml_model_name
+        if self._ggml_model_dir() and ggml_model_name(model_key):
             return "download"
         return "unavailable"
 
