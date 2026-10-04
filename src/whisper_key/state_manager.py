@@ -174,6 +174,7 @@ class StateManager:
                 self.audio_recorder.stop_monitoring()
             elif not self.audio_recorder.start_monitoring():
                 self.logger.warning("Microphone monitoring needs real-time VAD (vad.vad_realtime_enabled) and ten-vad")
+                print("⚠️ Voice-activated recording cannot run: it needs vad.vad_realtime_enabled and ten-vad")
                 return False
             return True
 
