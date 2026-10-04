@@ -76,7 +76,8 @@ class FloatingWidget:
         self._lock_label = None
         self._mute_label = None
         self._controls_frame = None
-        self._hit_target = None
+        self._hit_targets = []
+        self._hit_target_sync_pending = False
         self._icon_photos = {}
         self._locked = locked
         self._dragging = False
@@ -155,7 +156,8 @@ class FloatingWidget:
         self._lock_label = None
         self._mute_label = None
         self._controls_frame = None
-        self._hit_target = None
+        self._hit_targets = []
+        self._hit_target_sync_pending = False
         self._icon_photos = {}
         gc.collect()
 
@@ -170,6 +172,7 @@ class FloatingWidget:
         self._icon_label = tk.Label(self._root, bg=TRANSPARENT_KEY_COLOR, bd=0, highlightthickness=0, cursor="hand2")
         self._icon_label.pack()
         self._bind_icon_mouse_handlers(self._icon_label)
+        self._icon_label.bind("<Configure>", self._on_covered_widget_configure)
 
         self._controls_frame = tk.Frame(self._root, bg=TRANSPARENT_KEY_COLOR, bd=0, highlightthickness=0)
         self._controls_frame.pack()
@@ -181,6 +184,8 @@ class FloatingWidget:
         self._mute_label = tk.Label(self._controls_frame, bd=0, cursor="hand2", width=MUTE_LABEL_WIDTH)
         self._mute_label.pack(side=tk.LEFT)
         self._mute_label.bind("<Button-1>", self._on_mute_click)
+        self._lock_label.bind("<Configure>", self._on_covered_widget_configure)
+        self._mute_label.bind("<Configure>", self._on_covered_widget_configure)
 
         self._apply_size()
         self._apply_lock_appearance()
@@ -189,7 +194,11 @@ class FloatingWidget:
         self._root.geometry(self._initial_position())
         self._root.update_idletasks()
         window_style.prevent_focus_steal(self._root.winfo_id())
-        self._build_hit_target()
+        self._hit_targets = [
+            (self._build_hit_target(self._bind_icon_mouse_handlers), self._icon_label),
+            (self._build_hit_target(lambda target: target.bind("<Button-1>", self._on_lock_click)), self._lock_label),
+            (self._build_hit_target(lambda target: target.bind("<Button-1>", self._on_mute_click)), self._mute_label),
+        ]
 
         self._root.after(QUEUE_POLL_INTERVAL_MS, self._process_command_queue)
 
@@ -198,31 +207,46 @@ class FloatingWidget:
         widget.bind("<B1-Motion>", self._on_icon_drag)
         widget.bind("<ButtonRelease-1>", self._on_icon_release)
 
-    def _build_hit_target(self):
-        self._hit_target = tk.Toplevel(self._root, bg=HIT_TARGET_COLOR, cursor="hand2")
-        self._hit_target.withdraw()
-        self._hit_target.overrideredirect(True)
-        self._hit_target.attributes("-topmost", True)
-        self._hit_target.attributes("-alpha", HIT_TARGET_ALPHA)
-        self._bind_icon_mouse_handlers(self._hit_target)
-        self._hit_target.update_idletasks()
-        window_style.prevent_focus_steal(self._hit_target.winfo_id())
+    def _build_hit_target(self, bind_handlers: Callable[[tk.Misc], None]) -> tk.Toplevel:
+        hit_target = tk.Toplevel(self._root, bg=HIT_TARGET_COLOR, cursor="hand2")
+        hit_target.withdraw()
+        hit_target.overrideredirect(True)
+        hit_target.attributes("-topmost", True)
+        hit_target.attributes("-alpha", HIT_TARGET_ALPHA)
+        bind_handlers(hit_target)
+        hit_target.update_idletasks()
+        window_style.prevent_focus_steal(hit_target.winfo_id())
+        return hit_target
+
+    def _on_covered_widget_configure(self, event):
+        if self._hit_targets and not self._hit_target_sync_pending:
+            self._hit_target_sync_pending = True
+            self._root.after_idle(self._sync_hit_target_after_layout)
+
+    def _sync_hit_target_after_layout(self):
+        self._hit_target_sync_pending = False
+        self._sync_hit_target()
 
     def _sync_hit_target(self):
         if self._root.state() != "normal":
-            self._hit_target.withdraw()
+            for hit_target, _ in self._hit_targets:
+                hit_target.withdraw()
             return
         self._root.update_idletasks()
         self._place_hit_target(self._root.winfo_x(), self._root.winfo_y())
-        if self._hit_target.state() != "normal":
-            self._hit_target.deiconify()
-            self._root.lift()
+        for hit_target, _ in self._hit_targets:
+            if hit_target.state() != "normal":
+                hit_target.deiconify()
+        self._root.lift()
 
     def _place_hit_target(self, window_x: int, window_y: int):
-        self._hit_target.geometry(
-            f"{self._icon_label.winfo_width()}x{self._icon_label.winfo_height()}"
-            f"+{window_x + self._icon_label.winfo_x()}+{window_y + self._icon_label.winfo_y()}"
-        )
+        for hit_target, covered_widget in self._hit_targets:
+            offset_x = covered_widget.winfo_rootx() - self._root.winfo_rootx()
+            offset_y = covered_widget.winfo_rooty() - self._root.winfo_rooty()
+            hit_target.geometry(
+                f"{covered_widget.winfo_width()}x{covered_widget.winfo_height()}"
+                f"+{window_x + offset_x}+{window_y + offset_y}"
+            )
 
     def _initial_position(self) -> str:
         if self.save_position and self._saved_position_is_on_screen():
