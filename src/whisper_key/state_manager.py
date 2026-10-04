@@ -758,6 +758,8 @@ class StateManager:
         current_runtime = self.get_current_runtime()
         if not installed_binary or find_whisper_server(installed_binary) or not current_runtime or current_runtime.key != VULKAN:
             return
+        if self.config_manager.get_setting('onboarding', 'whisper_server_upgrade') == 'declined':
+            return
         with self._state_lock:
             if self._runtime_install_running:
                 return
@@ -772,6 +774,8 @@ class StateManager:
                     f"The installed {runtime.label} runtime predates whisper-server, so the model is reloaded for every recording.\n\n"
                     f"Rebuild it now to keep the model loaded?\nDownload: {options[0].download_size}")):
                 return options[0]
+            self.config_manager.update_user_setting('onboarding', 'whisper_server_upgrade', 'declined')
+            print("ℹ️ whisper-server rebuild skipped, this prompt will not be shown again")
             return None
         title = f"Install {runtime.label}"
         restart_note = "" if runtime.key == VULKAN else "\n\nWhisper Key restarts afterwards to use it."

@@ -397,6 +397,10 @@ onboarding: # First-run setup state (managed automatically)
     # nvidia | amd_rdna2+ | amd_rdna1 | null
     gpu_class: null
 
+    # Answer to the whisper-server rebuild prompt for an older Vulkan runtime
+    # pending | declined
+    whisper_server_upgrade: pending
+
 voice_commands: # Voice Command Settings
     # Enable/disable voice commands feature
     # true = register command hotkey and load commands file
