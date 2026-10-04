@@ -118,6 +118,117 @@ function Patch-IconSupport {
     }
 }
 
+function Set-PatchedText {
+    param($Path, $Find, $Replace, $Marker)
+    $Find = $Find -replace "`r`n", "`n"
+    $Replace = $Replace -replace "`r`n", "`n"
+    $Marker = $Marker -replace "`r`n", "`n"
+    $Content = [System.IO.File]::ReadAllText($Path) -replace "`r`n", "`n"
+    if ($Content.Contains($Marker)) { return }
+    if (-not $Content.Contains($Find)) {
+        Write-Host "Error: patch anchor not found in $Path" -ForegroundColor Red
+        exit 1
+    }
+    $Index = $Content.IndexOf($Find)
+    $Content = $Content.Substring(0, $Index) + $Replace + $Content.Substring($Index + $Find.Length)
+    [System.IO.File]::WriteAllText($Path, $Content)
+}
+
+function Patch-NoTerminalSupport {
+    param($PyAppSourcePath)
+
+    Copy-Item (Join-Path $PSScriptRoot "pyapp-patches\splash.rs") (Join-Path $PyAppSourcePath "src\splash.rs") -Force
+
+    Set-PatchedText (Join-Path $PyAppSourcePath "Cargo.toml") '[build-dependencies]' @'
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging"] }
+
+[build-dependencies]
+'@ 'windows-sys = { version = "0.59"'
+
+    Set-PatchedText (Join-Path $PyAppSourcePath "build.rs") 'fn main() {' @'
+fn main() {
+    println!("cargo:rustc-check-cfg=cfg(pyapp_windows_subsystem)");
+    println!("cargo:rerun-if-env-changed=PYAPP_WINDOWS_SUBSYSTEM");
+    if std::env::var("PYAPP_WINDOWS_SUBSYSTEM").is_ok_and(|value| value == "1" || value == "true") {
+        println!("cargo:rustc-cfg=pyapp_windows_subsystem");
+    }
+'@ 'pyapp_windows_subsystem'
+
+    $MainRs = Join-Path $PyAppSourcePath "src\main.rs"
+    Set-PatchedText $MainRs 'mod app;' @'
+#![cfg_attr(all(windows, pyapp_windows_subsystem), windows_subsystem = "windows")]
+
+mod app;
+mod splash;
+'@ 'mod splash;'
+    Set-PatchedText $MainRs 'fn main() -> Result<()> {' @'
+fn main() -> Result<()> {
+    let result = run();
+    if cfg!(pyapp_windows_subsystem) {
+        if let Err(error) = &result {
+            splash::show_error(&format!("{error:#}"));
+            std::process::exit(1);
+        }
+    }
+    result
+}
+
+fn run() -> Result<()> {
+'@ 'fn run() -> Result<()> {'
+
+    $TerminalRs = Join-Path $PyAppSourcePath "src\terminal.rs"
+    Set-PatchedText $TerminalRs 'let pb = ProgressBar::new(size);' @'
+crate::splash::set_status(&message);
+    let pb = ProgressBar::new(size);
+'@ 'crate::splash::set_status(&message);
+    let pb'
+    Set-PatchedText $TerminalRs 'let s = ProgressBar::new(0);' @'
+crate::splash::set_status(&message);
+    let s = ProgressBar::new(0);
+'@ 'crate::splash::set_status(&message);
+    let s'
+
+    $ProcessRs = Join-Path $PyAppSourcePath "src\process.rs"
+    Set-PatchedText $ProcessRs 'use crate::{app, terminal};' @'
+use crate::{app, terminal};
+
+#[cfg(windows)]
+fn hide_console_window(command: &mut Command) {
+    if cfg!(pyapp_windows_subsystem) {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+}
+
+#[cfg(not(windows))]
+fn hide_console_window(_command: &mut Command) {}
+'@ 'fn hide_console_window'
+    Set-PatchedText $ProcessRs @'
+    command.stderr(writer_stderr);
+
+    let mut child = command.spawn()?;
+'@ @'
+    command.stderr(writer_stderr);
+    hide_console_window(&mut command);
+
+    let mut child = command.spawn()?;
+'@ 'hide_console_window(&mut command);
+
+    let mut child = command.spawn()?;
+    drop'
+    Set-PatchedText $ProcessRs @'
+fn exec_gui(mut command: Command) -> Result<()> {
+    let mut child = command.spawn()?;
+'@ @'
+fn exec_gui(mut command: Command) -> Result<()> {
+    hide_console_window(&mut command);
+    let mut child = command.spawn()?;
+    crate::splash::hand_over(child.id());
+'@ 'crate::splash::hand_over'
+}
+
 $AppVersion = Get-ProjectVersion $ProjectRoot
 Write-Host "Version: $AppVersion" -ForegroundColor Cyan
 
@@ -146,11 +257,14 @@ if (Test-Path $IconPath) {
     Write-Host "Warning: Icon not found at $IconPath, building without icon" -ForegroundColor Yellow
 }
 
+Write-Host "Patching no-terminal support..." -ForegroundColor Yellow
+Patch-NoTerminalSupport $PyAppSourcePath
+
 Write-Host "Starting pyapp build for $AppName v$AppVersion..." -ForegroundColor Green
 Write-Host "PyApp source: $PyAppSourcePath" -ForegroundColor Gray
 Write-Host "Distribution: $DistPath" -ForegroundColor Gray
 
-$PyAppVars = "PYAPP_PROJECT_NAME", "PYAPP_PROJECT_VERSION", "PYAPP_PROJECT_PATH", "PYAPP_PYTHON_VERSION", "PYAPP_EXEC_CODE", "PYAPP_SELF_COMMAND", "PYAPP_PASS_LOCATION", "PYAPP_IS_GUI"
+$PyAppVars = "PYAPP_PROJECT_NAME", "PYAPP_PROJECT_VERSION", "PYAPP_PROJECT_PATH", "PYAPP_PYTHON_VERSION", "PYAPP_EXEC_CODE", "PYAPP_SELF_COMMAND", "PYAPP_PASS_LOCATION", "PYAPP_IS_GUI", "PYAPP_WINDOWS_SUBSYSTEM"
 $SavedEnv = @{}
 foreach ($Var in $PyAppVars) { $SavedEnv[$Var] = [Environment]::GetEnvironmentVariable($Var) }
 $PushedLocation = $false
@@ -185,9 +299,9 @@ try {
     }
 
     $Builds = @(
-        @{ Name = "$AppName";          IsGui = $false; Label = "console";                        ExecCode = $ExecCode },
-        @{ Name = "$AppName-hideable"; IsGui = $true;  Label = "hideable (GUI subsystem)";       ExecCode = $ExecCode },
-        @{ Name = "$AppName-no-term";  IsGui = $true;  Label = "no terminal (GUI subsystem)";    ExecCode = $NoTerminalExecCode }
+        @{ Name = "$AppName";          IsGui = $false; NoTerminal = $false; Label = "console";                     ExecCode = $ExecCode },
+        @{ Name = "$AppName-hideable"; IsGui = $true;  NoTerminal = $false; Label = "hideable (GUI subsystem)";    ExecCode = $ExecCode },
+        @{ Name = "$AppName-no-term";  IsGui = $true;  NoTerminal = $true;  Label = "no terminal (GUI subsystem)"; ExecCode = $NoTerminalExecCode }
     )
 
     Push-Location $PyAppSourcePath
@@ -199,6 +313,8 @@ try {
         $env:PYAPP_EXEC_CODE = $Build.ExecCode
         if ($Build.IsGui) { $env:PYAPP_IS_GUI = "true" }
         else { Remove-Item Env:\PYAPP_IS_GUI -ErrorAction SilentlyContinue }
+        if ($Build.NoTerminal) { $env:PYAPP_WINDOWS_SUBSYSTEM = "1" }
+        else { Remove-Item Env:\PYAPP_WINDOWS_SUBSYSTEM -ErrorAction SilentlyContinue }
 
         (Get-Item (Join-Path $PyAppSourcePath "build.rs")).LastWriteTime = Get-Date
 
