@@ -2,6 +2,7 @@ import gc
 import logging
 import time
 import threading
+from pathlib import Path
 import platform
 from typing import Optional
 
@@ -60,6 +61,8 @@ class StateManager:
         self._runtime_installer = None
         self._runtime_key = None
         self._runtimes_lock = threading.Lock()
+        self._fallback_runtime = None
+        self._failed_runtime_key = None
 
         self.logger = logging.getLogger(__name__)
         self._current_audio_host = None
@@ -170,6 +173,7 @@ class StateManager:
             self._update_ui_state("recording")
     
     def _transcription_pipeline(self, audio_data, use_auto_enter: bool = False):
+        fallback_to = None
         try:
             with self._state_lock:
                 if self.is_model_loading:
@@ -190,7 +194,17 @@ class StateManager:
 
             self._update_ui_state("processing")
 
-            transcribed_text = engine.transcribe_audio(audio_data)
+            try:
+                transcribed_text = engine.transcribe_audio(audio_data)
+            except Exception:
+                fallback = self._fallback_runtime
+                if fallback and engine is self.whisper_engine:
+                    self._fallback_runtime = None
+                    self._failed_runtime_key = self._runtime_key
+                    fallback_to = fallback
+                raise
+            self._fallback_runtime = None
+            self._failed_runtime_key = None
 
             if not transcribed_text:
                 return
@@ -220,21 +234,28 @@ class StateManager:
                 self.is_processing = False
                 pending_model = self._pending_model_change
                 pending_device = self._pending_device_change
+                self._pending_model_change = None
+                self._pending_device_change = None
+                if pending_model:
+                    self.is_model_loading = True
 
             if pending_device:
                 device_id, device_name = pending_device
                 self.logger.info(f"Executing pending device change to: {device_name}")
                 self._execute_audio_device_change(device_id, device_name)
-                self._pending_device_change = None
 
             if pending_model:
                 self.logger.info(f"Executing pending model change to: {pending_model}")
                 print(f"🔄 Processing complete, now switching to [{pending_model}] model...")
                 self._execute_model_change(pending_model)
-                self._pending_model_change = None
 
             if not (pending_device or pending_model):
                 self._update_ui_state("idle")
+
+            if fallback_to and not pending_model:
+                runtime, compute_type = fallback_to
+                print(f"⚠️ New runtime failed during transcription, falling back to [{runtime.label}]")
+                self.request_runtime_change(runtime.key, compute_type)
 
     def _log_transcription(self, text: str):
         log_config = self.config_manager.get_logging_config()
@@ -300,12 +321,9 @@ class StateManager:
         with self._state_lock:
             old_state = self.is_model_loading
             self.is_model_loading = loading
-            
-            if old_state != loading:
-                if loading:
-                    self._update_ui_state("processing")
-                else:
-                    self._update_ui_state("idle")
+
+        if old_state != loading:
+            self._update_ui_state("processing" if loading else "idle")
     
     def is_transcription_recording(self) -> bool:
         return self.audio_recorder.get_recording_status() and not self._command_mode
@@ -326,33 +344,74 @@ class StateManager:
                 return "idle"
     
     def request_model_change(self, new_model_key: str) -> bool:
-        current_state = self.get_current_state()
-        
         if new_model_key == self.whisper_engine.model_key:
             return True
-        
-        if current_state == "model_loading":
-            print("⏳ Model already loading, please wait...")
-            return False
-        
-        if current_state == "recording":
+
+        if self.get_ggml_model_state(new_model_key) == "download":
+            with self._state_lock:
+                if self._runtime_install_running:
+                    print("⏳ A download is already running...")
+                    return False
+                self._runtime_install_running = True
+            threading.Thread(target=self._download_ggml_model_and_switch, args=(new_model_key,), daemon=True).start()
+            return True
+
+        if self.get_current_state() == "recording":
             print(f"🎤 Cancelling recording to switch to [{new_model_key}] model...")
             self.cancel_active_recording()
-            self._execute_model_change(new_model_key)
-            return True
-        
-        if current_state == "processing":
-            print(f"⏳ Queueing model change to [{new_model_key}] until transcription completes...")
-            self._pending_model_change = new_model_key
-            return True
-        
-        if current_state == "idle":
-            self._execute_model_change(new_model_key)
-            return True
-        
-        self.logger.warning(f"Unexpected state for model change: {current_state}")
-        return False
-    
+
+        with self._state_lock:
+            if self.is_model_loading:
+                print("⏳ Model already loading, please wait...")
+                return False
+            if self.is_processing:
+                print(f"⏳ Queueing model change to [{new_model_key}] until transcription completes...")
+                self._pending_model_change = new_model_key
+                return True
+            self.is_model_loading = True
+
+        self._update_ui_state("processing")
+        self._execute_model_change(new_model_key)
+        return True
+
+    def _ggml_model_dir(self) -> Optional[str]:
+        return with_whisper_cpp_paths(self.config_manager.get_whisper_config()).get('cpp_model_dir')
+
+    def get_ggml_model_state(self, model_key: str) -> Optional[str]:
+        engine = self.whisper_engine
+        if engine.ENGINE_TYPE == FASTER_WHISPER:
+            return None
+        if engine._is_model_cached(model_key):
+            return "ready"
+        from .runtime_installer import GGML_MODEL_NAMES, GGML_MODEL_ALIASES
+        if self._ggml_model_dir() and GGML_MODEL_ALIASES.get(model_key, model_key).lower() in GGML_MODEL_NAMES:
+            return "download"
+        return "unavailable"
+
+    def _download_ggml_model_and_switch(self, model_key: str):
+        from .runtime_installer import RuntimeInstaller
+
+        title = "Download whisper.cpp model"
+        self._runtime_installer = RuntimeInstaller(on_progress=self._report_install_progress)
+        try:
+            if not dialogs.confirm(title, f"The whisper.cpp file for the [{model_key}] model is not downloaded yet. Download it now?"):
+                return
+            print(f"📦 Downloading the whisper.cpp model for [{model_key}]...")
+            self._runtime_installer.download_ggml_model(model_key, Path(self._ggml_model_dir()))
+        except Exception as e:
+            self.logger.error(f"Failed to download ggml model {model_key}: {e}")
+            print(f"❌ Failed to download the [{model_key}] model: {e}")
+            dialogs.show_error(title, f"Download failed:\n\n{str(e)[:600]}")
+            return
+        finally:
+            with self._state_lock:
+                self._runtime_install_running = False
+                self._runtime_installer = None
+            self.system_tray.set_status_text(None)
+
+        self.system_tray.refresh_menu()
+        self.request_model_change(model_key)
+
     def get_runtimes(self) -> list:
         with self._runtimes_lock:
             if self._runtimes is None:
@@ -360,8 +419,16 @@ class StateManager:
                 installed_binary, _ = whisper_cpp_runtime_paths()
                 whisper_cpp_binary = (self.config_manager.get_setting('whisper', 'cpp_binary')
                                       or installed_binary or find_whisper_cli())
-                self._runtimes = detect_runtimes(whisper_cpp_binary)
+                try:
+                    self._runtimes = detect_runtimes(whisper_cpp_binary)
+                except Exception as e:
+                    self.logger.error(f"Runtime detection failed: {e}")
+                    self._runtimes = []
             return self._runtimes
+
+    def refresh_runtimes(self):
+        with self._runtimes_lock:
+            self._runtimes = None
 
     def get_current_runtime(self) -> Optional[Runtime]:
         runtimes = self.get_runtimes()
@@ -425,6 +492,7 @@ class StateManager:
 
         old_engine = self.whisper_engine
         old_runtime = self.get_current_runtime()
+        old_compute_type = self.get_current_compute_type()
         whisper_config = with_whisper_cpp_paths(self.config_manager.get_whisper_config())
         whisper_config['model'] = old_engine.model_key
         if runtime.engine_type == FASTER_WHISPER:
@@ -453,6 +521,8 @@ class StateManager:
             with self._state_lock:
                 self.whisper_engine = new_engine
                 self._runtime_key = runtime.key
+                retry_allowed = old_runtime and old_runtime.key != self._failed_runtime_key
+                self._fallback_runtime = (old_runtime, old_compute_type) if retry_allowed else None
             old_engine.unload()
             del old_engine
             gc.collect()
@@ -508,8 +578,7 @@ class StateManager:
             self.system_tray.set_status_text(None)
 
         print(f"✅ {runtime.label} installed")
-        with self._runtimes_lock:
-            self._runtimes = None
+        self.refresh_runtimes()
         installed_runtime = next(candidate for candidate in self.get_runtimes() if candidate.key == runtime.key)
         if installed_runtime.needs_restart:
             self._restart_into_runtime(installed_runtime)
@@ -522,18 +591,28 @@ class StateManager:
             self._restart_into_runtime(runtime)
 
     def _restart_into_runtime(self, runtime: Runtime):
-        if self.get_current_state() != "idle":
+        with self._state_lock:
+            busy = self.is_model_loading or self.is_processing or self.audio_recorder.get_recording_status()
+            if not busy:
+                self.is_model_loading = True
+        if busy:
             message = f"{runtime.label} is installed. Select it again in the Runtime menu once the current recording is done."
             print(f"⏳ {message}")
             dialogs.confirm(f"Switch to {runtime.label}", message)
             return
+        self._update_ui_state("processing")
         self.config_manager.update_user_setting('whisper', 'runtime', runtime.key)
         self.config_manager.update_user_setting('whisper', 'engine_type', runtime.engine_type)
         self.config_manager.update_user_setting('whisper', 'device', runtime.device)
         self.config_manager.update_user_setting('whisper', 'compute_type', choose_compute_type(runtime, None))
         print(f"🔄 Restarting Whisper Key to switch to [{runtime.label}]...")
         from .utils import restart_app
-        restart_app()
+        try:
+            restart_app()
+        except Exception as e:
+            self.logger.error(f"Failed to restart into {runtime.label}: {e}")
+            print(f"❌ Failed to restart, restart Whisper Key manually: {e}")
+            self.set_model_loading(False)
 
     def _restore_engine(self, engine):
         print("🔄 Restoring previous runtime...")
@@ -562,6 +641,7 @@ class StateManager:
         def progress_callback(message: str):
             if "ready" in message.lower() or "already loaded" in message.lower():
                 print(f"✅ Successfully switched to [{new_model_key}] model")
+                self.config_manager.update_user_setting('whisper', 'model', new_model_key)
                 self.set_model_loading(False)
             elif "failed" in message.lower():
                 print(f"❌ Failed to change model: {message}")
@@ -570,8 +650,8 @@ class StateManager:
                 print(f"🔄 {message}")
                 self.set_model_loading(True)
         
+        self._fallback_runtime = None
         try:
-            self.set_model_loading(True)
             print(f"🔄 Switching to [{new_model_key}] model...")
             
             self.whisper_engine.change_model(new_model_key, progress_callback)
