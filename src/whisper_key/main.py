@@ -361,7 +361,7 @@ def main():
                 clipboard_manager.update_auto_paste(False)
 
         print("🚀 Whisper Key ready!")
-        state_manager.play_ready_sound()
+        audio_feedback.play_ready_sound()
         config_manager.print_startup_hotkey_instructions()
         print("   [CTRL+C] to quit", flush=True)
 
