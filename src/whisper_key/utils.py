@@ -1,5 +1,6 @@
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import importlib.resources
@@ -101,6 +102,24 @@ def restart_app():
     subprocess.Popen([sys.executable, restart_helper, str(os.getpid()), *command], creationflags=creationflags)
     import signal
     signal.raise_signal(signal.SIGINT)
+
+
+def prune_stale_pyapp_envs():
+    if not os.environ.get('PYAPP'):
+        return []
+
+    current_env = Path(sys.prefix).resolve()
+    hash_dir = current_env.parent
+    if hash_dir.parent.name != 'whisper-key-local' or hash_dir.parent.parent.name != 'data':
+        return []
+
+    removed = []
+    for sibling in hash_dir.iterdir():
+        if sibling.is_dir() and sibling != current_env and (sibling / 'pyvenv.cfg').is_file():
+            shutil.rmtree(sibling, ignore_errors=True)
+            if not sibling.exists():
+                removed.append(sibling.name)
+    return removed
 
 
 def get_version():

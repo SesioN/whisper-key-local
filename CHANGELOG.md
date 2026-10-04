@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Auto-paste and copy to clipboard are independent tray checkboxes** - New `clipboard.copy_to_clipboard` keeps the transcription on the clipboard after auto-paste in both delivery methods (disables `paste_preserve_clipboard`); voice-command text follows the same setting. Replaces `type_also_copy_to_clipboard`, which is migrated automatically
 
 ### Fixed
+- **Stale PyApp environments cleaned up** - the exe now deletes environments left behind by previous versions on startup (~400 MB each)
 - **No console flashes from sound playback** - playsound3 backend probes no longer briefly open console windows on Windows
 
 ## [0.8.3] - 2026-09-27
