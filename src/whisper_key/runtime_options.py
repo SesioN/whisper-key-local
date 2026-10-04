@@ -1,6 +1,7 @@
 import logging
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 from .platform import gpu
@@ -106,12 +107,18 @@ def _gpu_runtime(key: str, loaded_ct2_variant: str, gpu_device_count: int, gpu_t
 
 
 def _whisper_cpp_runtime(whisper_cpp_binary: Optional[str], has_gpu) -> Runtime:
-    label = "Vulkan (whisper.cpp)"
+    label = "Vulkan (whisper.cpp)" if _has_vulkan_backend(whisper_cpp_binary) else "whisper.cpp"
     if whisper_cpp_binary:
         return Runtime(VULKAN, label, WHISPER_CPP, "vulkan", INSTALLED)
     if has_gpu and gpu.has_vulkan_driver() and sys.platform == "win32":
         return Runtime(VULKAN, label, WHISPER_CPP, "vulkan", INSTALLABLE, install_size=_install_size(VULKAN))
     return Runtime(VULKAN, label, WHISPER_CPP, "vulkan", UNSUPPORTED, "no Vulkan GPU driver")
+
+
+def _has_vulkan_backend(whisper_cpp_binary: Optional[str]) -> bool:
+    if not whisper_cpp_binary:
+        return True
+    return any(Path(whisper_cpp_binary).resolve().parent.glob("*ggml-vulkan*"))
 
 
 def current_runtime_key(engine_type: str, device: str, runtimes: list) -> str:

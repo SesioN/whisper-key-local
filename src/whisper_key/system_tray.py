@@ -320,7 +320,6 @@ class SystemTray:
             success = self.state_manager.request_model_change(model_key)
 
             if success:
-                self.config_manager.update_user_setting('whisper', 'model', model_key)
                 self.icon.menu = self._create_menu()
             else:
                 self.logger.warning(f"Request to change model to {model_key} was not accepted")
