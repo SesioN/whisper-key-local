@@ -771,7 +771,9 @@ class StateManager:
         from .runtime_installer import install_options
         options = install_options(runtime.key)
         if upgrade:
-            if options and dialogs.confirm(f"Upgrade {runtime.label}", (
+            if not options:
+                return None
+            if dialogs.confirm(f"Upgrade {runtime.label}", (
                     f"The installed {runtime.label} runtime predates whisper-server, so the model is reloaded for every recording.\n\n"
                     f"Rebuild it now to keep the model loaded?\nDownload: {options[0].download_size}")):
                 return options[0]
