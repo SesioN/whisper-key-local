@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **`whisper-key-no-term.exe`** - Windows build that never opens a console window; a native splash shows first-run setup progress and reports setup or startup failures in an error dialog, then the loading screen takes over
 
 ### Fixed
+- **Stale PyApp environments cleaned up** - the exe now deletes environments left behind by previous versions on startup (~400 MB each)
 - **No console flashes from sound playback** - playsound3 backend probes no longer briefly open console windows on Windows
 
 ## [0.8.3] - 2026-09-27

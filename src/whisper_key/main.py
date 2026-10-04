@@ -30,7 +30,7 @@ from .voice_commands import VoiceCommandManager
 from .hardware_detection import detect_and_print as detect_hardware
 from .onboarding import check_gpu
 from .update_checker import check_for_updates
-from .utils import get_user_app_data_path, get_version
+from .utils import get_user_app_data_path, get_version, prune_stale_pyapp_envs
 
 def setup_logging(config_manager: ConfigManager):
     log_config = config_manager.get_logging_config()
@@ -213,6 +213,14 @@ def shutdown_app(hotkey_listener: HotkeyListener, state_manager: StateManager, l
     if state_manager:
         state_manager.shutdown()
 
+def prune_stale_envs_in_background(logger: logging.Logger):
+    try:
+        removed = prune_stale_pyapp_envs()
+        if removed:
+            logger.info(f"Removed stale PyApp environments: {', '.join(removed)}")
+    except Exception as ex:
+        logger.warning(f"Could not prune stale PyApp environments: {ex}")
+
 def main():
     console.setup()
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -243,6 +251,8 @@ def main():
         setup_exception_handler()
 
         check_for_updates(config_manager, test_mode=args.test)
+        if not args.test:
+            threading.Thread(target=prune_stale_envs_in_background, args=(logger,), daemon=True).start()
 
         whisper_config = config_manager.get_whisper_config()
         audio_config = config_manager.get_audio_config()
