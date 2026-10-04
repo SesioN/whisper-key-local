@@ -107,12 +107,13 @@ class SystemTray:
             first_group = False
 
             for model in models:
+                ggml_state = self.state_manager.get_ggml_model_state(model.key)
                 items.append(pystray.MenuItem(
-                    model.label,
+                    f"{model.label} (download)" if ggml_state == "download" else model.label,
                     make_model_selector(model.key),
                     radio=True,
                     checked=make_is_current(model.key),
-                    enabled=model_selection_enabled
+                    enabled=False if ggml_state == "unavailable" else model_selection_enabled
                 ))
 
         return items
@@ -445,8 +446,8 @@ class SystemTray:
             console.hide()
         console.start_minimize_monitor(console.hide)
 
-    def _quit_application_from_tray(self, icon=None, item=None):        
-        os.kill(os.getpid(), signal.SIGINT)
+    def _quit_application_from_tray(self, icon=None, item=None):
+        signal.raise_signal(signal.SIGINT)
     
     def update_state(self, new_state: str):
         if not TRAY_AVAILABLE or not self.is_running:

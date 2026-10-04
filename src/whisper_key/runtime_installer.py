@@ -1,5 +1,6 @@
 import glob
 import hashlib
+import http.client
 import importlib.util
 import json
 import logging
@@ -11,6 +12,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
 import wave
 import zipfile
@@ -65,6 +67,9 @@ WINGET_PACKAGES = {
 }
 
 DOWNLOAD_CHUNK_BYTES = 1024 * 1024
+DOWNLOAD_ATTEMPTS = 3
+INSTALL_FREE_SPACE_BYTES = 5 * 1024 ** 3
+BUILD_FREE_SPACE_BYTES = 2 * 1024 ** 3
 PIP_TIMEOUT_SECONDS = 3600
 BUILD_TIMEOUT_SECONDS = 3600
 WINGET_REBOOT_REQUIRED = 0x8A150109
@@ -129,6 +134,13 @@ def install_options(runtime_key: str) -> list:
     return []
 
 
+def ensure_free_space(directory: Path, required_bytes: int):
+    free_bytes = shutil.disk_usage(directory).free
+    if free_bytes < required_bytes:
+        raise RuntimeInstallError(f"Not enough free disk space in {directory}: "
+                                  f"{required_bytes / 1e9:.1f} GB needed, {free_bytes / 1e9:.1f} GB free")
+
+
 def ggml_model_file_name(model_key: str) -> str:
     key = GGML_MODEL_ALIASES.get(model_key, model_key).lower()
     if key in GGML_MODEL_NAMES:
@@ -155,6 +167,8 @@ class RuntimeInstaller:
         if runtime_key == active_ct2_runtime():
             raise RuntimeInstallError("This runtime is in use; switch to another runtime and restart first")
         final_dir = get_runtime_dir(runtime_key)
+        final_dir.parent.mkdir(parents=True, exist_ok=True)
+        ensure_free_space(final_dir.parent, INSTALL_FREE_SPACE_BYTES)
         staging_dir = final_dir.with_name(final_dir.name + ".partial")
         shutil.rmtree(staging_dir, ignore_errors=True)
         staging_dir.mkdir(parents=True)
@@ -334,6 +348,7 @@ class RuntimeInstaller:
         work_dir = Path(tempfile.gettempdir()) / "wkb"
         shutil.rmtree(work_dir, ignore_errors=True)
         work_dir.mkdir(parents=True)
+        ensure_free_space(work_dir, BUILD_FREE_SPACE_BYTES)
         try:
             source_dir = self._download_whisper_cpp_source(tag, work_dir)
             build_dir = work_dir / "b"
@@ -447,22 +462,62 @@ class RuntimeInstaller:
             raise RuntimeInstallError("Unexpected whisper.cpp source archive layout")
         return top_level_dirs[0]
 
+    def download_ggml_model(self, model_key: str, model_dir: Path) -> Path:
+        file_name = ggml_model_file_name(model_key)
+        model_dir.mkdir(parents=True, exist_ok=True)
+        destination = model_dir / file_name
+        self._download_file(GGML_MODEL_URL.format(revision=GGML_MODEL_REVISION, file_name=file_name), destination, GGML_MODEL_SHA256[file_name])
+        return destination
+
     def _download_file(self, url: str, destination: Path, expected_sha256: str):
+        for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+            try:
+                return self._download_file_once(url, destination, expected_sha256)
+            except (OSError, http.client.HTTPException) as e:
+                client_error = isinstance(e, urllib.error.HTTPError) and e.code < 500
+                if self._cancelled or client_error or attempt == DOWNLOAD_ATTEMPTS:
+                    destination.with_name(destination.name + ".download").unlink(missing_ok=True)
+                    raise
+                self.logger.warning(f"Download of {destination.name} failed ({e}), retrying")
+                self._report(f"Download interrupted, retrying ({attempt}/{DOWNLOAD_ATTEMPTS - 1})...")
+                time.sleep(attempt * 5)
+
+    def _download_file_once(self, url: str, destination: Path, expected_sha256: str):
         partial = destination.with_name(destination.name + ".download")
         digest = hashlib.sha256()
-        with urllib.request.urlopen(url, timeout=60) as response, open(partial, "wb") as output:
+        resume_from = partial.stat().st_size if partial.exists() else 0
+        request = urllib.request.Request(url, headers={"Range": f"bytes={resume_from}-"} if resume_from else {})
+        try:
+            response = urllib.request.urlopen(request, timeout=60)
+        except urllib.error.HTTPError as e:
+            if e.code != 416:
+                raise
+            partial.unlink()
+            return self._download_file_once(url, destination, expected_sha256)
+        with response:
+            if response.status != 206:
+                resume_from = 0
+            if resume_from:
+                with open(partial, "rb") as existing:
+                    while chunk := existing.read(DOWNLOAD_CHUNK_BYTES):
+                        digest.update(chunk)
             total_bytes = int(response.headers.get("Content-Length") or 0)
-            received_bytes = 0
-            last_reported_percent = -1
-            while chunk := response.read(DOWNLOAD_CHUNK_BYTES):
-                output.write(chunk)
-                digest.update(chunk)
-                received_bytes += len(chunk)
-                if total_bytes:
-                    percent = received_bytes * 100 // total_bytes
-                    if percent >= last_reported_percent + 10:
-                        last_reported_percent = percent
-                        self._report(f"Downloading {destination.name}... {percent}%")
+            ensure_free_space(destination.parent, total_bytes)
+            total_bytes += resume_from
+            received_bytes = resume_from
+            with open(partial, "ab" if resume_from else "wb") as output:
+                last_reported_percent = -1
+                while chunk := response.read(DOWNLOAD_CHUNK_BYTES):
+                    if self._cancelled:
+                        raise RuntimeInstallError("Installation cancelled")
+                    output.write(chunk)
+                    digest.update(chunk)
+                    received_bytes += len(chunk)
+                    if total_bytes:
+                        percent = received_bytes * 100 // total_bytes
+                        if percent >= last_reported_percent + 10:
+                            last_reported_percent = percent
+                            self._report(f"Downloading {destination.name}... {percent}%")
         if digest.hexdigest() != expected_sha256:
             partial.unlink(missing_ok=True)
             raise RuntimeInstallError(f"Checksum mismatch for {destination.name}; the download was discarded")
