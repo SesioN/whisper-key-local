@@ -76,6 +76,9 @@ class StateManager:
         self._vad_sensitivity_window_open = False
         self._vad_hysteresis_gap = None
         self._auto_trigger_resume_time = 0.0
+        self._auto_trigger_paste = config_manager.get_setting('vad', 'auto_trigger_paste')
+        self._auto_trigger_lock = threading.Lock()
+        self._start_lock = threading.Lock()
 
         self._runtimes = None
         self._runtime_install_running = False
@@ -126,14 +129,27 @@ class StateManager:
             self._handle_auto_trigger_speech_end()
 
     def _handle_auto_trigger_speech_start(self):
-        if not self.auto_trigger_enabled or self._vad_sensitivity_window_open or not self.can_start_recording():
-            return
         # Don't let our own feedback sounds trigger a new recording
         if time.monotonic() < self._auto_trigger_resume_time:
             self.logger.debug("Auto-trigger: ignoring speech during feedback cooldown")
             return
-        self.logger.info("Auto-trigger: speech detected, starting recording")
-        self._begin_recording(auto_triggered=True)
+        with self._start_lock:
+            if not self.auto_trigger_enabled or self._vad_sensitivity_window_open or not self.can_start_recording():
+                return
+            self.logger.info("Auto-trigger: speech detected, starting recording")
+            self._begin_recording(auto_triggered=True)
+
+    def _resume_auto_trigger_if_speaking(self):
+        detector = self.audio_recorder.continuous_vad
+        if detector and detector.is_speech_active():
+            self._handle_auto_trigger_speech_start()
+
+    def _start_auto_trigger_cooldown(self):
+        self._auto_trigger_resume_time = time.monotonic() + self.AUTO_TRIGGER_COOLDOWN_SECONDS
+
+    def play_ready_sound(self):
+        self._start_auto_trigger_cooldown()
+        self.audio_feedback.play_ready_sound()
 
     def _handle_auto_trigger_speech_end(self):
         if not self._auto_triggered_recording or not self.is_transcription_recording():
@@ -196,16 +212,15 @@ class StateManager:
     def is_auto_trigger_available(self) -> bool:
         return self.audio_recorder.continuous_vad is not None
 
-    def play_ready_sound(self):
-        self._auto_trigger_resume_time = time.monotonic() + self.AUTO_TRIGGER_COOLDOWN_SECONDS
-        self.audio_feedback.play_ready_sound()
-
     def update_auto_trigger(self, enabled: bool):
-        self.auto_trigger_enabled = enabled
-        if self._apply_auto_trigger():
-            self.config_manager.update_user_setting('vad', 'auto_trigger_enabled', enabled)
-        else:
-            self.auto_trigger_enabled = False
+        with self._auto_trigger_lock:
+            self.auto_trigger_enabled = enabled
+            if self._apply_auto_trigger():
+                self.config_manager.update_user_setting('vad', 'auto_trigger_enabled', enabled)
+                print("🎙️ Voice-activated recording on: the microphone is listening" if enabled else "🎙️ Voice-activated recording off")
+            else:
+                self.auto_trigger_enabled = False
+        self.system_tray.refresh_menu()
 
     def handle_streaming_result(self, text: str, is_final: bool):
         if is_final:
@@ -236,6 +251,7 @@ class StateManager:
         self._clear_streaming_display()
         self._command_mode = False
         self.audio_recorder.cancel_recording()
+        self._start_auto_trigger_cooldown()
         self.audio_feedback.play_cancel_sound()
         self._update_ui_state("idle")
     
@@ -250,19 +266,20 @@ class StateManager:
             return False
     
     def start_recording(self):
-        if not self.can_start_recording():
-            current_state = self.get_current_state()
-            if self.is_muted:
-                print("🔇 Microphone is muted - unmute to record")
-            elif self.is_processing:
-                print("⏳ Still processing previous recording...")
-            elif self.is_model_loading:
-                print("⏳ Still loading model...")
-            else:
-                print(f"⏳ Cannot record while {current_state}...")
-            return
+        with self._start_lock:
+            if self.can_start_recording():
+                self._begin_recording()
+                return
 
-        self._begin_recording()
+        current_state = self.get_current_state()
+        if self.is_muted:
+            print("🔇 Microphone is muted - unmute to record")
+        elif self.is_processing:
+            print("⏳ Still processing previous recording...")
+        elif self.is_model_loading:
+            print("⏳ Still loading model...")
+        else:
+            print(f"⏳ Cannot record while {current_state}...")
 
     def toggle_recording(self):
         if not self._toggle_lock.acquire(blocking=False):
@@ -278,11 +295,13 @@ class StateManager:
             self._toggle_lock.release()
 
     def start_command_recording(self):
-        if not self.can_start_recording():
-            if self.is_muted:
+        with self._start_lock:
+            if self.can_start_recording():
+                self._begin_command_recording()
+            elif self.is_muted:
                 print("🔇 Microphone is muted - unmute to record")
-            return
 
+    def _begin_command_recording(self):
         with self._state_lock:
             self._command_mode = True
             self._auto_triggered_recording = False
@@ -329,6 +348,7 @@ class StateManager:
                 command_mode = self._command_mode
                 self._command_mode = False
                 engine = self.whisper_engine
+                auto_triggered = self._auto_triggered_recording
 
             self.audio_feedback.play_stop_sound()
 
@@ -353,9 +373,12 @@ class StateManager:
                 self._handle_command_transcription(transcribed_text, use_auto_enter)
                 return
 
-            success = self.clipboard_manager.deliver_transcription(
-                transcribed_text, use_auto_enter
-            )
+            if auto_triggered and not self._auto_trigger_paste:
+                success = self.clipboard_manager.copy_with_notification(transcribed_text)
+            else:
+                success = self.clipboard_manager.deliver_transcription(
+                    transcribed_text, use_auto_enter
+                )
 
             if success:
                 self.last_transcription = transcribed_text
@@ -369,7 +392,7 @@ class StateManager:
             with self._state_lock:
                 self.is_processing = False
                 self._auto_triggered_recording = False
-                self._auto_trigger_resume_time = time.monotonic() + self.AUTO_TRIGGER_COOLDOWN_SECONDS
+                self._start_auto_trigger_cooldown()
                 pending_model = self._pending_model_change
                 pending_device = self._pending_device_change
                 self._pending_model_change = None
@@ -390,7 +413,8 @@ class StateManager:
             if not (pending_device or pending_model):
                 self._update_ui_state("idle")
 
-            self._apply_auto_trigger()
+            if self._apply_auto_trigger() and self.auto_trigger_enabled:
+                threading.Timer(self.AUTO_TRIGGER_COOLDOWN_SECONDS, self._resume_auto_trigger_if_speaking).start()
 
     def _log_transcription(self, text: str):
         log_config = self.config_manager.get_logging_config()

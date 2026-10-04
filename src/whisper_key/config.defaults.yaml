@@ -211,6 +211,7 @@ vad: # Voice Activity Detection (VAD)
     # NOTE: the microphone stays open the whole time the app is running
     auto_trigger_enabled: false
     auto_trigger_silence_seconds: 1.5 # Silence after speech that ends a voice-activated recording
+    auto_trigger_paste: true # false = voice-activated recordings are only copied to the clipboard, never pasted
 
 audio: # Audio Recording Settings
     # Sample rate is fixed at 16000 Hz for optimal Whisper and TEN VAD performance

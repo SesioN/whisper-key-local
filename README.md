@@ -125,8 +125,9 @@ Delete this file and restart app to reset to defaults.
 | `vad.vad_min_speech_duration` | `0.1` | Min speech segment (seconds); also how long speech must last to start a voice-activated recording |
 | `vad.vad_realtime_enabled` | `true` | Auto-stop on silence |
 | `vad.vad_silence_timeout_seconds` | `30.0` | Seconds before auto-stop |
-| `vad.auto_trigger_enabled` | `false` | Start recording when speech is detected, stop after a short silence. Keeps the microphone open and the VAD running (small constant CPU use); any nearby speech (TV, calls) is transcribed and delivered like a hotkey recording, including auto-paste |
+| `vad.auto_trigger_enabled` | `false` | Start recording when speech is detected, stop after a short silence. Keeps the microphone open and the VAD running (about 0.1 ms per 16 ms audio block, under 1% of one core); any nearby speech (TV, calls) is transcribed and delivered like a hotkey recording, including auto-paste unless `vad.auto_trigger_paste` is false. The tray tooltip shows when the microphone is listening. The live streaming preview starts without the 1 s pre-roll; the final transcription includes it |
 | `vad.auto_trigger_silence_seconds` | `1.5` | Silence that ends a voice-activated recording |
+| `vad.auto_trigger_paste` | `true` | false = voice-activated recordings are only copied to the clipboard |
 | **Audio** |||
 | `audio.host` | `null` | Audio API (WASAPI, Core Audio, etc.) |
 | `audio.channels` | `1` | 1 = mono, 2 = stereo |
