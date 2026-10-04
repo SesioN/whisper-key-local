@@ -104,12 +104,13 @@ class SystemTray:
             first_group = False
 
             for model in models:
+                ggml_state = self.state_manager.get_ggml_model_state(model.key)
                 items.append(pystray.MenuItem(
-                    model.label,
+                    f"{model.label} (download)" if ggml_state == "download" else model.label,
                     make_model_selector(model.key),
                     radio=True,
                     checked=make_is_current(model.key),
-                    enabled=model_selection_enabled
+                    enabled=False if ggml_state == "unavailable" else model_selection_enabled
                 ))
 
         return items

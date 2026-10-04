@@ -15,6 +15,14 @@ import numpy as np
 from .audio_recorder import AudioRecorder
 
 
+def ggml_file_name(model_key: str) -> str:
+    from .runtime_installer import RuntimeInstallError, ggml_model_file_name
+    try:
+        return ggml_model_file_name(model_key)
+    except RuntimeInstallError:
+        return f"ggml-{model_key}.bin"
+
+
 def find_whisper_cli():
     env = os.environ.get("WHISPER_CPP_BINARY", "")
     if env and os.path.isfile(env):
@@ -102,7 +110,7 @@ class WhisperCppEngine:
 
     def _get_model_path(self, model_key: str = None):
         key = model_key or self.model_key
-        filename = f"ggml-{key}.bin"
+        filename = ggml_file_name(key)
 
         if self._model_dir:
             candidate = os.path.join(self._model_dir, filename)

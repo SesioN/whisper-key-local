@@ -2,6 +2,7 @@ import gc
 import logging
 import time
 import threading
+from pathlib import Path
 import platform
 from typing import Optional
 
@@ -342,6 +343,15 @@ class StateManager:
         if new_model_key == self.whisper_engine.model_key:
             return True
 
+        if self.get_ggml_model_state(new_model_key) == "download":
+            with self._state_lock:
+                if self._runtime_install_running:
+                    print("⏳ A download is already running...")
+                    return False
+                self._runtime_install_running = True
+            threading.Thread(target=self._download_ggml_model_and_switch, args=(new_model_key,), daemon=True).start()
+            return True
+
         if self.get_current_state() == "recording":
             print(f"🎤 Cancelling recording to switch to [{new_model_key}] model...")
             self.cancel_active_recording()
@@ -359,6 +369,44 @@ class StateManager:
         self._update_ui_state("processing")
         self._execute_model_change(new_model_key)
         return True
+
+    def _ggml_model_dir(self) -> Optional[str]:
+        return with_whisper_cpp_paths(self.config_manager.get_whisper_config()).get('cpp_model_dir')
+
+    def get_ggml_model_state(self, model_key: str) -> Optional[str]:
+        engine = self.whisper_engine
+        if engine.ENGINE_TYPE == FASTER_WHISPER:
+            return None
+        if engine._is_model_cached(model_key):
+            return "ready"
+        from .runtime_installer import GGML_MODEL_NAMES, GGML_MODEL_ALIASES
+        if self._ggml_model_dir() and GGML_MODEL_ALIASES.get(model_key, model_key).lower() in GGML_MODEL_NAMES:
+            return "download"
+        return "unavailable"
+
+    def _download_ggml_model_and_switch(self, model_key: str):
+        from .runtime_installer import RuntimeInstaller
+
+        title = "Download whisper.cpp model"
+        self._runtime_installer = RuntimeInstaller(on_progress=self._report_install_progress)
+        try:
+            if not dialogs.confirm(title, f"The whisper.cpp file for the [{model_key}] model is not downloaded yet. Download it now?"):
+                return
+            print(f"📦 Downloading the whisper.cpp model for [{model_key}]...")
+            self._runtime_installer.download_ggml_model(model_key, Path(self._ggml_model_dir()))
+        except Exception as e:
+            self.logger.error(f"Failed to download ggml model {model_key}: {e}")
+            print(f"❌ Failed to download the [{model_key}] model: {e}")
+            dialogs.show_error(title, f"Download failed:\n\n{str(e)[:600]}")
+            return
+        finally:
+            with self._state_lock:
+                self._runtime_install_running = False
+                self._runtime_installer = None
+            self.system_tray.set_status_text(None)
+
+        self.system_tray.refresh_menu()
+        self.request_model_change(model_key)
 
     def get_runtimes(self) -> list:
         with self._runtimes_lock:
