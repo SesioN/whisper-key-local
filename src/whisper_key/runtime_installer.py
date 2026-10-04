@@ -140,9 +140,17 @@ def ensure_free_space(directory: Path, required_bytes: int):
                                   f"{required_bytes / 1e9:.1f} GB needed, {free_bytes / 1e9:.1f} GB free")
 
 
+def ggml_model_name(model_key: str) -> Optional[str]:
+    key = model_key.rsplit("/", 1)[-1].lower()
+    key = re.sub(r"^(?:faster-)?whisper-", "", key)
+    key = re.sub(r"-ct2$", "", key)
+    key = GGML_MODEL_ALIASES.get(key, key)
+    return key if key in GGML_MODEL_NAMES else None
+
+
 def ggml_model_file_name(model_key: str) -> str:
-    key = GGML_MODEL_ALIASES.get(model_key, model_key).lower()
-    if key in GGML_MODEL_NAMES:
+    key = ggml_model_name(model_key)
+    if key:
         return f"ggml-{key}.bin"
     raise RuntimeInstallError(f"No whisper.cpp (ggml) model matches '{model_key}'")
 
