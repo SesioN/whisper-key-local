@@ -96,7 +96,7 @@ def _redirect_missing_streams_to_devnull():
 
 def setup():
     global _hwnd, _active
-    if not os.environ.get("PYAPP") or not kernel32.AllocConsole():
+    if not os.environ.get("PYAPP") or os.environ.get("WHISPER_KEY_NO_TERMINAL") or not kernel32.AllocConsole():
         _redirect_missing_streams_to_devnull()
         return
     _hwnd = None

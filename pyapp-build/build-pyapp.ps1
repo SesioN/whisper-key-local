@@ -167,7 +167,8 @@ try {
         $env:PYAPP_PROJECT_VERSION = $AppVersion
     }
     $env:PYAPP_PYTHON_VERSION = "3.12"
-    $env:PYAPP_EXEC_CODE = 'from whisper_key.main import main; main()'
+    $ExecCode = 'from whisper_key.main import main; main()'
+    $NoTerminalExecCode = 'import os; os.environ["WHISPER_KEY_NO_TERMINAL"] = "1"; from whisper_key.main import main; main()'
     $env:PYAPP_SELF_COMMAND = "self"
     $env:PYAPP_PASS_LOCATION = "true"
 
@@ -184,8 +185,9 @@ try {
     }
 
     $Builds = @(
-        @{ Name = "$AppName";      IsGui = $false; Label = "console" },
-        @{ Name = "$AppName-hideable"; IsGui = $true;  Label = "hideable (GUI subsystem)" }
+        @{ Name = "$AppName";          IsGui = $false; Label = "console";                        ExecCode = $ExecCode },
+        @{ Name = "$AppName-hideable"; IsGui = $true;  Label = "hideable (GUI subsystem)";       ExecCode = $ExecCode },
+        @{ Name = "$AppName-no-term";  IsGui = $true;  Label = "no terminal (GUI subsystem)";    ExecCode = $NoTerminalExecCode }
     )
 
     Push-Location $PyAppSourcePath
@@ -194,6 +196,7 @@ try {
     foreach ($Build in $Builds) {
         Write-Host "`nBuilding $($Build.Label): $($Build.Name).exe..." -ForegroundColor Yellow
 
+        $env:PYAPP_EXEC_CODE = $Build.ExecCode
         if ($Build.IsGui) { $env:PYAPP_IS_GUI = "true" }
         else { Remove-Item Env:\PYAPP_IS_GUI -ErrorAction SilentlyContinue }
 

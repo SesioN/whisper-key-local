@@ -4,6 +4,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+- **`whisper-key-no-term.exe`** - Windows build that never opens a console window; startup progress is shown by the loading screen only
+
 ### Changed
 - **Auto-paste and copy to clipboard are independent tray checkboxes** - New `clipboard.copy_to_clipboard` keeps the transcription on the clipboard after auto-paste in both delivery methods (disables `paste_preserve_clipboard`); voice-command text follows the same setting. Replaces `type_also_copy_to_clipboard`, which is migrated automatically
 
