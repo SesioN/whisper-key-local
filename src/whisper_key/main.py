@@ -369,6 +369,8 @@ def main():
 
         if onboarding_runtime and not state_manager.request_runtime_change(onboarding_runtime):
             print("⚠ The selected GPU runtime is not available on this system. Choose another one in the tray Runtime menu.")
+        elif not onboarding_runtime:
+            state_manager.offer_whisper_server_upgrade()
 
         app.run_event_loop(shutdown_event)
             

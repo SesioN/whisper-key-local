@@ -532,9 +532,27 @@ class StateManager:
             self.set_model_loading(False)
             self.system_tray.refresh_menu()
 
-    def _choose_install_option(self, runtime: Runtime):
+    def offer_whisper_server_upgrade(self):
+        from .whisper_cpp_engine import find_whisper_server
+        installed_binary, _ = whisper_cpp_runtime_paths()
+        current_runtime = self.get_current_runtime()
+        if not installed_binary or find_whisper_server(installed_binary) or not current_runtime or current_runtime.key != VULKAN:
+            return
+        with self._state_lock:
+            if self._runtime_install_running:
+                return
+            self._runtime_install_running = True
+        threading.Thread(target=self._install_and_switch_runtime, args=(current_runtime, True), daemon=True).start()
+
+    def _choose_install_option(self, runtime: Runtime, upgrade: bool = False):
         from .runtime_installer import install_options
         options = install_options(runtime.key)
+        if upgrade:
+            if options and dialogs.confirm(f"Upgrade {runtime.label}", (
+                    f"The installed {runtime.label} runtime predates whisper-server, so the model is reloaded for every recording.\n\n"
+                    f"Rebuild it now to keep the model loaded?\nDownload: {options[0].download_size}")):
+                return options[0]
+            return None
         title = f"Install {runtime.label}"
         restart_note = "" if runtime.key == VULKAN else "\n\nWhisper Key restarts afterwards to use it."
         if len(options) >= 2:
@@ -556,12 +574,12 @@ class StateManager:
         print(f"   {message}")
         self.system_tray.set_status_text(message)
 
-    def _install_and_switch_runtime(self, runtime: Runtime):
+    def _install_and_switch_runtime(self, runtime: Runtime, upgrade: bool = False):
         from .runtime_installer import RuntimeInstaller
 
         self._runtime_installer = RuntimeInstaller(on_progress=self._report_install_progress)
         try:
-            option = self._choose_install_option(runtime)
+            option = self._choose_install_option(runtime, upgrade)
             if option is None:
                 return
             print(f"📦 Installing [{runtime.label}]: {option.description}")
@@ -580,7 +598,10 @@ class StateManager:
         print(f"✅ {runtime.label} installed")
         self.refresh_runtimes()
         installed_runtime = next(candidate for candidate in self.get_runtimes() if candidate.key == runtime.key)
-        if installed_runtime.needs_restart:
+        current_runtime = self.get_current_runtime()
+        if current_runtime and current_runtime.key == installed_runtime.key:
+            self._reload_current_engine()
+        elif installed_runtime.needs_restart:
             self._restart_into_runtime(installed_runtime)
         else:
             self.system_tray.refresh_menu()
@@ -613,6 +634,24 @@ class StateManager:
             self.logger.error(f"Failed to restart into {runtime.label}: {e}")
             print(f"❌ Failed to restart, restart Whisper Key manually: {e}")
             self.set_model_loading(False)
+
+    def _reload_current_engine(self):
+        with self._state_lock:
+            busy = self.is_model_loading or self.is_processing or self.audio_recorder.get_recording_status()
+            if not busy:
+                self.is_model_loading = True
+        if busy:
+            print("⏳ Restart Whisper Key or switch the runtime again to use the upgraded runtime")
+            return
+        self._update_ui_state("processing")
+        try:
+            self.whisper_engine.reload()
+        except Exception as e:
+            self.logger.error(f"Failed to reload the upgraded runtime: {e}")
+            print(f"❌ Failed to reload the upgraded runtime, restart Whisper Key: {e}")
+        finally:
+            self.set_model_loading(False)
+            self.system_tray.refresh_menu()
 
     def _restore_engine(self, engine):
         print("🔄 Restoring previous runtime...")
