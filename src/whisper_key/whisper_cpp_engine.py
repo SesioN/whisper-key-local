@@ -25,7 +25,8 @@ from .platform import child_processes
 from .utils import get_user_app_data_path
 
 SERVER_HOST = "127.0.0.1"
-SERVER_STARTUP_TIMEOUT_SECONDS = 120
+SERVER_STARTUP_TIMEOUT_SECONDS = 60
+WARM_UP_TIMEOUT_SECONDS = 120
 SERVER_POLL_INTERVAL_SECONDS = 0.2
 SERVER_STOP_TIMEOUT_SECONDS = 5
 SERVER_MAX_RESTARTS = 2
@@ -189,6 +190,7 @@ class WhisperCppEngine:
                    "--request-path", request_path, "-nt", "-l", self.language or "auto"]
         if self.beam_size:
             command.extend(["-bs", str(self.beam_size)])
+        print("   Starting whisper.cpp server...", flush=True)
         self.logger.info("Starting whisper-server: %s", " ".join(command).replace(request_path, "/***"))
         with self._server_lock:
             if self._closed or not self._server_enabled:
@@ -219,6 +221,7 @@ class WhisperCppEngine:
         else:
             self.logger.warning("whisper-server did not start in time, using whisper-cli instead:\n%s",
                                 _log_tail(self._server_log))
+            print(f"   ⚠ whisper-server did not start within {SERVER_STARTUP_TIMEOUT_SECONDS}s, using whisper-cli (slower), see {self._server_log}")
             self._stop_server(process)
             return False
 
@@ -348,7 +351,7 @@ class WhisperCppEngine:
     def warm_up(self):
         if self._server_url:
             silence = np.zeros(AudioRecorder.WHISPER_SAMPLE_RATE, dtype=np.float32)
-            self._transcribe_with_server(self._wav_bytes(silence), SERVER_STARTUP_TIMEOUT_SECONDS)
+            self._transcribe_with_server(self._wav_bytes(silence), WARM_UP_TIMEOUT_SECONDS)
 
     def _load_model_async(self,
                           new_model_key: str,
@@ -371,13 +374,12 @@ class WhisperCppEngine:
                 with self._server_lock:
                     restart = self._server_enabled and not self._closed
                     self._restarts = 0
-                if restart:
-                    self._restart_server(new_model_key)
+                server_started = self._restart_server(new_model_key) if restart else True
                 self.model_key = new_model_key
                 self.logger.info("WhisperCpp model changed: %s -> %s", old_model_key, new_model_key)
 
                 if progress_callback:
-                    progress_callback("Model ready!")
+                    progress_callback("Model ready!" if server_started else "Model ready! (whisper-server unavailable, using whisper-cli)")
             except Exception as e:
                 self.logger.error("Failed to change model: %s", e)
                 if progress_callback:
