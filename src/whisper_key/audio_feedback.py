@@ -46,7 +46,9 @@ class AudioFeedback:
             self.logger.warning(f"Ready sound file not found: {self.ready_sound_path}")
 
     def set_enabled(self, enabled: bool):
-        if enabled and not self.enabled:
+        if enabled == self.enabled:
+            return
+        if enabled:
             self._validate_sound_files()
         self.enabled = enabled
         self.logger.info(f"Audio feedback {'enabled' if enabled else 'disabled'}")
