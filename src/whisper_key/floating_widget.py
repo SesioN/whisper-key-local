@@ -383,6 +383,8 @@ class FloatingWidget:
         self._root.lift()
         if self._dragging:
             self._dragging = False
+            self._root.update_idletasks()
+            self._log_geometry("drag end")
             if self.save_position and not self._locked:
                 self._handle_command_safely(SAVE_POSITION)
             return
