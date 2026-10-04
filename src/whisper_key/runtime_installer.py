@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .onboarding import CT2_WHEEL_URLS, NVIDIA_PACKAGES, ROCM_72_PACKAGES
-from .runtime_loader import CUDA, MARKER_FILE, ROCM, VULKAN, active_ct2_runtime, get_runtime_dir
+from .runtime_loader import CUDA, MARKER_FILE, PYTHON_TAG, ROCM, VULKAN, active_ct2_runtime, get_runtime_dir
 
 ROCM_SYSTEM_SDK_VERSION = "7.2"
 ROCM_SYSTEM_DLLS = ("amdhip64_7.dll", "hipblas.dll", "rocblas.dll")
@@ -156,6 +156,9 @@ def ggml_model_file_name(model_key: str) -> str:
     raise RuntimeInstallError(f"No whisper.cpp (ggml) model matches '{model_key}'")
 
 
+STALE_CT2_RUNTIME_PATTERN = re.compile(r"^ct2-(?:cuda|rocm)-(cp\d+)(?:\.old|\.partial)?$")
+
+
 class RuntimeInstaller:
     def __init__(self, on_progress: Callable[[str], None]):
         self.on_progress = on_progress
@@ -198,7 +201,20 @@ class RuntimeInstaller:
             raise
 
         self._report(f"{runtime_key} runtime installed")
+        if runtime_key != VULKAN:
+            self._remove_stale_ct2_runtimes(final_dir.parent)
         return final_dir
+
+    def _remove_stale_ct2_runtimes(self, runtimes_dir: Path):
+        for runtime_dir in runtimes_dir.iterdir():
+            match = STALE_CT2_RUNTIME_PATTERN.match(runtime_dir.name)
+            if not match or match.group(1) == PYTHON_TAG or not runtime_dir.is_dir():
+                continue
+            try:
+                shutil.rmtree(runtime_dir)
+                self.logger.info(f"Removed runtime for an unused Python version: {runtime_dir}")
+            except OSError as e:
+                self.logger.warning(f"Could not remove old runtime {runtime_dir}: {e}")
 
     def _swap_into_place(self, staging_dir: Path, final_dir: Path):
         previous_dir = final_dir.with_name(final_dir.name + ".old")
