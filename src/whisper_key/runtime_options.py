@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Optional
 
 from .platform import gpu
-from .runtime_loader import CPU, CUDA, ROCM, VULKAN, active_ct2_runtime, is_runtime_installed, whisper_cpp_runtime_paths
+from .runtime_loader import (CPU, CUDA, ONNX_CPU, ONNX_CUDA, ONNX_DIRECTML, ONNX_RUNTIME_KEYS, ROCM, VULKAN, active_ct2_runtime,
+                             active_ort_runtime, is_runtime_installed, whisper_cpp_runtime_paths)
 
 COMPUTE_TYPES = ("int8", "int8_float32", "int8_float16", "int8_bfloat16", "int16", "float16", "bfloat16", "float32")
 PREFERRED_COMPUTE_TYPES = {
@@ -15,6 +16,10 @@ PREFERRED_COMPUTE_TYPES = {
 
 FASTER_WHISPER = "faster_whisper"
 WHISPER_CPP = "whisper_cpp"
+ONNX_ASR = "onnx_asr"
+
+ORT_PROVIDERS = {ONNX_DIRECTML: "DmlExecutionProvider", ONNX_CUDA: "CUDAExecutionProvider"}
+ORT_RUNTIME_LABELS = {ONNX_CPU: "CPU (ONNX)", ONNX_DIRECTML: "DirectML GPU (ONNX)", ONNX_CUDA: "NVIDIA CUDA (ONNX)"}
 
 INSTALLED = "installed"
 INSTALLABLE = "installable"
@@ -81,7 +86,61 @@ def detect_runtimes(whisper_cpp_binary: Optional[str]) -> list:
             _gpu_runtime(ROCM, loaded_ct2_variant, gpu_device_count, gpu_types, gpu_class),
         ]
     runtimes.append(_whisper_cpp_runtime(whisper_cpp_binary, gpu_class or gpu_name))
+    runtimes += _onnx_runtimes(gpu_class, gpu_name)
     return runtimes
+
+
+def _onnx_runtimes(gpu_class: Optional[str], gpu_name: Optional[str]) -> list:
+    logger = logging.getLogger(__name__)
+    try:
+        import onnx_asr
+        import onnxruntime
+        providers = onnxruntime.get_available_providers()
+    except Exception as e:
+        logger.warning(f"ONNX Runtime check failed: {e}")
+        return [Runtime(ONNX_CPU, ORT_RUNTIME_LABELS[ONNX_CPU], ONNX_ASR, "cpu", UNSUPPORTED, "onnx-asr not installed")]
+
+    runtimes = [Runtime(ONNX_CPU, ORT_RUNTIME_LABELS[ONNX_CPU], ONNX_ASR, "cpu", INSTALLED)]
+    if sys.platform != "win32":
+        return runtimes
+    hardware = {ONNX_DIRECTML: bool(gpu_class or gpu_name), ONNX_CUDA: gpu_class == "nvidia"}
+    unsupported_reason = {ONNX_DIRECTML: "no GPU found", ONNX_CUDA: "no NVIDIA GPU"}
+    for key in (ONNX_DIRECTML, ONNX_CUDA):
+        label = ORT_RUNTIME_LABELS[key]
+        if active_ort_runtime() == key and ORT_PROVIDERS[key] in providers:
+            runtimes.append(Runtime(key, label, ONNX_ASR, "gpu", INSTALLED))
+        elif active_ort_runtime() == key:
+            runtimes.append(Runtime(key, label, ONNX_ASR, "gpu", UNSUPPORTED, "installed, but the GPU provider failed to load"))
+        elif is_runtime_installed(key) and active_ort_runtime() != key:
+            runtimes.append(Runtime(key, label, ONNX_ASR, "gpu", INSTALLED, needs_restart=True))
+        elif hardware[key]:
+            runtimes.append(Runtime(key, label, ONNX_ASR, "gpu", INSTALLABLE, install_size=_install_size(key)))
+        else:
+            runtimes.append(Runtime(key, label, ONNX_ASR, "gpu", UNSUPPORTED, unsupported_reason[key]))
+    return runtimes
+
+
+def runtimes_for_engine_family(runtimes: list, onnx_family: bool) -> list:
+    return [runtime for runtime in runtimes if (runtime.engine_type == ONNX_ASR) == onnx_family]
+
+
+def best_onnx_runtime(runtimes: list, preferred: Optional[str]) -> Optional[Runtime]:
+    onnx_runtimes = {runtime.key: runtime for runtime in runtimes if runtime.engine_type == ONNX_ASR}
+    if preferred in onnx_runtimes and onnx_runtimes[preferred].available:
+        return onnx_runtimes[preferred]
+    for key in (ONNX_CUDA, ONNX_DIRECTML, ONNX_CPU):
+        if key in onnx_runtimes and onnx_runtimes[key].available:
+            return onnx_runtimes[key]
+    return None
+
+
+def apply_onnx_runtime_selection(whisper_config: dict) -> dict:
+    whisper_config = dict(whisper_config)
+    whisper_config['engine_type'] = ONNX_ASR
+    onnx_runtime = whisper_config.get('onnx_runtime')
+    if onnx_runtime not in ONNX_RUNTIME_KEYS or (onnx_runtime != ONNX_CPU and active_ort_runtime() != onnx_runtime):
+        whisper_config['onnx_runtime'] = ONNX_CPU
+    return whisper_config
 
 
 def _install_size(runtime_key: str) -> str:

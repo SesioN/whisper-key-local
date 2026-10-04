@@ -10,8 +10,11 @@ import sounddevice as sd
 
 from .audio_recorder import AudioRecorder
 from .whisper_engine import WhisperEngine, create_whisper_engine
-from .runtime_options import FASTER_WHISPER, INSTALLABLE, UNSUPPORTED, Runtime, choose_compute_type, current_runtime_key, detect_runtimes, with_whisper_cpp_paths
-from .runtime_loader import VULKAN, whisper_cpp_runtime_paths
+from .runtime_options import (FASTER_WHISPER, INSTALLABLE, ONNX_ASR, UNSUPPORTED, WHISPER_CPP, Runtime, best_onnx_runtime,
+                              choose_compute_type, current_runtime_key, detect_runtimes, runtimes_for_engine_family,
+                              with_whisper_cpp_paths)
+from .runtime_loader import CPU, ONNX_CUDA, ONNX_DIRECTML, VULKAN, whisper_cpp_runtime_paths
+from .model_registry import ONNX_FAMILY
 from .platform import dialogs
 from .clipboard_manager import ClipboardManager
 from .system_tray import SystemTray
@@ -530,14 +533,22 @@ class StateManager:
         if new_model_key == self.whisper_engine.model_key:
             return True
 
-        if self.get_ggml_model_state(new_model_key) == "download":
+        download_state = self.get_model_download_state(new_model_key)
+        if download_state == "download":
             with self._state_lock:
                 if self._runtime_install_running:
                     print("⏳ A download is already running...")
                     return False
                 self._runtime_install_running = True
-            threading.Thread(target=self._download_ggml_model_and_switch, args=(new_model_key,), daemon=True).start()
+            target = self._download_onnx_model_and_switch if self._is_onnx_model(new_model_key) else self._download_ggml_model_and_switch
+            threading.Thread(target=target, args=(new_model_key,), daemon=True).start()
             return True
+        if download_state == "unavailable":
+            print(f"⚠️ The [{new_model_key}] model is not available for the current runtime")
+            return False
+
+        if self._is_onnx_model(new_model_key) != self._is_onnx_engine():
+            return self._switch_engine_family(new_model_key)
 
         if self.get_current_state() == "recording":
             print(f"🎤 Cancelling recording to switch to [{new_model_key}] model...")
@@ -599,16 +610,112 @@ class StateManager:
     def _ggml_model_dir(self) -> Optional[str]:
         return with_whisper_cpp_paths(self.config_manager.get_whisper_config()).get('cpp_model_dir')
 
-    def get_ggml_model_state(self, model_key: str) -> Optional[str]:
-        engine = self.whisper_engine
-        if engine.ENGINE_TYPE == FASTER_WHISPER:
+    def _is_onnx_engine(self) -> bool:
+        return self.whisper_engine.ENGINE_TYPE == ONNX_ASR
+
+    def _is_onnx_model(self, model_key: str) -> bool:
+        return self.whisper_engine.registry.get_engine_family(model_key) == ONNX_FAMILY
+
+    def _whisper_models_use_whisper_cpp(self) -> bool:
+        engine_type = self.whisper_engine.ENGINE_TYPE
+        if engine_type == ONNX_ASR:
+            return self.config_manager.get_setting('whisper', 'runtime') == VULKAN
+        return engine_type == WHISPER_CPP
+
+    def get_model_download_state(self, model_key: str) -> Optional[str]:
+        registry = self.whisper_engine.registry
+        if self._is_onnx_model(model_key):
+            return "ready" if registry.is_onnx_model_downloaded(model_key) else "download"
+        if not self._whisper_models_use_whisper_cpp():
             return None
-        if engine._is_model_cached(model_key):
+        engine = self.whisper_engine
+        if engine.ENGINE_TYPE == WHISPER_CPP and engine._is_model_cached(model_key):
             return "ready"
         from .runtime_installer import ggml_model_name
-        if self._ggml_model_dir() and ggml_model_name(model_key):
+        model_dir = self._ggml_model_dir()
+        ggml_name = ggml_model_name(model_key)
+        if model_dir and ggml_name and (Path(model_dir) / f"ggml-{ggml_name}.bin").is_file():
+            return "ready"
+        if model_dir and ggml_name:
             return "download"
         return "unavailable"
+
+    def _download_onnx_model_and_switch(self, model_key: str):
+        from .runtime_installer import RuntimeInstaller
+
+        model = self.whisper_engine.registry.get_model(model_key)
+        title = f"Download {model.label}"
+        self._runtime_installer = RuntimeInstaller(on_progress=self._report_install_progress)
+        try:
+            if not dialogs.confirm(title, f"{model.label} is not downloaded yet. Download it now?"):
+                return
+            print(f"📦 Downloading the [{model_key}] model...")
+            self._show_install_progress(title)
+            self._runtime_installer.download_onnx_model(self.whisper_engine.registry, model_key)
+        except Exception as e:
+            self._close_install_progress()
+            if self._install_was_cancelled():
+                print("ℹ️ Download cancelled, already downloaded files are kept for the next attempt")
+                return
+            self.logger.error(f"Failed to download ONNX model {model_key}: {e}")
+            print(f"❌ Failed to download the [{model_key}] model: {e}")
+            dialogs.show_error(title, f"Download failed:\n\n{str(e)[:600]}")
+            return
+        finally:
+            self._close_install_progress()
+            with self._state_lock:
+                self._runtime_install_running = False
+                self._runtime_installer = None
+            self.system_tray.set_status_text(None)
+
+        self.system_tray.refresh_menu()
+        self.request_model_change(model_key)
+
+    def _switch_engine_family(self, model_key: str) -> bool:
+        runtimes = self.get_runtimes()
+        if self._is_onnx_model(model_key):
+            gpu_runtime = self._installable_onnx_gpu_runtime(runtimes)
+            if gpu_runtime:
+                threading.Thread(target=self._offer_onnx_gpu_runtime, args=(gpu_runtime, model_key), daemon=True).start()
+                return True
+            runtime = best_onnx_runtime(runtimes, self.config_manager.get_setting('whisper', 'onnx_runtime'))
+            compute_type = None
+        else:
+            runtime_key = self.config_manager.get_setting('whisper', 'runtime')
+            runtime = next((candidate for candidate in runtimes if candidate.key == runtime_key and candidate.available), None)
+            runtime = runtime or next((candidate for candidate in runtimes if candidate.key == CPU and candidate.available), None)
+            compute_type = self.config_manager.get_setting('whisper', 'compute_type')
+        if runtime is None:
+            print(f"❌ No runtime can run the [{model_key}] model")
+            return False
+        return self.request_runtime_change(runtime.key, compute_type, model_key=model_key)
+
+    def _installable_onnx_gpu_runtime(self, runtimes: list) -> Optional[Runtime]:
+        if self.config_manager.get_setting('onboarding', 'onnx_gpu') == 'declined':
+            return None
+        onnx_runtimes = {runtime.key: runtime for runtime in runtimes if runtime.engine_type == ONNX_ASR}
+        if any(onnx_runtimes[key].available for key in (ONNX_CUDA, ONNX_DIRECTML) if key in onnx_runtimes):
+            return None
+        return next((onnx_runtimes[key] for key in (ONNX_CUDA, ONNX_DIRECTML)
+                     if key in onnx_runtimes and onnx_runtimes[key].state == INSTALLABLE), None)
+
+    def _offer_onnx_gpu_runtime(self, runtime: Runtime, model_key: str):
+        message = (f"ONNX models can run on your GPU with {runtime.label}.\n\n"
+                   f"Install it now? (download {runtime.install_size}, Whisper Key restarts afterwards)\n"
+                   f"No: use the CPU. You can change this later in the tray Runtime menu.")
+        if not dialogs.confirm(f"Use the GPU for {model_key}", message):
+            self.config_manager.update_user_setting('onboarding', 'onnx_gpu', 'declined')
+            self._switch_engine_family(model_key)
+            return
+        with self._state_lock:
+            if self._runtime_install_running:
+                print("⏳ A runtime is already being installed...")
+                return
+            self._runtime_install_running = True
+        if not self._install_and_switch_runtime(runtime, model_key=model_key):
+            print("ℹ️ Using the CPU for ONNX models")
+            self.config_manager.update_user_setting('onboarding', 'onnx_gpu', 'declined')
+            self._switch_engine_family(model_key)
 
     def _download_ggml_model_and_switch(self, model_key: str):
         from .runtime_installer import RuntimeInstaller
@@ -662,8 +769,14 @@ class StateManager:
         runtimes = self.get_runtimes()
         if self._runtime_key is None:
             engine = self.whisper_engine
-            self._runtime_key = current_runtime_key(engine.ENGINE_TYPE, getattr(engine, 'device', 'cpu'), runtimes)
+            if engine.ENGINE_TYPE == ONNX_ASR:
+                self._runtime_key = engine.onnx_runtime
+            else:
+                self._runtime_key = current_runtime_key(engine.ENGINE_TYPE, getattr(engine, 'device', 'cpu'), runtimes)
         return next((runtime for runtime in runtimes if runtime.key == self._runtime_key), None)
+
+    def get_menu_runtimes(self) -> list:
+        return runtimes_for_engine_family(self.get_runtimes(), self._is_onnx_engine())
 
     def get_current_compute_type(self) -> Optional[str]:
         if self.whisper_engine.ENGINE_TYPE != FASTER_WHISPER:
@@ -674,7 +787,7 @@ class StateManager:
         current_runtime = self.get_current_runtime()
         return bool(current_runtime) and self.request_runtime_change(current_runtime.key, compute_type)
 
-    def request_runtime_change(self, runtime_key: str, compute_type: Optional[str] = None) -> bool:
+    def request_runtime_change(self, runtime_key: str, compute_type: Optional[str] = None, model_key: Optional[str] = None) -> bool:
         runtime = next((runtime for runtime in self.get_runtimes() if runtime.key == runtime_key), None)
         if not runtime or runtime.state == UNSUPPORTED:
             return False
@@ -694,7 +807,8 @@ class StateManager:
 
         compute_type = choose_compute_type(runtime, compute_type or self.get_current_compute_type())
         current_runtime = self.get_current_runtime()
-        if current_runtime and current_runtime.key == runtime.key and compute_type == self.get_current_compute_type():
+        model_changes = model_key is not None and model_key != self.whisper_engine.model_key
+        if current_runtime and current_runtime.key == runtime.key and compute_type == self.get_current_compute_type() and not model_changes:
             return True
 
         if self.get_current_state() == "recording":
@@ -711,21 +825,26 @@ class StateManager:
             self.is_model_loading = True
 
         self._update_ui_state("processing")
-        threading.Thread(target=self._execute_runtime_change, args=(runtime, compute_type), daemon=True).start()
+        threading.Thread(target=self._execute_runtime_change, args=(runtime, compute_type, model_key), daemon=True).start()
         return True
 
-    def _execute_runtime_change(self, runtime: Runtime, compute_type: Optional[str]):
+    def _execute_runtime_change(self, runtime: Runtime, compute_type: Optional[str], model_key: Optional[str] = None):
         description = runtime.label if runtime.engine_type != FASTER_WHISPER else f"{runtime.label}, {compute_type}"
+        if model_key:
+            description = f"{model_key} on {description}"
         print(f"🔄 Switching runtime to [{description}]...")
 
         old_engine = self.whisper_engine
         old_runtime = self.get_current_runtime()
         old_compute_type = self.get_current_compute_type()
+        changes_engine_family = (runtime.engine_type == ONNX_ASR) != (old_engine.ENGINE_TYPE == ONNX_ASR)
         whisper_config = with_whisper_cpp_paths(self.config_manager.get_whisper_config())
-        whisper_config['model'] = old_engine.model_key
+        whisper_config['model'] = model_key or old_engine.model_key
         if runtime.engine_type == FASTER_WHISPER:
             whisper_config['device'] = runtime.device
             whisper_config['compute_type'] = compute_type
+        if runtime.engine_type == ONNX_ASR:
+            whisper_config['onnx_runtime'] = runtime.key
 
         release_first = getattr(old_engine, 'device', 'cpu') != "cpu" or runtime.device != "cpu"
         if release_first:
@@ -749,12 +868,14 @@ class StateManager:
             with self._state_lock:
                 self.whisper_engine = new_engine
                 self._runtime_key = runtime.key
-                retry_allowed = old_runtime and old_runtime.key != self._failed_runtime_key
+                retry_allowed = old_runtime and old_runtime.key != self._failed_runtime_key and not changes_engine_family
                 self._fallback_runtime = (old_runtime, old_compute_type) if retry_allowed else None
             old_engine.unload()
             del old_engine
             gc.collect()
             self._persist_runtime(runtime, compute_type)
+            if model_key:
+                self.config_manager.update_user_setting('whisper', 'model', model_key)
             print(f"✅ Now transcribing with [{description}]")
         finally:
             self.set_model_loading(False)
@@ -826,14 +947,14 @@ class StateManager:
         installer = self._runtime_installer
         return bool(installer and installer.cancelled)
 
-    def _install_and_switch_runtime(self, runtime: Runtime, upgrade: bool = False):
-        from .runtime_installer import RuntimeInstaller
+    def _install_and_switch_runtime(self, runtime: Runtime, upgrade: bool = False, model_key: Optional[str] = None) -> bool:
+        from .runtime_installer import RuntimeInstaller, install_options
 
         self._runtime_installer = RuntimeInstaller(on_progress=self._report_install_progress)
         try:
-            option = self._choose_install_option(runtime, upgrade)
+            option = install_options(runtime.key)[0] if model_key else self._choose_install_option(runtime, upgrade)
             if option is None:
-                return
+                return False
             print(f"📦 Installing [{runtime.label}]: {option.description}")
             self._show_install_progress(f"Installing {runtime.label}")
             self._runtime_installer.install(runtime.key, option, model_key=self.whisper_engine.model_key)
@@ -841,11 +962,11 @@ class StateManager:
             self._close_install_progress()
             if self._install_was_cancelled():
                 print(f"ℹ️ {runtime.label} installation cancelled")
-                return
+                return False
             self.logger.error(f"Failed to install runtime {runtime.key}: {e}")
             print(f"❌ Failed to install {runtime.label}: {e}")
             dialogs.show_error(f"Install {runtime.label}", f"Installation failed:\n\n{str(e)[:600]}\n\nDetails are in the log file.")
-            return
+            return False
         finally:
             self._close_install_progress()
             with self._state_lock:
@@ -857,13 +978,16 @@ class StateManager:
         self.refresh_runtimes()
         installed_runtime = next(candidate for candidate in self.get_runtimes() if candidate.key == runtime.key)
         current_runtime = self.get_current_runtime()
+        if model_key:
+            self.config_manager.update_user_setting('whisper', 'model', model_key)
         if current_runtime and current_runtime.key == installed_runtime.key:
             self._reload_current_engine()
         elif installed_runtime.needs_restart:
             self._restart_into_runtime(installed_runtime)
         else:
             self.system_tray.refresh_menu()
-            self.request_runtime_change(installed_runtime.key)
+            self.request_runtime_change(installed_runtime.key, model_key=model_key)
+        return True
 
     def _confirm_restart_into_runtime(self, runtime: Runtime):
         if dialogs.confirm(f"Switch to {runtime.label}", f"Whisper Key restarts to switch to {runtime.label}."):
@@ -880,10 +1004,13 @@ class StateManager:
             dialogs.confirm(f"Switch to {runtime.label}", message)
             return
         self._update_ui_state("processing")
-        self.config_manager.update_user_setting('whisper', 'runtime', runtime.key)
-        self.config_manager.update_user_setting('whisper', 'engine_type', runtime.engine_type)
-        self.config_manager.update_user_setting('whisper', 'device', runtime.device)
-        self.config_manager.update_user_setting('whisper', 'compute_type', choose_compute_type(runtime, None))
+        if runtime.engine_type == ONNX_ASR:
+            self.config_manager.update_user_setting('whisper', 'onnx_runtime', runtime.key)
+        else:
+            self.config_manager.update_user_setting('whisper', 'runtime', runtime.key)
+            self.config_manager.update_user_setting('whisper', 'engine_type', runtime.engine_type)
+            self.config_manager.update_user_setting('whisper', 'device', runtime.device)
+            self.config_manager.update_user_setting('whisper', 'compute_type', choose_compute_type(runtime, None))
         print(f"🔄 Restarting Whisper Key to switch to [{runtime.label}]...")
         from .utils import restart_app
         try:
@@ -921,6 +1048,9 @@ class StateManager:
 
     def _persist_runtime(self, runtime: Runtime, compute_type: Optional[str]):
         try:
+            if runtime.engine_type == ONNX_ASR:
+                self.config_manager.update_user_setting('whisper', 'onnx_runtime', runtime.key)
+                return
             self.config_manager.update_user_setting('whisper', 'runtime', runtime.key)
             if runtime.engine_type == FASTER_WHISPER:
                 self.config_manager.update_user_setting('whisper', 'device', runtime.device)

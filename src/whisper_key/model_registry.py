@@ -4,6 +4,9 @@ from typing import Optional
 
 from faster_whisper.utils import _MODELS
 
+WHISPER_FAMILY = "whisper"
+ONNX_FAMILY = "onnx_asr"
+
 
 class ModelRegistry:
     DEFAULT_CACHE_PREFIX = "models--Systran--faster-whisper-"
@@ -40,7 +43,28 @@ class ModelRegistry:
         return [m for m in self.whisper_models.values() if m.group == group and m.enabled]
 
     def get_groups_ordered(self) -> list:
-        return ["official", "custom"]
+        return ["official", "custom", "onnx"]
+
+    def get_engine_family(self, key: str) -> str:
+        model = self.get_model(key)
+        return model.engine if model else WHISPER_FAMILY
+
+    def get_onnx_model_dir(self, key: str) -> Optional[str]:
+        model = self.get_model(key)
+        if not model or model.engine != ONNX_FAMILY:
+            return None
+        from .runtime_loader import get_runtimes_dir
+        return str(get_runtimes_dir().parent / "models" / model.source.replace("/", "--") / model.revision)
+
+    def get_onnx_complete_marker(self, key: str) -> Optional[str]:
+        model_dir = self.get_onnx_model_dir(key)
+        if not model_dir:
+            return None
+        return os.path.join(model_dir, f"download-complete-{self.get_model(key).quantization or 'fp32'}.json")
+
+    def is_onnx_model_downloaded(self, key: str) -> bool:
+        marker = self.get_onnx_complete_marker(key)
+        return bool(marker) and os.path.isfile(marker)
 
     def get_hf_cache_path(self) -> str:
         userprofile = os.environ.get('USERPROFILE')
@@ -50,6 +74,8 @@ class ModelRegistry:
 
     def is_model_cached(self, key: str) -> bool:
         model = self.get_model(key)
+        if model and model.engine == ONNX_FAMILY:
+            return self.is_onnx_model_downloaded(key)
         if model and model.is_local_path:
             return os.path.exists(os.path.join(model.source, 'model.bin'))
         cache_folder = self.get_cache_folder(key)
@@ -129,6 +155,11 @@ class ModelDefinition:
         self.group = config.get("group", "custom")
         self.enabled = config.get("enabled", True)
         self.files = config.get("files", {})
+        self.engine = config.get("engine", WHISPER_FAMILY)
+        self.revision = config.get("revision", "main")
+        self.onnx_model_type = config.get("onnx_model_type")
+        self.quantization = config.get("quantization")
+        self.directml = config.get("directml", True)
         self.is_local_path = self._check_is_local_path()
         self.cache_folder = self._derive_cache_folder()
 

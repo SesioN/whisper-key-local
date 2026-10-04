@@ -449,6 +449,10 @@ def validate_config(config, default_config, logger):
     if runtime not in ('cpu', 'cuda', 'rocm', 'vulkan'):
         _set_to_default(config, default_config, 'whisper.runtime', runtime, logger)
 
+    onnx_runtime = _get_config_value_at_path(config, 'whisper.onnx_runtime')
+    if onnx_runtime not in ('onnx-cpu', 'onnx-directml', 'onnx-cuda'):
+        _set_to_default(config, default_config, 'whisper.onnx_runtime', onnx_runtime, logger)
+
     auto_trigger_enabled = _get_config_value_at_path(config, 'vad.auto_trigger_enabled')
     if not isinstance(auto_trigger_enabled, bool):
         _set_to_default(config, default_config, 'vad.auto_trigger_enabled', auto_trigger_enabled, logger)

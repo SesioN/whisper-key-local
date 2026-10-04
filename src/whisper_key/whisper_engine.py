@@ -6,7 +6,7 @@ from typing import Optional, Callable
 import numpy as np
 from faster_whisper import WhisperModel
 
-from .runtime_options import WHISPER_CPP
+from .runtime_options import ONNX_ASR, WHISPER_CPP
 
 
 class WhisperEngine:
@@ -223,6 +223,16 @@ class WhisperEngine:
 
 
 def create_whisper_engine(engine_type: str, whisper_config: dict, vad_manager, model_registry):
+
+    if engine_type == ONNX_ASR:
+        from .onnx_asr_engine import OnnxAsrEngine
+        return OnnxAsrEngine(
+            model_key=whisper_config['model'],
+            onnx_runtime=whisper_config['onnx_runtime'],
+            language=whisper_config['language'],
+            vad_manager=vad_manager,
+            model_registry=model_registry,
+        )
 
     if engine_type == WHISPER_CPP:
         from .whisper_cpp_engine import WhisperCppEngine

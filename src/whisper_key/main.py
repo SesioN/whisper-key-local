@@ -19,7 +19,7 @@ from .config_manager import ConfigManager
 from .audio_recorder import AudioRecorder
 from .hotkey_listener import HotkeyListener
 from .whisper_engine import create_whisper_engine
-from .runtime_options import apply_runtime_selection
+from .runtime_options import ONNX_ASR, apply_onnx_runtime_selection, apply_runtime_selection
 from .voice_activity_detection import VadManager
 from .clipboard_manager import ClipboardManager
 from .state_manager import StateManager
@@ -28,7 +28,7 @@ from .text_postprocessor import TextPostProcessor
 from .system_tray import SystemTray
 from .audio_feedback import AudioFeedback
 from .instance_manager import guard_against_multiple_instances
-from .model_registry import ModelRegistry
+from .model_registry import ONNX_FAMILY, ModelRegistry
 from .streaming_manager import StreamingManager
 from .voice_commands import VoiceCommandManager
 from .hardware_detection import detect_and_print as detect_hardware
@@ -121,6 +121,8 @@ def setup_streaming(streaming_config, model_registry):
     )
 
 def setup_whisper_engine(whisper_config, vad_manager, model_registry, config_manager=None, loading_screen=None):
+    if model_registry.get_engine_family(whisper_config['model']) == ONNX_FAMILY:
+        return _setup_onnx_engine(whisper_config, vad_manager, model_registry)
     whisper_config = apply_runtime_selection(whisper_config)
     engine_type = whisper_config['engine_type']
     try:
@@ -299,6 +301,17 @@ def run_gpu_onboarding(config_manager, whisper_config):
 
     check_gpu(gpu_class, gpu_name, ct2_works, whisper_config['device'], config_manager)
     return config_manager.get_whisper_config(), None
+
+
+def _setup_onnx_engine(whisper_config, vad_manager, model_registry):
+    onnx_config = apply_onnx_runtime_selection(whisper_config)
+    try:
+        return create_whisper_engine(ONNX_ASR, onnx_config, vad_manager, model_registry)
+    except Exception as e:
+        logging.getLogger(__name__).error(f"ONNX engine failed to start: {e}")
+        print(f"\n❌ ONNX model [{whisper_config['model']}] unavailable: {e}")
+        print("   Falling back to the Tiny model for this session.\n")
+        return setup_whisper_engine({**whisper_config, 'model': 'tiny'}, vad_manager, model_registry)
 
 
 def _handle_whisper_cpp_failure(error, whisper_config, vad_manager, model_registry):

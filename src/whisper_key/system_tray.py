@@ -107,13 +107,13 @@ class SystemTray:
             first_group = False
 
             for model in models:
-                ggml_state = self.state_manager.get_ggml_model_state(model.key)
+                download_state = self.state_manager.get_model_download_state(model.key)
                 items.append(pystray.MenuItem(
-                    f"{model.label} (download)" if ggml_state == "download" else model.label,
+                    f"{model.label} (download)" if download_state == "download" else model.label,
                     make_model_selector(model.key),
                     radio=True,
                     checked=make_is_current(model.key),
-                    enabled=False if ggml_state == "unavailable" else model_selection_enabled
+                    enabled=False if download_state == "unavailable" else model_selection_enabled
                 ))
 
         return items
@@ -278,7 +278,7 @@ class SystemTray:
                 checked=make_is_current_runtime(runtime.key),
                 enabled=runtime.selectable and not is_busy
             )
-            for runtime in self.state_manager.get_runtimes()
+            for runtime in self.state_manager.get_menu_runtimes()
         ]
 
         if current_runtime and current_runtime.compute_types:
