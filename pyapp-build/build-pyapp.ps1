@@ -1,7 +1,8 @@
 param(
     [string]$ProjectRoot = (Split-Path -Parent $PSScriptRoot),
     [string]$AppName = "whisper-key",
-    [switch]$Clean
+    [switch]$Clean,
+    [switch]$FromSource
 )
 
 function Get-ResolvedPath {
@@ -19,6 +20,71 @@ function Get-ProjectVersion {
     }
     Write-Host "Error: Could not find version in pyproject.toml" -ForegroundColor Red
     exit 1
+}
+
+function Build-SourceWheel {
+    param($ProjectRoot, $AppVersion, $DistPath)
+
+    foreach ($Tool in "git", "python") {
+        if (-not (Get-Command $Tool -ErrorAction SilentlyContinue)) {
+            Write-Host "Error: -FromSource needs $Tool on PATH" -ForegroundColor Red
+            exit 1
+        }
+    }
+
+    $Commit = git -C $ProjectRoot rev-parse --short HEAD
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Error: -FromSource needs a git checkout" -ForegroundColor Red
+        exit 1
+    }
+    $Commit = $Commit.Trim()
+    if (git -C $ProjectRoot status --porcelain) {
+        Write-Host "Warning: uncommitted changes are not included (building commit $Commit)" -ForegroundColor Yellow
+    }
+
+    $WheelVersion = "$AppVersion+g$Commit"
+    $StagingDir = Join-Path ([System.IO.Path]::GetTempPath()) "whisper-key-wheel-$([guid]::NewGuid())"
+    $WheelDir = Join-Path $DistPath "wheel"
+    if (Test-Path $WheelDir) { Remove-Item -Recurse -Force $WheelDir }
+    New-Item -ItemType Directory -Path $StagingDir, $WheelDir -Force | Out-Null
+
+    try {
+        $Archive = Join-Path $StagingDir "source.zip"
+        git -C $ProjectRoot archive --format=zip --output=$Archive HEAD
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Error: git archive failed" -ForegroundColor Red
+            exit 1
+        }
+        Expand-Archive -Path $Archive -DestinationPath $StagingDir -ErrorAction Stop
+        Remove-Item $Archive
+
+        $PyProjectFile = Join-Path $StagingDir "pyproject.toml"
+        $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        $PyProject = [System.IO.File]::ReadAllText($PyProjectFile, $Utf8NoBom)
+        $VersionPattern = [regex]'(?m)^version\s*=\s*"[^"]+"'
+        $PatchedPyProject = $VersionPattern.Replace($PyProject, "version = `"$WheelVersion`"", 1)
+        if ($PatchedPyProject -eq $PyProject) {
+            Write-Host "Error: Could not set wheel version in pyproject.toml" -ForegroundColor Red
+            exit 1
+        }
+        [System.IO.File]::WriteAllText($PyProjectFile, $PatchedPyProject, $Utf8NoBom)
+
+        Write-Host "Building wheel $WheelVersion from commit $Commit..." -ForegroundColor Yellow
+        python -m pip wheel $StagingDir --no-deps --wheel-dir $WheelDir --quiet | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Wheel build failed!" -ForegroundColor Red
+            exit 1
+        }
+    } finally {
+        Remove-Item -Recurse -Force $StagingDir -ErrorAction SilentlyContinue
+    }
+
+    $Wheel = Get-ChildItem $WheelDir -Filter "*+g$Commit-*.whl" | Select-Object -First 1
+    if (-not $Wheel) {
+        Write-Host "Error: No wheel for $WheelVersion found in $WheelDir" -ForegroundColor Red
+        exit 1
+    }
+    return $Wheel.FullName
 }
 
 function Patch-IconSupport {
@@ -84,59 +150,71 @@ Write-Host "Starting pyapp build for $AppName v$AppVersion..." -ForegroundColor 
 Write-Host "PyApp source: $PyAppSourcePath" -ForegroundColor Gray
 Write-Host "Distribution: $DistPath" -ForegroundColor Gray
 
-$env:PYAPP_PROJECT_NAME = "whisper-key-local"
-$env:PYAPP_PROJECT_VERSION = $AppVersion
-$env:PYAPP_PYTHON_VERSION = "3.12"
-$env:PYAPP_EXEC_CODE = 'from whisper_key.main import main; main()'
-$env:PYAPP_SELF_COMMAND = "self"
-$env:PYAPP_PASS_LOCATION = "true"
+$PyAppVars = "PYAPP_PROJECT_NAME", "PYAPP_PROJECT_VERSION", "PYAPP_PROJECT_PATH", "PYAPP_PYTHON_VERSION", "PYAPP_EXEC_CODE", "PYAPP_SELF_COMMAND", "PYAPP_PASS_LOCATION", "PYAPP_IS_GUI"
+$SavedEnv = @{}
+foreach ($Var in $PyAppVars) { $SavedEnv[$Var] = [Environment]::GetEnvironmentVariable($Var) }
+$PushedLocation = $false
 
-if ($Clean) {
-    $TargetDir = Join-Path $PyAppSourcePath "target"
-    if (Test-Path $TargetDir) {
-        Write-Host "Cleaning previous Rust build..." -ForegroundColor Yellow
-        Remove-Item -Recurse -Force $TargetDir
+try {
+    if ($FromSource) {
+        $env:PYAPP_PROJECT_PATH = Build-SourceWheel $ProjectRoot $AppVersion $DistPath
+        Write-Host "Embedding $($env:PYAPP_PROJECT_PATH)" -ForegroundColor Gray
+        Remove-Item Env:\PYAPP_PROJECT_NAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\PYAPP_PROJECT_VERSION -ErrorAction SilentlyContinue
+    } else {
+        Remove-Item Env:\PYAPP_PROJECT_PATH -ErrorAction SilentlyContinue
+        $env:PYAPP_PROJECT_NAME = "whisper-key-local"
+        $env:PYAPP_PROJECT_VERSION = $AppVersion
     }
-}
+    $env:PYAPP_PYTHON_VERSION = "3.12"
+    $env:PYAPP_EXEC_CODE = 'from whisper_key.main import main; main()'
+    $env:PYAPP_SELF_COMMAND = "self"
+    $env:PYAPP_PASS_LOCATION = "true"
 
-if (-not (Test-Path $DistPath)) {
-    New-Item -ItemType Directory -Path $DistPath -Force | Out-Null
-}
-
-$Builds = @(
-    @{ Name = "$AppName";      IsGui = $false; Label = "console" },
-    @{ Name = "$AppName-hideable"; IsGui = $true;  Label = "hideable (GUI subsystem)" }
-)
-
-Push-Location $PyAppSourcePath
-
-foreach ($Build in $Builds) {
-    Write-Host "`nBuilding $($Build.Label): $($Build.Name).exe..." -ForegroundColor Yellow
-
-    if ($Build.IsGui) { $env:PYAPP_IS_GUI = "true" }
-    else { Remove-Item Env:\PYAPP_IS_GUI -ErrorAction SilentlyContinue }
-
-    cargo build --release
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Build failed for $($Build.Name)!" -ForegroundColor Red
-        exit 1
+    if ($Clean) {
+        $TargetDir = Join-Path $PyAppSourcePath "target"
+        if (Test-Path $TargetDir) {
+            Write-Host "Cleaning previous Rust build..." -ForegroundColor Yellow
+            Remove-Item -Recurse -Force $TargetDir
+        }
     }
 
-    $SourceExe = Join-Path $PyAppSourcePath "target\release\pyapp.exe"
-    $DestExe = Join-Path $DistPath "$($Build.Name).exe"
-    Copy-Item $SourceExe $DestExe -Force
+    if (-not (Test-Path $DistPath)) {
+        New-Item -ItemType Directory -Path $DistPath -Force | Out-Null
+    }
 
-    $ExeSize = (Get-Item $DestExe).Length / 1MB
-    Write-Host ("  -> $DestExe ({0:N2} MB)" -f $ExeSize) -ForegroundColor Green
+    $Builds = @(
+        @{ Name = "$AppName";      IsGui = $false; Label = "console" },
+        @{ Name = "$AppName-hideable"; IsGui = $true;  Label = "hideable (GUI subsystem)" }
+    )
+
+    Push-Location $PyAppSourcePath
+    $PushedLocation = $true
+
+    foreach ($Build in $Builds) {
+        Write-Host "`nBuilding $($Build.Label): $($Build.Name).exe..." -ForegroundColor Yellow
+
+        if ($Build.IsGui) { $env:PYAPP_IS_GUI = "true" }
+        else { Remove-Item Env:\PYAPP_IS_GUI -ErrorAction SilentlyContinue }
+
+        (Get-Item (Join-Path $PyAppSourcePath "build.rs")).LastWriteTime = Get-Date
+
+        cargo build --release
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Build failed for $($Build.Name)!" -ForegroundColor Red
+            exit 1
+        }
+
+        $SourceExe = Join-Path $PyAppSourcePath "target\release\pyapp.exe"
+        $DestExe = Join-Path $DistPath "$($Build.Name).exe"
+        Copy-Item $SourceExe $DestExe -Force
+
+        $ExeSize = (Get-Item $DestExe).Length / 1MB
+        Write-Host ("  -> $DestExe ({0:N2} MB)" -f $ExeSize) -ForegroundColor Green
+    }
+
+    Write-Host "`nBuild complete!" -ForegroundColor Green
+} finally {
+    if ($PushedLocation) { Pop-Location }
+    foreach ($Var in $PyAppVars) { [Environment]::SetEnvironmentVariable($Var, $SavedEnv[$Var]) }
 }
-
-Pop-Location
-Write-Host "`nBuild complete!" -ForegroundColor Green
-
-Remove-Item Env:\PYAPP_PROJECT_NAME -ErrorAction SilentlyContinue
-Remove-Item Env:\PYAPP_PROJECT_VERSION -ErrorAction SilentlyContinue
-Remove-Item Env:\PYAPP_PYTHON_VERSION -ErrorAction SilentlyContinue
-Remove-Item Env:\PYAPP_EXEC_CODE -ErrorAction SilentlyContinue
-Remove-Item Env:\PYAPP_SELF_COMMAND -ErrorAction SilentlyContinue
-Remove-Item Env:\PYAPP_PASS_LOCATION -ErrorAction SilentlyContinue
-Remove-Item Env:\PYAPP_IS_GUI -ErrorAction SilentlyContinue
