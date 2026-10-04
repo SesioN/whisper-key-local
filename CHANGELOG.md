@@ -2,6 +2,11 @@
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
+## [Unreleased]
+
+### Fixed
+- **No console flashes from sound playback** - playsound3 backend probes no longer briefly open console windows on Windows
+
 ## [0.8.3] - 2026-09-27
 
 ### Fixed
