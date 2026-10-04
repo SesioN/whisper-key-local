@@ -4,7 +4,7 @@ from .utils import setup_portaudio_path, setup_nvidia_dll_path
 setup_portaudio_path()
 setup_nvidia_dll_path()
 
-from .runtime_loader import ROCM, VULKAN, activate_selected_runtime, runtime_activation_warning
+from .runtime_loader import CUDA, ROCM, VULKAN, activate_selected_runtime, runtime_activation_warning
 activate_selected_runtime()
 
 import argparse
@@ -262,6 +262,37 @@ def run_gpu_onboarding(config_manager, whisper_config):
             config_manager.update_user_setting('whisper', 'compute_type', 'int8')
             config_manager.update_user_setting('whisper', 'runtime', 'cpu')
             config_manager.update_user_setting('onboarding', 'gpu_class', gpu_class)
+            config_manager.update_user_setting('onboarding', 'gpu', 'skipped')
+
+        return whisper_config, None
+
+    if gpu_class == 'nvidia' and not ct2_works:
+        from .terminal_ui import BOLD_GREEN, RESET, prompt_choice
+
+        INSTALL_CUDA = 1
+        CPU_ONLY = 3
+
+        choice = prompt_choice(
+            "GPU acceleration available",
+            [
+                ("Use NVIDIA CUDA (faster_whisper)", "Installs the CUDA runtime after startup"),
+                ("Skip for now", "Use CPU this session"),
+                ("Use CPU only", "Don't ask again"),
+            ],
+            subtitle=f"Use {gpu_name} for fast transcription?",
+        )
+        print()
+
+        config_manager.update_user_setting('onboarding', 'gpu_class', gpu_class)
+        if choice == INSTALL_CUDA:
+            config_manager.update_user_setting('onboarding', 'gpu', 'complete')
+            print(f"{BOLD_GREEN}The runtime is set up after startup. You can change it later in the tray Runtime menu.{RESET}\n")
+            return whisper_config, CUDA
+
+        if choice == CPU_ONLY:
+            config_manager.update_user_setting('whisper', 'device', 'cpu')
+            config_manager.update_user_setting('whisper', 'compute_type', 'int8')
+            config_manager.update_user_setting('whisper', 'runtime', 'cpu')
             config_manager.update_user_setting('onboarding', 'gpu', 'skipped')
 
         return whisper_config, None
