@@ -23,6 +23,10 @@ whisper: # Whisper AI Model Settings
     # GPU runtimes are installed on demand into %LOCALAPPDATA%\whisperkey\runtimes
     runtime: cpu
 
+    # Runtime for ONNX models (Parakeet, Qwen3-ASR), chosen from the tray "Runtime" menu while one is selected
+    # Options: onnx-cpu, onnx-directml (any DirectX 12 GPU), onnx-cuda (NVIDIA)
+    onnx_runtime: onnx-cpu
+
     # Transcription device (only for faster_whisper engine, set from runtime)
     # Options: cpu, cuda (for both NVIDIA and AMD)
     # For GPU setup, see https://github.com/PinW/whisper-key-local/blob/master/docs/gpu-setup.md
@@ -118,6 +122,44 @@ whisper: # Whisper AI Model Settings
             source: distil-whisper/distil-large-v3.5-ct2
             label: "Distil-Large-V3.5 (English, 1.4GB)"
             group: custom
+            enabled: true
+
+        # ONNX models — run on CPU, DirectML (any DirectX 12 GPU) or NVIDIA CUDA, see the tray "Runtime" menu
+        # Only the selected variant is downloaded, into %LOCALAPPDATA%\whisperkey\models
+        parakeet-tdt-0.6b-v3: # NVIDIA Parakeet, 25 European languages, automatic language detection
+            source: istupakov/parakeet-tdt-0.6b-v3-onnx
+            revision: 8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce
+            engine: onnx_asr
+            onnx_model_type: nemo-conformer-tdt
+            label: "Parakeet-TDT-0.6B-V3 (25 languages, 2.5GB)"
+            group: onnx
+            enabled: true
+        parakeet-tdt-0.6b-v3-int8:
+            source: istupakov/parakeet-tdt-0.6b-v3-onnx
+            revision: 8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce
+            engine: onnx_asr
+            onnx_model_type: nemo-conformer-tdt
+            quantization: int8
+            label: "Parakeet-TDT-0.6B-V3 int8 (25 languages, 670MB)"
+            group: onnx
+            enabled: true
+        qwen3-asr-1.7b: # Qwen3-ASR, 30 languages; uses the "language" setting (auto = detect)
+            source: OpenVoiceOS/qwen3-asr-1.7b-onnx
+            revision: 895b989354254bda979d2ba2fc413007ac89361c
+            engine: onnx_asr
+            onnx_model_type: speech-llm
+            label: "Qwen3-ASR-1.7B (30 languages, 9.4GB)"
+            group: onnx
+            enabled: true
+        qwen3-asr-1.7b-int8:
+            source: OpenVoiceOS/qwen3-asr-1.7b-onnx
+            revision: 895b989354254bda979d2ba2fc413007ac89361c
+            engine: onnx_asr
+            onnx_model_type: speech-llm
+            quantization: int8
+            directml: false # int8 runs faster on the CPU than with DirectML
+            label: "Qwen3-ASR-1.7B int8 (30 languages, 2.4GB)"
+            group: onnx
             enabled: true
 
 streaming: # Real-time STT (Experimental, speech preview only)
@@ -400,6 +442,10 @@ onboarding: # First-run setup state (managed automatically)
     # Answer to the whisper-server rebuild prompt for an older Vulkan runtime
     # pending | declined
     whisper_server_upgrade: pending
+
+    # Answer to the offer to run ONNX models on the GPU
+    # pending | declined
+    onnx_gpu: pending
 
 voice_commands: # Voice Command Settings
     # Enable/disable voice commands feature

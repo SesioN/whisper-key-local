@@ -10,12 +10,25 @@ VULKAN = "vulkan"
 RUNTIME_KEYS = (CPU, CUDA, ROCM, VULKAN)
 CT2_RUNTIMES = (CUDA, ROCM)
 
+ONNX_CPU = "onnx-cpu"
+ONNX_DIRECTML = "onnx-directml"
+ONNX_CUDA = "onnx-cuda"
+ONNX_RUNTIME_KEYS = (ONNX_CPU, ONNX_DIRECTML, ONNX_CUDA)
+ORT_RUNTIMES = (ONNX_DIRECTML, ONNX_CUDA)
+
 PYTHON_TAG = f"cp{sys.version_info.major}{sys.version_info.minor}"
-RUNTIME_FOLDERS = {CUDA: f"ct2-cuda-{PYTHON_TAG}", ROCM: f"ct2-rocm-{PYTHON_TAG}", VULKAN: "whisper.cpp-vulkan"}
+RUNTIME_FOLDERS = {
+    CUDA: f"ct2-cuda-{PYTHON_TAG}",
+    ROCM: f"ct2-rocm-{PYTHON_TAG}",
+    VULKAN: "whisper.cpp-vulkan",
+    ONNX_DIRECTML: f"ort-directml-{PYTHON_TAG}",
+    ONNX_CUDA: f"ort-cuda-{PYTHON_TAG}",
+}
 MARKER_FILE = "runtime.json"
-BUNDLED_DLL_GLOBS = ("_rocm_sdk_*/bin", "nvidia/*/bin")
+BUNDLED_DLL_GLOBS = ("_rocm_sdk_*/bin", "nvidia/**/bin")
 
 _active_ct2_runtime = CPU
+_active_ort_runtime = ONNX_CPU
 _activation_warning = None
 
 
@@ -76,20 +89,52 @@ def add_dll_directories(directories: list):
         os.environ["PATH"] = directory + os.pathsep + os.environ.get("PATH", "")
 
 
-def read_selected_runtime() -> str:
+def read_user_settings() -> dict:
     from ruamel.yaml import YAML
     from .utils import get_user_app_data_path
 
     settings_path = Path(get_user_app_data_path()) / "user_settings.yaml"
     try:
         with open(settings_path, encoding="utf-8") as settings_file:
-            settings = YAML(typ="safe").load(settings_file) or {}
+            return YAML(typ="safe").load(settings_file) or {}
     except Exception:
-        return CPU
+        return {}
+
+
+def read_selected_runtime() -> str:
+    settings = read_user_settings()
     return derive_runtime(settings.get("whisper") or {}, settings.get("onboarding") or {})
 
 
+def read_selected_onnx_runtime() -> str:
+    onnx_runtime = (read_user_settings().get("whisper") or {}).get("onnx_runtime")
+    return onnx_runtime if onnx_runtime in ONNX_RUNTIME_KEYS else ONNX_CPU
+
+
 def activate_selected_runtime():
+    _activate_ct2_runtime()
+    _activate_ort_runtime()
+
+
+def _activate_ort_runtime():
+    global _active_ort_runtime
+    runtime = read_selected_onnx_runtime()
+    if runtime not in ORT_RUNTIMES:
+        return
+    marker = read_runtime_marker(runtime)
+    if marker is None:
+        return
+    runtime_dir = get_runtime_dir(runtime)
+    add_dll_directories(runtime_dll_directories(runtime_dir, marker))
+    sys.path.insert(0, str(runtime_dir))
+    _active_ort_runtime = runtime
+
+
+def active_ort_runtime() -> str:
+    return _active_ort_runtime
+
+
+def _activate_ct2_runtime():
     global _active_ct2_runtime, _activation_warning
     runtime = read_selected_runtime()
     if runtime not in CT2_RUNTIMES:

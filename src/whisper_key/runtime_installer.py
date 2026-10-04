@@ -24,7 +24,18 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .onboarding import CT2_WHEEL_URLS, NVIDIA_PACKAGES, ROCM_72_PACKAGES
-from .runtime_loader import CUDA, MARKER_FILE, PYTHON_TAG, ROCM, VULKAN, active_ct2_runtime, get_runtime_dir
+from .runtime_loader import (CUDA, MARKER_FILE, ONNX_CUDA, ONNX_DIRECTML, ORT_RUNTIMES, PYTHON_TAG, ROCM, VULKAN,
+                             active_ct2_runtime, active_ort_runtime, get_runtime_dir)
+
+ORT_PACKAGES = {
+    ONNX_DIRECTML: ["onnxruntime-directml==1.24.4"],
+    ONNX_CUDA: ["onnxruntime-gpu==1.24.4"],
+}
+ORT_CUDA_LIBRARIES = ["nvidia-cuda-nvrtc-cu12~=12.0", "nvidia-cuda-runtime-cu12~=12.0", "nvidia-cufft-cu12~=11.0",
+                      "nvidia-curand-cu12~=10.0", "nvidia-cudnn-cu12~=9.0", "nvidia-cublas-cu12~=12.0"]
+ORT_PROVIDER_NAMES = {ONNX_DIRECTML: "DmlExecutionProvider", ONNX_CUDA: "CUDAExecutionProvider"}
+HF_TREE_URL = "https://huggingface.co/api/models/{repo}/tree/{revision}?recursive=true"
+HF_FILE_URL = "https://huggingface.co/{repo}/resolve/{revision}/{path}"
 
 ROCM_SYSTEM_SDK_VERSION = "7.2"
 ROCM_SYSTEM_DLLS = ("amdhip64_7.dll", "hipblas.dll", "rocblas.dll")
@@ -131,6 +142,10 @@ def install_options(runtime_key: str) -> list:
         return options
     if runtime_key == VULKAN:
         return [InstallOption(False, "Build whisper.cpp with Vulkan (installs CMake, Vulkan SDK and C++ build tools if missing)", "2-4 GB")]
+    if runtime_key == ONNX_DIRECTML:
+        return [InstallOption(False, "Download ONNX Runtime with DirectML (works with any DirectX 12 GPU)", "25 MB")]
+    if runtime_key == ONNX_CUDA:
+        return [InstallOption(False, "Download ONNX Runtime with CUDA 12 and cuDNN 9", "1.5 GB")]
     return []
 
 
@@ -179,7 +194,7 @@ class RuntimeInstaller:
     def install(self, runtime_key: str, option: InstallOption, model_key: Optional[str] = None) -> Path:
         if self._cancelled:
             raise RuntimeInstallError("Installation cancelled")
-        if runtime_key == active_ct2_runtime():
+        if runtime_key in (active_ct2_runtime(), active_ort_runtime()):
             raise RuntimeInstallError("This runtime is in use; switch to another runtime and restart first")
         final_dir = get_runtime_dir(runtime_key)
         final_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -191,6 +206,8 @@ class RuntimeInstaller:
         try:
             if runtime_key == VULKAN:
                 marker = self._install_whisper_cpp(staging_dir, model_key)
+            elif runtime_key in ORT_RUNTIMES:
+                marker = self._install_ort_runtime(runtime_key, staging_dir)
             else:
                 marker = self._install_ct2_runtime(runtime_key, option, staging_dir)
             marker["installed_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -201,7 +218,7 @@ class RuntimeInstaller:
             raise
 
         self._report(f"{runtime_key} runtime installed")
-        if runtime_key != VULKAN:
+        if runtime_key in (CUDA, ROCM):
             self._remove_stale_ct2_runtimes(final_dir.parent)
         return final_dir
 
@@ -365,6 +382,81 @@ class RuntimeInstaller:
         if int(values.get("CT2_DEVICES", 0)) < 1 or int(values.get("CT2_TYPES", 0)) < 1:
             raise RuntimeInstallError("The runtime was installed but found no usable GPU")
 
+    def _install_ort_runtime(self, runtime_key: str, staging_dir: Path) -> dict:
+        if runtime_key == ONNX_CUDA:
+            self._report("Downloading CUDA 12 and cuDNN libraries (1.3 GB)...")
+            self._pip_install(staging_dir, ORT_CUDA_LIBRARIES)
+        self._report("Installing ONNX Runtime...")
+        self._pip_install(staging_dir, ORT_PACKAGES[runtime_key], no_deps=True)
+        marker = {"runtime": runtime_key, "system_dll_dirs": []}
+        self._report("Checking ONNX Runtime...")
+        self._verify_ort_runtime(runtime_key, staging_dir, marker)
+        return marker
+
+    def _verify_ort_runtime(self, runtime_key: str, runtime_dir: Path, marker: dict):
+        from .runtime_loader import runtime_dll_directories
+        dll_dirs = runtime_dll_directories(runtime_dir, marker)
+        script = (
+            "import os, sys\n"
+            f"sys.path.insert(0, {str(runtime_dir)!r})\n"
+            f"for d in {dll_dirs!r}:\n"
+            "    os.add_dll_directory(d)\n"
+            "    os.environ['PATH'] = d + os.pathsep + os.environ['PATH']\n"
+            "import onnxruntime\n"
+            "print('ORT_FILE', onnxruntime.__file__)\n"
+            "print('ORT_PROVIDERS', ','.join(onnxruntime.get_available_providers()))\n"
+        )
+        env = {name: value for name, value in os.environ.items() if name not in ("PYTHONPATH", "PYTHONHOME")}
+        output = self._run([sys.executable, "-s", "-c", script], timeout=300, env=env)
+        values = dict(line.split(" ", 1) for line in output.splitlines() if line.startswith("ORT_") and " " in line)
+        if not Path(values.get("ORT_FILE", "")).resolve().is_relative_to(runtime_dir.resolve()):
+            raise RuntimeInstallError(f"The check loaded ONNX Runtime from outside the runtime: {values.get('ORT_FILE')}")
+        if ORT_PROVIDER_NAMES[runtime_key] not in values.get("ORT_PROVIDERS", ""):
+            raise RuntimeInstallError(f"ONNX Runtime was installed but has no {ORT_PROVIDER_NAMES[runtime_key]}")
+
+    def download_onnx_model(self, model_registry, model_key: str) -> Path:
+        from .onnx_asr_engine import matches_any_pattern, onnx_model_file_patterns, onnx_required_file_patterns
+        model = model_registry.get_model(model_key)
+        model_dir = Path(model_registry.get_onnx_model_dir(model_key))
+        patterns = onnx_model_file_patterns(model.onnx_model_type, model.quantization)
+        self._report("Fetching the model file list...")
+        tree = self._fetch_json(HF_TREE_URL.format(repo=model.source, revision=model.revision))
+        files = [entry for entry in tree if entry.get("type") == "file" and matches_any_pattern(entry["path"], patterns)]
+        for required_group in onnx_required_file_patterns(model.onnx_model_type, model.quantization):
+            if not any(matches_any_pattern(entry["path"], required_group[:2]) for entry in files):
+                raise RuntimeInstallError(f"{model.source} has no file matching {required_group[1]} for [{model_key}]")
+        total_bytes = sum(entry.get("size", 0) for entry in files)
+        model_dir.mkdir(parents=True, exist_ok=True)
+        ensure_free_space(model_dir, total_bytes)
+        for index, entry in enumerate(files, start=1):
+            destination = model_dir / entry["path"]
+            expected_sha256 = (entry.get("lfs") or {}).get("oid")
+            if destination.exists() and destination.stat().st_size == entry.get("size"):
+                continue
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            self._report(f"Downloading {entry['path']} ({index}/{len(files)}, {entry.get('size', 0) / 1e9:.2f} GB)...")
+            self._download_file(HF_FILE_URL.format(repo=model.source, revision=model.revision, path=entry["path"]),
+                                destination, expected_sha256)
+        Path(model_registry.get_onnx_complete_marker(model_key)).write_text(
+            json.dumps({"source": model.source, "revision": model.revision, "files": [entry["path"] for entry in files]}, indent=2),
+            encoding="utf-8")
+        self._report(f"[{model_key}] downloaded")
+        return model_dir
+
+    def _fetch_json(self, url: str):
+        for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+            if self._cancelled:
+                raise RuntimeInstallError("Installation cancelled")
+            try:
+                with urllib.request.urlopen(url, timeout=30) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except (OSError, http.client.HTTPException, ValueError) as e:
+                client_error = isinstance(e, urllib.error.HTTPError) and e.code < 500
+                if self._cancelled or client_error or attempt == DOWNLOAD_ATTEMPTS:
+                    raise
+                self._report(f"Request failed, retrying ({attempt}/{DOWNLOAD_ATTEMPTS - 1})...")
+                time.sleep(attempt * 3)
+
     def _install_whisper_cpp(self, staging_dir: Path, model_key: Optional[str]) -> dict:
         if not model_key:
             raise RuntimeInstallError("A model is needed to set up whisper.cpp")
@@ -497,7 +589,7 @@ class RuntimeInstaller:
         self._download_file(GGML_MODEL_URL.format(revision=GGML_MODEL_REVISION, file_name=file_name), destination, GGML_MODEL_SHA256[file_name])
         return destination
 
-    def _download_file(self, url: str, destination: Path, expected_sha256: str):
+    def _download_file(self, url: str, destination: Path, expected_sha256: Optional[str]):
         for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
             try:
                 return self._download_file_once(url, destination, expected_sha256)
@@ -510,7 +602,7 @@ class RuntimeInstaller:
                 self._report(f"Download interrupted, retrying ({attempt}/{DOWNLOAD_ATTEMPTS - 1})...")
                 time.sleep(attempt * 5)
 
-    def _download_file_once(self, url: str, destination: Path, expected_sha256: str):
+    def _download_file_once(self, url: str, destination: Path, expected_sha256: Optional[str]):
         partial = destination.with_name(destination.name + ".download")
         digest = hashlib.sha256()
         resume_from = partial.stat().st_size if partial.exists() else 0
@@ -546,7 +638,7 @@ class RuntimeInstaller:
                         if percent >= last_reported_percent + 10:
                             last_reported_percent = percent
                             self._report(f"Downloading {destination.name}... {percent}%")
-        if digest.hexdigest() != expected_sha256:
+        if expected_sha256 and digest.hexdigest() != expected_sha256:
             partial.unlink(missing_ok=True)
             raise RuntimeInstallError(f"Checksum mismatch for {destination.name}; the download was discarded")
         partial.replace(destination)
