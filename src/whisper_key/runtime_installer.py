@@ -166,6 +166,10 @@ class RuntimeInstaller:
         self._process = None
         self._cancelled = False
 
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled
+
     def cancel(self):
         self._cancelled = True
         process = self._process
