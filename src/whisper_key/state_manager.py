@@ -59,6 +59,7 @@ class StateManager:
         self._runtimes = None
         self._runtime_install_running = False
         self._runtime_installer = None
+        self._install_progress_window = None
         self._runtime_key = None
         self._runtimes_lock = threading.Lock()
         self._fallback_runtime = None
@@ -397,13 +398,19 @@ class StateManager:
             if not dialogs.confirm(title, f"The whisper.cpp file for the [{model_key}] model is not downloaded yet. Download it now?"):
                 return
             print(f"📦 Downloading the whisper.cpp model for [{model_key}]...")
+            self._show_install_progress(title)
             self._runtime_installer.download_ggml_model(model_key, Path(self._ggml_model_dir()))
         except Exception as e:
+            self._close_install_progress()
+            if self._install_was_cancelled():
+                print("ℹ️ Download cancelled")
+                return
             self.logger.error(f"Failed to download ggml model {model_key}: {e}")
             print(f"❌ Failed to download the [{model_key}] model: {e}")
             dialogs.show_error(title, f"Download failed:\n\n{str(e)[:600]}")
             return
         finally:
+            self._close_install_progress()
             with self._state_lock:
                 self._runtime_install_running = False
                 self._runtime_installer = None
@@ -573,6 +580,24 @@ class StateManager:
     def _report_install_progress(self, message: str):
         print(f"   {message}")
         self.system_tray.set_status_text(message)
+        window = self._install_progress_window
+        if window:
+            window.set_status(message)
+
+    def _show_install_progress(self, title: str):
+        from .install_progress_window import InstallProgressWindow
+        self._install_progress_window = InstallProgressWindow(title, on_cancel=self._runtime_installer.cancel)
+        self._install_progress_window.show()
+
+    def _close_install_progress(self):
+        window = self._install_progress_window
+        self._install_progress_window = None
+        if window:
+            window.close()
+
+    def _install_was_cancelled(self) -> bool:
+        installer = self._runtime_installer
+        return bool(installer and installer.cancelled)
 
     def _install_and_switch_runtime(self, runtime: Runtime, upgrade: bool = False):
         from .runtime_installer import RuntimeInstaller
@@ -583,13 +608,19 @@ class StateManager:
             if option is None:
                 return
             print(f"📦 Installing [{runtime.label}]: {option.description}")
+            self._show_install_progress(f"Installing {runtime.label}")
             self._runtime_installer.install(runtime.key, option, model_key=self.whisper_engine.model_key)
         except Exception as e:
+            self._close_install_progress()
+            if self._install_was_cancelled():
+                print(f"ℹ️ {runtime.label} installation cancelled")
+                return
             self.logger.error(f"Failed to install runtime {runtime.key}: {e}")
             print(f"❌ Failed to install {runtime.label}: {e}")
             dialogs.show_error(f"Install {runtime.label}", f"Installation failed:\n\n{str(e)[:600]}\n\nDetails are in the log file.")
             return
         finally:
+            self._close_install_progress()
             with self._state_lock:
                 self._runtime_install_running = False
                 self._runtime_installer = None
