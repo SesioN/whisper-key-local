@@ -442,10 +442,10 @@ def main():
 
         state_manager.get_runtimes()
         system_tray.start()
+        loading_screen.close()
         if floating_widget and floating_widget_config['enabled']:
             floating_widget.show()
         terminal_title.start()
-        loading_screen.close()
 
         if clipboard_config['auto_paste']:
             if not permissions.check_accessibility_permission():
