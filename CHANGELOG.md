@@ -4,6 +4,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+- **`whisper-key-no-term.exe`** - Windows build that never opens a console window; startup progress is shown by the loading screen only
+
 ### Fixed
 - **No console flashes from sound playback** - playsound3 backend probes no longer briefly open console windows on Windows
 

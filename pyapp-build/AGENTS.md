@@ -27,4 +27,4 @@ are not included (the source is taken from `git archive HEAD`). Building the whe
 access for the build dependencies. Each commit installs into its own pyapp directory; `whisper-key self update`
 replaces the branch build with the latest PyPI release once a newer one exists.
 
-Produces two executables: `whisper-key.exe` (console) and `whisper-key-hideable.exe` (GUI subsystem, for start_hidden/minimize-to-tray).
+Produces three executables: `whisper-key.exe` (console), `whisper-key-hideable.exe` (GUI subsystem, for start_hidden/minimize-to-tray) and `whisper-key-no-term.exe` (GUI subsystem, never opens a console; only the loading screen, tray and widget are visible).
