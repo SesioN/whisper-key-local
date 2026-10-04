@@ -552,7 +552,12 @@ class StateManager:
         self.config_manager.update_user_setting('whisper', 'compute_type', choose_compute_type(runtime, None))
         print(f"🔄 Restarting Whisper Key to switch to [{runtime.label}]...")
         from .utils import restart_app
-        restart_app()
+        try:
+            restart_app()
+        except Exception as e:
+            self.logger.error(f"Failed to restart into {runtime.label}: {e}")
+            print(f"❌ Failed to restart, restart Whisper Key manually: {e}")
+            self.set_model_loading(False)
 
     def _restore_engine(self, engine):
         print("🔄 Restoring previous runtime...")
