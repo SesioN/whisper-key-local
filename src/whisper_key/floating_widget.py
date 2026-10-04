@@ -157,6 +157,7 @@ class FloatingWidget:
         self._mute_label = None
         self._controls_frame = None
         self._hit_targets = []
+        self._hit_target_sync_pending = False
         self._icon_photos = {}
         gc.collect()
 
