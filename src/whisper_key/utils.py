@@ -1,3 +1,4 @@
+import logging
 import os
 import subprocess
 import sys
@@ -8,13 +9,18 @@ from pathlib import Path
 class OptionalComponent:
     def __init__(self, component):
         self._component = component
-    
+        self._reported_missing = set()
+
     def __getattr__(self, name):
-        if self._component and hasattr(self._component, name):
-            attr = getattr(self._component, name)
-            return attr
-        else:
-            # Return a no-op function for missing methods/attributes
+        if self._component is None:
+            return lambda *args, **kwargs: None
+        try:
+            return getattr(self._component, name)
+        except AttributeError:
+            if name not in self._reported_missing:
+                self._reported_missing.add(name)
+                logging.getLogger(__name__).error(
+                    f"{type(self._component).__name__} has no attribute '{name}', ignoring the call", exc_info=True)
             return lambda *args, **kwargs: None
 
 
