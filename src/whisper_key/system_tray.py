@@ -356,8 +356,8 @@ class SystemTray:
             console.hide()
         console.start_minimize_monitor(console.hide)
 
-    def _quit_application_from_tray(self, icon=None, item=None):        
-        os.kill(os.getpid(), signal.SIGINT)
+    def _quit_application_from_tray(self, icon=None, item=None):
+        signal.raise_signal(signal.SIGINT)
     
     def update_state(self, new_state: str):
         if not TRAY_AVAILABLE or not self.is_running:
