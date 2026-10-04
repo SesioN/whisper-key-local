@@ -170,6 +170,7 @@ class FloatingWidget:
         self._icon_label = tk.Label(self._root, bg=TRANSPARENT_KEY_COLOR, bd=0, highlightthickness=0, cursor="hand2")
         self._icon_label.pack()
         self._bind_icon_mouse_handlers(self._icon_label)
+        self._icon_label.bind("<Configure>", self._on_icon_configure)
 
         self._controls_frame = tk.Frame(self._root, bg=TRANSPARENT_KEY_COLOR, bd=0, highlightthickness=0)
         self._controls_frame.pack()
@@ -208,20 +209,37 @@ class FloatingWidget:
         self._hit_target.update_idletasks()
         window_style.prevent_focus_steal(self._hit_target.winfo_id())
 
+    def _on_icon_configure(self, event):
+        self.logger.info(f"[widget] icon configured {event.width}x{event.height}+{event.x}+{event.y}")
+        if self._hit_target and self._root.state() == "normal":
+            self._sync_hit_target()
+
     def _sync_hit_target(self):
         if self._root.state() != "normal":
             self._hit_target.withdraw()
+            self._log_geometry("sync (hidden)")
             return
         self._root.update_idletasks()
         self._place_hit_target(self._root.winfo_x(), self._root.winfo_y())
         if self._hit_target.state() != "normal":
             self._hit_target.deiconify()
             self._root.lift()
+        self._log_geometry("sync")
 
     def _place_hit_target(self, window_x: int, window_y: int):
         self._hit_target.geometry(
             f"{self._icon_label.winfo_width()}x{self._icon_label.winfo_height()}"
             f"+{window_x + self._icon_label.winfo_x()}+{window_y + self._icon_label.winfo_y()}"
+        )
+
+    def _log_geometry(self, reason: str):
+        self.logger.info(
+            f"[widget] {reason}: root={self._root.state()} {self._root.winfo_width()}x{self._root.winfo_height()}"
+            f"+{self._root.winfo_x()}+{self._root.winfo_y()} {window_style.describe_window(self._root.winfo_id())}; "
+            f"icon={self._icon_label.winfo_width()}x{self._icon_label.winfo_height()}"
+            f"+{self._icon_label.winfo_x()}+{self._icon_label.winfo_y()} mapped={self._icon_label.winfo_ismapped()}; "
+            f"hit={self._hit_target.state()} {self._hit_target.geometry()} {window_style.describe_window(self._hit_target.winfo_id())}; "
+            f"locked={self._locked} muted={self.muted} state={self.state}"
         )
 
     def _initial_position(self) -> str:
@@ -294,6 +312,8 @@ class FloatingWidget:
             self.logger.error(f"Floating widget command '{command}' failed: {e}")
 
     def _handle_command(self, command: str):
+        if command not in (REFRESH_ICON, REFRESH_MUTE):
+            self.logger.info(f"[widget] command {command}")
         if command == SHOW:
             self._root.deiconify()
             self._sync_hit_target()
@@ -325,7 +345,9 @@ class FloatingWidget:
             self.logger.exception("Floating widget lock handler failed")
 
     def _on_mute_click(self, event):
+        self.logger.info(f"[widget] mute press at {event.x_root},{event.y_root}")
         if self._mute_click_thread and self._mute_click_thread.is_alive():
+            self.logger.info("[widget] mute click ignored: previous mute handler still running")
             return
         self._mute_click_thread = threading.Thread(target=self._run_mute_callback, daemon=True, name="FloatingWidgetMute")
         self._mute_click_thread.start()
@@ -337,6 +359,7 @@ class FloatingWidget:
             self.logger.exception("Floating widget mute handler failed")
 
     def _on_icon_press(self, event):
+        self.logger.info(f"[widget] icon press on {event.widget} at {event.x_root},{event.y_root}")
         self._dragging = False
         self._press_x_root = event.x_root
         self._press_y_root = event.y_root
@@ -356,6 +379,7 @@ class FloatingWidget:
             self._place_hit_target(window_x, window_y)
 
     def _on_icon_release(self, event):
+        self.logger.info(f"[widget] icon release on {event.widget} at {event.x_root},{event.y_root} dragging={self._dragging}")
         self._root.lift()
         if self._dragging:
             self._dragging = False
@@ -363,12 +387,15 @@ class FloatingWidget:
                 self._handle_command_safely(SAVE_POSITION)
             return
         if self._click_thread and self._click_thread.is_alive():
+            self.logger.info("[widget] click ignored: previous click handler still running")
             return
         self._click_thread = threading.Thread(target=self._run_click_callback, daemon=True, name="FloatingWidgetClick")
         self._click_thread.start()
 
     def _run_click_callback(self):
+        self.logger.info("[widget] click handler started")
         try:
             self.on_click()
         except Exception:
             self.logger.exception("Floating widget click handler failed")
+        self.logger.info("[widget] click handler finished")
