@@ -49,12 +49,15 @@ class FloatingWidget:
                  on_click: Callable[[], None],
                  on_position_changed: Callable[[str], None],
                  on_mute_click: Callable[[], None],
+                 on_lock_changed: Callable[[bool], None],
                  size: str = DEFAULT_SIZE,
                  save_position: bool = False,
-                 position: Optional[str] = None):
+                 position: Optional[str] = None,
+                 locked: bool = False):
         self.on_click = on_click
         self.on_position_changed = on_position_changed
         self.on_mute_click = on_mute_click
+        self.on_lock_changed = on_lock_changed
         self.size = size if size in SIZES else DEFAULT_SIZE
         self.save_position = save_position
         self.position = position
@@ -75,7 +78,7 @@ class FloatingWidget:
         self._controls_frame = None
         self._hit_target = None
         self._icon_photos = {}
-        self._locked = False
+        self._locked = locked
         self._dragging = False
         self._press_x_root = 0
         self._press_y_root = 0
@@ -210,13 +213,16 @@ class FloatingWidget:
             self._hit_target.withdraw()
             return
         self._root.update_idletasks()
-        self._hit_target.geometry(
-            f"{self._icon_label.winfo_width()}x{self._icon_label.winfo_height()}"
-            f"+{self._icon_label.winfo_rootx()}+{self._icon_label.winfo_rooty()}"
-        )
+        self._place_hit_target(self._root.winfo_x(), self._root.winfo_y())
         if self._hit_target.state() != "normal":
             self._hit_target.deiconify()
             self._root.lift()
+
+    def _place_hit_target(self, window_x: int, window_y: int):
+        self._hit_target.geometry(
+            f"{self._icon_label.winfo_width()}x{self._icon_label.winfo_height()}"
+            f"+{window_x + self._icon_label.winfo_x()}+{window_y + self._icon_label.winfo_y()}"
+        )
 
     def _initial_position(self) -> str:
         if self.save_position and self._saved_position_is_on_screen():
@@ -259,8 +265,7 @@ class FloatingWidget:
         self._apply_icon()
 
     def _apply_icon(self):
-        state = "muted" if self.muted and self.state == "idle" else self.state
-        photo = self._icon_photos.get(state, self._icon_photos["idle"])
+        photo = self._icon_photos.get(self.state, self._icon_photos["idle"])
         self._icon_label.config(image=photo)
 
     def _apply_lock_appearance(self):
@@ -299,7 +304,6 @@ class FloatingWidget:
             self._apply_icon()
         elif command == REFRESH_MUTE:
             self._apply_mute_appearance()
-            self._apply_icon()
         elif command == RESIZE:
             self._apply_size()
             self._sync_hit_target()
@@ -315,6 +319,10 @@ class FloatingWidget:
     def _on_lock_click(self, event):
         self._locked = not self._locked
         self._apply_lock_appearance()
+        try:
+            self.on_lock_changed(self._locked)
+        except Exception:
+            self.logger.exception("Floating widget lock handler failed")
 
     def _on_mute_click(self, event):
         if self._mute_click_thread and self._mute_click_thread.is_alive():
@@ -342,10 +350,13 @@ class FloatingWidget:
                 return
             self._dragging = True
         if not self._locked:
-            self._root.geometry(f"+{event.x_root - self._drag_offset_x}+{event.y_root - self._drag_offset_y}")
-            self._sync_hit_target()
+            window_x = event.x_root - self._drag_offset_x
+            window_y = event.y_root - self._drag_offset_y
+            self._root.geometry(f"+{window_x}+{window_y}")
+            self._place_hit_target(window_x, window_y)
 
     def _on_icon_release(self, event):
+        self._root.lift()
         if self._dragging:
             self._dragging = False
             if self.save_position and not self._locked:

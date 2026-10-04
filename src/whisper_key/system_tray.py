@@ -11,6 +11,7 @@ from .runtime_options import COMPUTE_TYPES
 try:
     import pystray
     from PIL import Image
+    from .icon_effects import create_muted_icon
     TRAY_AVAILABLE = True
 except ImportError:
     TRAY_AVAILABLE = False
@@ -64,15 +65,14 @@ class SystemTray:
                 "idle": self._create_fallback_icon("idle"),
                 "recording": self._create_fallback_icon("recording"),
                 "processing": self._create_fallback_icon("processing"),
-                "muted": self._create_fallback_icon("muted"),
+                "muted": create_muted_icon(self._create_fallback_icon("idle")),
             }
         
     def _create_fallback_icon(self, state: str) -> Image.Image:
         colors = {
             'idle': (128, 128, 128),      # Gray
             'recording': (34, 139, 34),   # Green  
-            'processing': (255, 165, 0),  # Orange
-            'muted': (200, 30, 30)
+            'processing': (255, 165, 0)   # Orange
         }
         
         color = colors.get(state, (128, 128, 128))  # Default to gray

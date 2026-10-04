@@ -293,6 +293,7 @@ class StateManager:
             self.audio_recorder.cancel_recording()
             with self._state_lock:
                 self._command_mode = False
+            print("🔇 Microphone is muted - unmute to record")
             return
         if success:
             print("\n🎤 Command mode activated! Speak a command...")
@@ -310,6 +311,7 @@ class StateManager:
         elif self.is_muted:
             self._auto_triggered_recording = False
             self.audio_recorder.cancel_recording()
+            print("🔇 Microphone is muted - unmute to record")
         else:
             print("\n🎤 Recording started! Speak now...")
             if not auto_triggered:
@@ -536,6 +538,9 @@ class StateManager:
 
     def save_floating_widget_position(self, position: str):
         self.config_manager.update_user_setting('floating_widget', 'position', position)
+
+    def save_floating_widget_locked(self, locked: bool):
+        self.config_manager.update_user_setting('floating_widget', 'locked', locked)
 
     def get_runtimes(self) -> list:
         with self._runtimes_lock:

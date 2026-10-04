@@ -213,9 +213,11 @@ def setup_floating_widget(floating_widget_config, state_manager):
         on_click=state_manager.toggle_recording,
         on_position_changed=state_manager.save_floating_widget_position,
         on_mute_click=state_manager.toggle_mute,
+        on_lock_changed=state_manager.save_floating_widget_locked,
         size=floating_widget_config['size'],
         save_position=floating_widget_config['save_position'],
-        position=floating_widget_config['position']
+        position=floating_widget_config['position'],
+        locked=floating_widget_config['locked']
     )
 
 def run_gpu_onboarding(config_manager, whisper_config):

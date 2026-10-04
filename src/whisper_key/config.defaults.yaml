@@ -352,6 +352,9 @@ floating_widget: # Floating Recording Button (Windows only)
     # Restore the last dragged position on startup
     save_position: false
 
+    # Keep the button locked in place (toggled with the label below the icon)
+    locked: false
+
     # Last position as "+x+y" (managed automatically)
     position: null
 
