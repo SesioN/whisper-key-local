@@ -162,6 +162,7 @@ class FloatingWidget:
         gc.collect()
 
     def _build_window(self):
+        foreground_before_build = window_style.get_foreground_window()
         self._root = tk.Tk()
         self._root.withdraw()
         self._root.overrideredirect(True)
@@ -199,6 +200,7 @@ class FloatingWidget:
             (self._build_hit_target(lambda target: target.bind("<Button-1>", self._on_lock_click)), self._lock_label),
             (self._build_hit_target(lambda target: target.bind("<Button-1>", self._on_mute_click)), self._mute_label),
         ]
+        window_style.give_back_foreground(foreground_before_build, self._own_window_ids())
 
         self._root.after(QUEUE_POLL_INTERVAL_MS, self._process_command_queue)
 
@@ -247,6 +249,9 @@ class FloatingWidget:
                 f"{covered_widget.winfo_width()}x{covered_widget.winfo_height()}"
                 f"+{window_x + offset_x}+{window_y + offset_y}"
             )
+
+    def _own_window_ids(self) -> list[int]:
+        return [self._root.winfo_id()] + [hit_target.winfo_id() for hit_target, _ in self._hit_targets]
 
     def _initial_position(self) -> str:
         if self.save_position and self._saved_position_is_on_screen():
@@ -319,8 +324,11 @@ class FloatingWidget:
 
     def _handle_command(self, command: str):
         if command == SHOW:
+            previous_foreground = window_style.get_foreground_window()
             self._root.deiconify()
             self._sync_hit_target()
+            self._root.update_idletasks()
+            window_style.give_back_foreground(previous_foreground, self._own_window_ids())
         elif command == HIDE:
             self._root.withdraw()
             self._sync_hit_target()
