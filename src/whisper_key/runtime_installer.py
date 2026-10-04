@@ -487,7 +487,14 @@ class RuntimeInstaller:
         digest = hashlib.sha256()
         resume_from = partial.stat().st_size if partial.exists() else 0
         request = urllib.request.Request(url, headers={"Range": f"bytes={resume_from}-"} if resume_from else {})
-        with urllib.request.urlopen(request, timeout=60) as response:
+        try:
+            response = urllib.request.urlopen(request, timeout=60)
+        except urllib.error.HTTPError as e:
+            if e.code != 416:
+                raise
+            partial.unlink()
+            return self._download_file_once(url, destination, expected_sha256)
+        with response:
             if response.status != 206:
                 resume_from = 0
             if resume_from:
