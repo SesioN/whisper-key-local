@@ -91,11 +91,11 @@ class HotkeyListener:
     def _stop_key_pressed(self):
         self.logger.debug(f"Stop key pressed, keys_armed={self.keys_armed}")
 
-        if self.keys_armed:
+        if not self.keys_armed:
+            self.logger.debug("Stop key ignored - waiting for key release first")
+        elif self.state_manager.audio_recorder.get_recording_status():
             self.logger.info("Stop key activated")
             self.state_manager.stop_recording()
-        else:
-            self.logger.debug("Stop key ignored - waiting for key release first")
 
     def _auto_send_key_pressed(self):
         self.logger.debug(f"Auto-send key pressed, keys_armed={self.keys_armed}")

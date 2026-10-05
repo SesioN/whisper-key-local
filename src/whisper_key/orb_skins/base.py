@@ -1,6 +1,7 @@
 import numpy as np
 
 ALPHA_FLOOR = 0.035
+GRAYSCALE_WEIGHTS = (0.299, 0.587, 0.114)
 
 def smoothstep(edge0, edge1, x):
     span = edge1 - edge0
@@ -68,8 +69,12 @@ class OrbSkin:
         return a.reshape((n, s, n, s) + a.shape[2:]).mean(axis=(1, 3))
 
     def render_into(self, pixels, state: str, level: float, t: float, opacity: float, flash: float = 0.0,
-                    flash_color=None):
+                    flash_color=None, grayscale: bool = False):
         rgb, alpha = self.shade(state, level, t)
+
+        if grayscale:
+            luminance = rgb @ np.array(GRAYSCALE_WEIGHTS, dtype=np.float32)
+            rgb = np.repeat(luminance[..., None], 3, axis=-1)
 
         if flash > 0.0:
             if flash_color is None:

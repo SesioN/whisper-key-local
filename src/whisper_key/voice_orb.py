@@ -189,6 +189,7 @@ ERROR_FLASH_COLOR = (255, 60, 50)
 OPACITY_MUTED_SKIN = 0.85
 OPACITY_IDLE = 0.7
 OPACITY_MUTED = 0.3
+OPACITY_LOADING = 0.35
 FPS_IDLE = 8
 FPS_ACTIVE = 30
 HIDDEN_POLL_SECONDS = 0.25
@@ -777,7 +778,10 @@ class VoiceOrb:
 
         skin = type(self._renderer)
         outcome = self._active_outcome()
-        if outcome and self.state != "recording":
+        grayscale = self.state == "loading"
+        if grayscale:
+            state, level, opacity = "idle", 0.0, OPACITY_LOADING
+        elif outcome and self.state != "recording":
             state, level, opacity = outcome, 0.0, 1.0
         elif self.muted or self.state == "muted":
             if skin.HANDLES_MUTED:
@@ -791,7 +795,7 @@ class VoiceOrb:
         flash = max(0.0, (self._flash_until - time.monotonic()) / flash_length)
 
         surface = self._surface
-        self._renderer.render_into(surface["pixels"], state, level, t, opacity, flash, self._flash_color)
+        self._renderer.render_into(surface["pixels"], state, level, t, opacity, flash, self._flash_color, grayscale)
         visibility = self._update_badge_visibility()
         badges = self._enabled_badges()
         if badges:

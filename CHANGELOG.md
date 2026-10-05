@@ -4,6 +4,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-06
+
+### Changed
+- **Model downloads use the installer window** - picking a faster-whisper model that is not downloaded yet asks first, then downloads it with progress and cancel (like ONNX and whisper.cpp models), instead of freezing while it downloads in the background
+- **Transcription pauses while switching** - while a model or runtime is downloading, installing or loading, recording is off and an active recording is cancelled; the floating button and orb turn gray and faded until the new model is ready
+- **Models warm up when they load** - at startup and after a switch, so the first recording is not slow and a broken GPU setup is caught while loading
+
+### Fixed
+- **Hang after a CUDA library error** - a faster-whisper model on CUDA without cuBLAS/cuDNN now fails during loading and falls back to the CPU, instead of failing the first recording and hanging on the next
+- **Startup crash on an unknown model** - a model key this version does not know (for example from a newer version's settings) falls back to Tiny for the session
+- **English-only models with another language** - `.en` models always transcribe in English and a warning explains that the configured language is ignored
+- **Tray menu error after a settings change** - `invalid command name ...canvas` when the menu rebuilt itself while a row was highlighted
+- **"Stop key activated" log spam** - only logged when a recording is actually stopped
+
 ## [1.1.0] - 2026-10-05
 
 ### Added
