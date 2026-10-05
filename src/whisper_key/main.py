@@ -203,23 +203,47 @@ def setup_system_tray(tray_config, config_manager, state_manager, model_registry
         console_config=console_config
     )
 
-def setup_floating_widget(floating_widget_config, state_manager):
+def setup_floating_widget(config_manager, state_manager):
     if not IS_WINDOWS:
         return None
     try:
         from .floating_widget import FloatingWidget
+        from .voice_orb import VoiceOrb
+        from .switchable_floating_widget import SwitchableFloatingWidget
     except ImportError as e:
         logging.getLogger(__name__).warning(f"Floating widget not available: {e}")
         return None
-    return FloatingWidget(
-        on_click=state_manager.toggle_recording,
-        on_position_changed=state_manager.save_floating_widget_position,
-        on_mute_click=state_manager.toggle_mute,
-        on_lock_changed=state_manager.save_floating_widget_locked,
-        size=floating_widget_config['size'],
-        save_position=floating_widget_config['save_position'],
-        position=floating_widget_config['position'],
-        locked=floating_widget_config['locked']
+
+    def create_button():
+        floating_widget_config = config_manager.get_floating_widget_config()
+        return FloatingWidget(
+            on_click=state_manager.toggle_recording,
+            on_position_changed=state_manager.save_floating_widget_position,
+            on_mute_click=state_manager.toggle_mute,
+            on_lock_changed=state_manager.save_floating_widget_locked,
+            size=floating_widget_config['size'],
+            save_position=floating_widget_config['save_position'],
+            position=floating_widget_config['position'],
+            locked=floating_widget_config['locked']
+        )
+
+    def create_orb():
+        floating_widget_config = config_manager.get_floating_widget_config()
+        return VoiceOrb(
+            on_click=state_manager.toggle_recording,
+            on_position_changed=state_manager.save_orb_position,
+            on_size_changed=state_manager.save_floating_widget_size,
+            size=floating_widget_config['size'],
+            skin=floating_widget_config['orb_skin'],
+            save_position=floating_widget_config['save_position'],
+            position=floating_widget_config['orb_position'],
+            locked=floating_widget_config['locked'],
+            hide_on_fullscreen=floating_widget_config['orb_hide_on_fullscreen']
+        )
+
+    return SwitchableFloatingWidget(
+        widget_factories={'button': create_button, 'orb': create_orb},
+        style=config_manager.get_floating_widget_config()['style']
     )
 
 def run_gpu_onboarding(config_manager, whisper_config):
@@ -522,7 +546,9 @@ def main():
         state_manager.attach_vad_sensitivity_window(setup_vad_sensitivity_window(vad_config, state_manager))
         system_tray = setup_system_tray(tray_config, config_manager, state_manager, model_registry, console_config)
         clipboard_manager.on_delivery_blocked = system_tray.notify
-        floating_widget = setup_floating_widget(floating_widget_config, state_manager)
+        floating_widget = setup_floating_widget(config_manager, state_manager)
+        if floating_widget:
+            audio_recorder.on_audio_level = floating_widget.set_level
         state_manager.attach_components(audio_recorder, system_tray, floating_widget)
         
         hotkey_listener = setup_hotkey_listener(config_manager, state_manager, voice_commands_config['enabled'])

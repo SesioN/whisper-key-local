@@ -403,6 +403,19 @@ floating_widget: # Floating Recording Button (Windows only)
     # Last position as "+x+y" (managed automatically)
     position: null
 
+    # Style: button (icon with Movable/Mute labels) or orb (animated voice orb
+    # that reacts to your voice; scroll on it to resize, lock it from the tray)
+    style: button
+
+    # Orb look: gold, silver, chrome, glass, aurora, blackhole
+    orb_skin: gold
+
+    # Hide the orb while a fullscreen application is in front
+    orb_hide_on_fullscreen: true
+
+    # Last orb position as "+x+y" in physical pixels (managed automatically)
+    orb_position: null
+
 terminal_title: # Terminal Tab Title Status
     # Tab title shows "<prefix> Whisper Key" based on app state
     # Each state is a static prefix string, or a list of [prefix, seconds]

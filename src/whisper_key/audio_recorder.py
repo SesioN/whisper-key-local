@@ -55,10 +55,22 @@ class AudioRecorder:
         self.streaming_manager = streaming_manager
         self.on_streaming_result = on_streaming_result
 
+        self.on_audio_level: Optional[Callable[[float], None]] = None
+        self._audio_level_error_logged = False
+
         self.resolve_device(device)
         self._test_audio_source()
 
         self.continuous_streaming = self._setup_continuous_streaming()
+
+    def _report_audio_level(self, audio_data):
+        samples = audio_data.ravel()
+        try:
+            self.on_audio_level(float(np.sqrt(np.dot(samples, samples) / max(samples.size, 1))))
+        except Exception as e:
+            if not self._audio_level_error_logged:
+                self._audio_level_error_logged = True
+                self.logger.error(f"Audio level callback failed: {e}")
 
     def _setup_continuous_vad_monitoring(self):
         if self.vad_manager.is_available():
@@ -309,6 +321,9 @@ class AudioRecorder:
 
                     if self.is_recording and self.continuous_streaming:
                         self.continuous_streaming.process_chunk(audio_data)
+
+                if self.is_recording and self.on_audio_level is not None:
+                    self._report_audio_level(audio_data)
 
                 if status:
                     self.logger.debug(f"Audio callback status: {status}")

@@ -607,6 +607,29 @@ class StateManager:
     def save_floating_widget_locked(self, locked: bool):
         self.config_manager.update_user_setting('floating_widget', 'locked', locked)
 
+    def save_floating_widget_size(self, size: str):
+        self.config_manager.update_user_setting('floating_widget', 'size', size)
+        self.system_tray.refresh_menu()
+
+    def save_orb_position(self, position: str):
+        self.config_manager.update_user_setting('floating_widget', 'orb_position', position)
+
+    def update_floating_widget_style(self, style: str):
+        self.config_manager.update_user_setting('floating_widget', 'style', style)
+        self.floating_widget.set_style(style)
+
+    def update_orb_skin(self, skin: str):
+        self.config_manager.update_user_setting('floating_widget', 'orb_skin', skin)
+        self.floating_widget.set_orb_skin(skin)
+
+    def update_orb_locked(self, locked: bool):
+        self.config_manager.update_user_setting('floating_widget', 'locked', locked)
+        self.floating_widget.set_orb_locked(locked)
+
+    def update_orb_hide_on_fullscreen(self, hide_on_fullscreen: bool):
+        self.config_manager.update_user_setting('floating_widget', 'orb_hide_on_fullscreen', hide_on_fullscreen)
+        self.floating_widget.set_orb_hide_on_fullscreen(hide_on_fullscreen)
+
     def _ggml_model_dir(self) -> Optional[str]:
         return with_whisper_cpp_paths(self.config_manager.get_whisper_config()).get('cpp_model_dir')
 
