@@ -425,6 +425,12 @@ class StateManager:
                 self._show_outcome("success" if command_ok else "error")
                 return
 
+            dictation_command = None if auto_triggered and not self._auto_trigger_paste else self._match_dictation_command(transcribed_text)
+            if dictation_command:
+                command_ok = self.voice_command_manager.execute_command(dictation_command, use_auto_enter)
+                self._show_outcome("success" if command_ok else "error")
+                return
+
             if auto_triggered and not self._auto_trigger_paste:
                 success = self.clipboard_manager.copy_with_notification(transcribed_text)
             else:
@@ -492,6 +498,14 @@ class StateManager:
             return self.voice_command_manager.execute_command(matched, use_auto_enter)
         print("   ✗ No matching command found")
         return False
+
+    def _match_dictation_command(self, text: str) -> Optional[dict]:
+        if not (self.voice_command_manager and self.voice_command_manager.match_in_dictation):
+            return None
+        matched = self.voice_command_manager.match_command(text)
+        if matched:
+            print(f"   ✓ Voice command matched: '{matched.get('trigger', '')}'")
+        return matched
 
     def get_application_state(self) -> dict:
         status = {

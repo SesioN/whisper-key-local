@@ -482,3 +482,8 @@ voice_commands: # Voice Command Settings
     # false = disable voice commands entirely
     # Define commands in commands.yaml (same folder as user_settings.yaml)
     enabled: true
+
+    # Check normal recordings for voice commands too
+    # true = a normal recording whose text contains a trigger runs that command instead of being pasted
+    # false = only the command hotkey runs voice commands
+    match_in_dictation: false

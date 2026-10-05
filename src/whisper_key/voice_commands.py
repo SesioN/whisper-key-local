@@ -77,8 +77,9 @@ def find_entry_problems(entries: list) -> list:
 
 
 class VoiceCommandManager:
-    def __init__(self, enabled=True, clipboard_manager=None, log_transcriptions=False):
+    def __init__(self, enabled=True, clipboard_manager=None, log_transcriptions=False, match_in_dictation=False):
         self.enabled = enabled
+        self.match_in_dictation = enabled and match_in_dictation
         self.clipboard_manager = clipboard_manager
         self.log_transcriptions = log_transcriptions
         self.logger = logging.getLogger(__name__)
