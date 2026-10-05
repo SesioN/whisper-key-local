@@ -33,6 +33,10 @@ class ModelRegistry:
         model = self.get_model(key)
         return model.source if model else key
 
+    def supports_prompt(self, key: str) -> bool:
+        model = self.get_model(key)
+        return model.supports_prompt if model else True
+
     def get_cache_folder(self, key: str) -> str:
         model = self.get_model(key)
         if not model:
@@ -160,6 +164,10 @@ class ModelDefinition:
         self.onnx_model_type = config.get("onnx_model_type")
         self.quantization = config.get("quantization")
         self.directml = config.get("directml", True)
+        self.supports_prompt = config.get("supports_prompt", True)
+        if not isinstance(self.supports_prompt, bool):
+            logging.getLogger(__name__).warning(f"Model {key}: supports_prompt must be true or false, got {self.supports_prompt!r}; using true")
+            self.supports_prompt = True
         self.is_local_path = self._check_is_local_path()
         self.cache_folder = self._derive_cache_folder()
 

@@ -62,6 +62,7 @@ whisper: # Whisper AI Model Settings
     # Available models (set enabled: false to hide from menu)
     # To add custom models (CTranslate2 format), add entry with source (HuggingFace or local path)
     # Example: my-model: {source: "username/repo-ct2", label: "My Model", group: custom}
+    # supports_prompt: false skips initial_prompt and hotwords for models that repeat or derail with them
     models:
         # Official whisper models
         tiny:

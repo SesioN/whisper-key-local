@@ -33,6 +33,7 @@ class WhisperEngine:
         self.model = None
         self.logger = logging.getLogger(__name__)
         self.registry = model_registry
+        self._prompt_skip_logged_models = set()
 
         self._loading_thread = None
         self._progress_callback = None
@@ -41,6 +42,14 @@ class WhisperEngine:
 
         self._load_model()
     
+    def _model_supports_prompt(self) -> bool:
+        if not self.registry or self.registry.supports_prompt(self.model_key):
+            return True
+        if (self.initial_prompt or self.hotwords) and self.model_key not in self._prompt_skip_logged_models:
+            self._prompt_skip_logged_models.add(self.model_key)
+            self.logger.info(f"Model {self.model_key} has supports_prompt: false, skipping initial_prompt and hotwords")
+        return False
+
     def _get_model_source(self, model_key: str) -> str:
         if self.registry:
             return self.registry.get_source(model_key)
@@ -178,10 +187,11 @@ class WhisperEngine:
                 language=self.language,
                 condition_on_previous_text=False,
             )
-            if self.initial_prompt:
-                transcribe_kwargs["initial_prompt"] = self.initial_prompt
-            if self.hotwords:
-                transcribe_kwargs["hotwords"] = self.hotwords
+            if self._model_supports_prompt():
+                if self.initial_prompt:
+                    transcribe_kwargs["initial_prompt"] = self.initial_prompt
+                if self.hotwords:
+                    transcribe_kwargs["hotwords"] = self.hotwords
 
             segments, info = self.model.transcribe(audio_data, **transcribe_kwargs)
             

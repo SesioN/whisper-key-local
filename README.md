@@ -128,7 +128,7 @@ Delete this file and restart app to reset to defaults.
 | `whisper.beam_size` | `5` | Higher = more accurate but slower (1-10) |
 | `whisper.initial_prompt` | `""` | Guide transcription style, language variant, or script |
 | `whisper.hotwords` | `[]` | Words the model should favor (names, technical terms) |
-| `whisper.models` | (see config) | Add custom HuggingFace or local models |
+| `whisper.models` | (see config) | Add custom HuggingFace or local models; `supports_prompt: false` on a model skips `initial_prompt` and `hotwords` for models that repeat or derail with them |
 | **Post-Processing** |||
 | `post_processing.strip_trailing_period` | `false` | Strip trailing period from output |
 | `post_processing.corrections` | `{}` | Fix recurring misheard words, e.g. `CAPEX: [cap x]` |
