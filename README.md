@@ -63,6 +63,7 @@ Open the system tray / menu bar icon to:
 - Select audio host and input device, or mute the microphone
 - Toggle auto-paste, copy to clipboard, audio feedback and voice-activated recording
 - Switch the recording mode between toggle and push-to-talk
+- Start Whisper Key with Windows (**Start with Windows**, per-user, no admin rights; the packaged app starts without a console)
 - Open the voice detection sensitivity window and floating button options (Windows)
 - Manage shortcuts: record a primary and secondary binding per action, or unset one (Windows, **Shortcuts...**)
 - Manage voice commands: add, edit, test and switch them on or off (Windows, **Voice commands...**)

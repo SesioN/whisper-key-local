@@ -6,7 +6,7 @@ from typing import Optional, TYPE_CHECKING
 from pathlib import Path
 
 from .utils import open_file
-from .platform import permissions, icons, console
+from .platform import permissions, icons, console, autostart
 from .runtime_options import COMPUTE_TYPES
 
 try:
@@ -235,6 +235,7 @@ class SystemTray:
                     f"Audio Source",
                     pystray.Menu(*audio_device_items)
                 ),
+                pystray.MenuItem("Start with Windows", self._toggle_autostart, checked=lambda item: self._is_autostart_enabled()) if autostart.is_supported() else None,
                 pystray.MenuItem("Audio feedback", lambda icon, item: self._set_audio_feedback(not self._is_audio_feedback_enabled()), checked=lambda item: self._is_audio_feedback_enabled()),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Auto-paste", lambda icon, item: self._set_transcription_mode(not self._is_auto_paste_enabled()), checked=lambda item: self._is_auto_paste_enabled()),
@@ -466,6 +467,25 @@ class SystemTray:
                 self.recording_mode_changer(mode)
         except Exception as e:
             self.logger.error(f"Error setting recording mode to {mode}: {e}")
+        self.refresh_menu()
+
+    def _is_autostart_enabled(self):
+        try:
+            return autostart.is_enabled()
+        except OSError as e:
+            self.logger.error(f"Could not read autostart setting: {e}")
+            return False
+
+    def _toggle_autostart(self, icon=None, item=None):
+        try:
+            if autostart.is_enabled():
+                autostart.disable()
+                self.logger.info("Autostart disabled")
+            else:
+                autostart.enable()
+                self.logger.info("Autostart enabled")
+        except Exception as e:
+            self.logger.error(f"Error changing autostart: {e}")
         self.refresh_menu()
 
     def _set_floating_widget_enabled(self, enabled: bool):
