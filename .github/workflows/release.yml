@@ -52,7 +52,7 @@ jobs:
         shell: pwsh
         run: |
           Invoke-WebRequest "https://github.com/ofek/pyapp/releases/download/v$env:PYAPP_VERSION/source.tar.gz" -OutFile pyapp.tar.gz
-          New-Item -ItemType Directory pyapp-source | Out-Null
+          New-Item -ItemType Directory pyapp-source -Force | Out-Null
           tar -xzf pyapp.tar.gz -C pyapp-source --strip-components=1
           @{ pyapp_source_path = "pyapp-source"; dist_path = "dist" } | ConvertTo-Json | Set-Content pyapp-build/build-config.json
 
