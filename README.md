@@ -1,8 +1,9 @@
 # Whisper Key - Local Speech-to-Text
 
-Global hotkeys to record speech and transcribe directly to your cursor. 
+Global hotkeys to record speech and transcribe directly to your cursor.
 
-> Questions or ideas? [Discord](https://discord.gg/uZnXV8snhz)
+> This is an independent fork of [PinW/whisper-key-local](https://github.com/PinW/whisper-key-local) with its own
+> releases. Bugs and ideas: [issues](https://github.com/SesioN/whisper-key-local/issues).
 
 ## ✨ Features
 
@@ -14,33 +15,33 @@ Global hotkeys to record speech and transcribe directly to your cursor.
 - **GPU Ready**: Support for both NVIDIA & AMD cards
 - **Cross-platform**: Works on Windows and macOS
 - **Voice Commands**: Trigger shortcuts, text snippets, and shell commands by voice — [docs](docs/voice-commands.md)
+- **More engines**: whisper.cpp (Vulkan) and ONNX models (Parakeet-TDT, Qwen3-ASR), switchable from the tray
+- **Hands-free**: Voice-activated recording and an always-on-top record button (Windows)
 - **Configurable**: Customize hotkeys, models, and [much more](#️-configuration)
 
 ## 🚀 Quick Start
 
-### From PyPI (Recommended)
+### Windows App (Recommended)
 
-Requires Python 3.11-3.13
+1. Download `whisper-key.exe` (or `whisper-key-no-term.exe` for no console window) from the
+   [latest release](https://github.com/SesioN/whisper-key-local/releases/latest)
+2. Run it. The app updates itself from this repository's releases.
+
+### Python Package
+
+Requires Python 3.11-3.13. This fork is not on PyPI (`pip install whisper-key-local` installs the upstream app).
+Download the `.whl` from the [latest release](https://github.com/SesioN/whisper-key-local/releases/latest), then:
 
 ```bash
-# With pipx (isolated environment)
-pipx install whisper-key-local
-
-# Or with pip
-pip install whisper-key-local
+pipx install ./whisper_key_local-<version>-py3-none-any.whl
 ```
 
 Then run: `whisper-key` (or `wk` for short)
 
-### Windows App
-
-1. Download `whisper-key.exe` from the [latest release](https://github.com/PinW/whisper-key-local/releases/latest)
-2. Run `whisper-key.exe`
-
 ### From Source
 
 ```bash
-git clone https://github.com/PinW/whisper-key-local.git
+git clone https://github.com/SesioN/whisper-key-local.git
 cd whisper-key-local
 pip install -e .
 python whisper-key.py
@@ -187,7 +188,12 @@ Default path for transcription models (via HuggingFace):
 
 ## Contributing
 
-Check the [roadmap](docs/roadmap/roadmap.md) for planned features and see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. Please open an issue before starting work on new features.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Pull requests target the `dev` branch; `master` only holds releases.
+
+## Credits
+
+Based on [Whisper Key](https://github.com/PinW/whisper-key-local) by Pin Wang (MIT). Upstream changes are merged in
+periodically.
 
 ## 📦 Dependencies
 

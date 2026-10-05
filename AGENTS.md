@@ -1,4 +1,4 @@
-https://github.com/PinW/whisper-key-local
+https://github.com/SesioN/whisper-key-local (fork of https://github.com/PinW/whisper-key-local)
 
 @docs/platform-abstraction.md
 
