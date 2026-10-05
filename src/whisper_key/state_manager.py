@@ -109,11 +109,38 @@ class StateManager:
         self._apply_auto_trigger()
 
     def _update_ui_state(self, state: str):
+        if self.is_engine_unavailable() and state != "recording":
+            self.system_tray.update_state("processing")
+            self.terminal_title.update_state("processing")
+            self.floating_widget.update_state("loading")
+            return
         if state == "idle" and self.is_muted:
             state = "muted"
         self.system_tray.update_state(state)
         self.terminal_title.update_state(state)
         self.floating_widget.update_state(state)
+
+    def is_engine_unavailable(self) -> bool:
+        return self.is_model_loading or self._runtime_install_running
+
+    def _begin_engine_switch(self) -> bool:
+        with self._state_lock:
+            if self._runtime_install_running:
+                return False
+            self._runtime_install_running = True
+        if self.audio_recorder.get_recording_status():
+            print("🎤 Cancelling recording, transcription is paused until the switch completes...")
+            self.cancel_active_recording()
+        self._update_ui_state("idle")
+        return True
+
+    def _end_engine_switch(self, refresh_ui: bool = True):
+        with self._state_lock:
+            self._runtime_install_running = False
+            self._runtime_installer = None
+        self.system_tray.set_status_text(None)
+        if refresh_ui:
+            self._update_ui_state(self.get_current_state())
 
     def _show_outcome(self, outcome: str):
         self.floating_widget.show_outcome(outcome)
@@ -287,8 +314,8 @@ class StateManager:
             print("🔇 Microphone is muted - unmute to record")
         elif self.is_processing:
             print("⏳ Still processing previous recording...")
-        elif self.is_model_loading:
-            print("⏳ Still loading model...")
+        elif self.is_engine_unavailable():
+            print("⏳ Transcription is unavailable until the model is ready...")
         else:
             print(f"⏳ Cannot record while {current_state}...")
 
@@ -311,6 +338,8 @@ class StateManager:
                 self._begin_command_recording()
             elif self.is_muted:
                 print("🔇 Microphone is muted - unmute to record")
+            elif self.is_engine_unavailable():
+                print("⏳ Transcription is unavailable until the model is ready...")
 
     def _begin_command_recording(self):
         with self._state_lock:
@@ -353,7 +382,7 @@ class StateManager:
         fallback_to = None
         try:
             with self._state_lock:
-                if self.is_model_loading:
+                if self.is_engine_unavailable():
                     print("⏳ Runtime is switching, recording discarded")
                     return
                 self.is_processing = True
@@ -468,7 +497,7 @@ class StateManager:
         status = {
             "recording": self.audio_recorder.get_recording_status(),
             "processing": self.is_processing,
-            "model_loading": self.is_model_loading,
+            "model_loading": self.is_engine_unavailable(),
         }
         
         return status
@@ -522,11 +551,11 @@ class StateManager:
 
     def can_start_recording(self) -> bool:
         with self._state_lock:
-            return not (self.is_muted or self.is_processing or self.is_model_loading or self.audio_recorder.get_recording_status())
+            return not (self.is_muted or self.is_processing or self.is_engine_unavailable() or self.audio_recorder.get_recording_status())
     
     def get_current_state(self) -> str:
         with self._state_lock:
-            if self.is_model_loading:
+            if self.is_engine_unavailable():
                 return "model_loading"
             elif self.is_processing:
                 return "processing"
@@ -539,15 +568,17 @@ class StateManager:
         if new_model_key == self.whisper_engine.model_key:
             return True
 
+        language = self.config_manager.get_setting('whisper', 'language')
+        if self.whisper_engine.registry.is_english_only(new_model_key) and language not in (None, 'auto', 'en'):
+            self.logger.warning(f"Model {new_model_key} is English-only, the configured language [{language}] is ignored")
+            print(f"⚠️ [{new_model_key}] only transcribes English, the configured language [{language}] is ignored")
+
         download_state = self.get_model_download_state(new_model_key)
         if download_state == "download":
-            with self._state_lock:
-                if self._runtime_install_running:
-                    print("⏳ A download is already running...")
-                    return False
-                self._runtime_install_running = True
-            target = self._download_onnx_model_and_switch if self._is_onnx_model(new_model_key) else self._download_ggml_model_and_switch
-            threading.Thread(target=target, args=(new_model_key,), daemon=True).start()
+            if not self._begin_engine_switch():
+                print("⏳ A download is already running...")
+                return False
+            threading.Thread(target=self._download_model_and_switch, args=(new_model_key,), daemon=True).start()
             return True
         if download_state == "unavailable":
             print(f"⚠️ The [{new_model_key}] model is not available for the current runtime")
@@ -662,7 +693,9 @@ class StateManager:
         if self._is_onnx_model(model_key):
             return "ready" if registry.is_onnx_model_downloaded(model_key) else "download"
         if not self._whisper_models_use_whisper_cpp():
-            return None
+            if registry.is_model_cached(model_key):
+                return "ready"
+            return "download" if registry.get_hf_repo(model_key) else "unavailable"
         engine = self.whisper_engine
         if engine.ENGINE_TYPE == WHISPER_CPP and engine._is_model_cached(model_key):
             return "ready"
@@ -675,36 +708,48 @@ class StateManager:
             return "download"
         return "unavailable"
 
-    def _download_onnx_model_and_switch(self, model_key: str):
+    def _download_model_and_switch(self, model_key: str):
         from .runtime_installer import RuntimeInstaller
 
-        model = self.whisper_engine.registry.get_model(model_key)
-        title = f"Download {model.label}"
+        registry = self.whisper_engine.registry
+        model = registry.get_model(model_key)
+        label = model.label if model else model_key
+        title = f"Download {label}"
+        message = f"{label} is not downloaded yet. Download it now?\n\nTranscription is paused until the download completes."
+        if self._is_onnx_model(model_key):
+            download = lambda installer: installer.download_onnx_model(registry, model_key)
+        elif self._whisper_models_use_whisper_cpp():
+            title = "Download whisper.cpp model"
+            message = f"The whisper.cpp file for the [{model_key}] model is not downloaded yet. Download it now?"
+            download = lambda installer: installer.download_ggml_model(model_key, Path(self._ggml_model_dir()))
+        else:
+            download = lambda installer: installer.download_whisper_model(registry, model_key)
+
         self._runtime_installer = RuntimeInstaller(on_progress=self._report_install_progress)
+        downloaded = False
         try:
-            if not dialogs.confirm(title, f"{model.label} is not downloaded yet. Download it now?"):
+            if not dialogs.confirm(title, message):
                 return
             print(f"📦 Downloading the [{model_key}] model...")
             self._show_install_progress(title)
-            self._runtime_installer.download_onnx_model(self.whisper_engine.registry, model_key)
+            download(self._runtime_installer)
+            downloaded = True
         except Exception as e:
             self._close_install_progress()
             if self._install_was_cancelled():
                 print("ℹ️ Download cancelled, already downloaded files are kept for the next attempt")
                 return
-            self.logger.error(f"Failed to download ONNX model {model_key}: {e}")
+            self.logger.error(f"Failed to download model {model_key}: {e}")
             print(f"❌ Failed to download the [{model_key}] model: {e}")
             dialogs.show_error(title, f"Download failed:\n\n{str(e)[:600]}")
             return
         finally:
             self._close_install_progress()
-            with self._state_lock:
-                self._runtime_install_running = False
-                self._runtime_installer = None
-            self.system_tray.set_status_text(None)
+            self._end_engine_switch(refresh_ui=not downloaded)
 
         self.system_tray.refresh_menu()
         self.request_model_change(model_key)
+        self._update_ui_state(self.get_current_state())
 
     def _switch_engine_family(self, model_key: str) -> bool:
         runtimes = self.get_runtimes()
@@ -742,45 +787,13 @@ class StateManager:
             self.config_manager.update_user_setting('onboarding', 'onnx_gpu', 'declined')
             self._switch_engine_family(model_key)
             return
-        with self._state_lock:
-            if self._runtime_install_running:
-                print("⏳ A runtime is already being installed...")
-                return
-            self._runtime_install_running = True
+        if not self._begin_engine_switch():
+            print("⏳ A runtime is already being installed...")
+            return
         if not self._install_and_switch_runtime(runtime, model_key=model_key):
             print("ℹ️ Using the CPU for ONNX models")
             self.config_manager.update_user_setting('onboarding', 'onnx_gpu', 'declined')
             self._switch_engine_family(model_key)
-
-    def _download_ggml_model_and_switch(self, model_key: str):
-        from .runtime_installer import RuntimeInstaller
-
-        title = "Download whisper.cpp model"
-        self._runtime_installer = RuntimeInstaller(on_progress=self._report_install_progress)
-        try:
-            if not dialogs.confirm(title, f"The whisper.cpp file for the [{model_key}] model is not downloaded yet. Download it now?"):
-                return
-            print(f"📦 Downloading the whisper.cpp model for [{model_key}]...")
-            self._show_install_progress(title)
-            self._runtime_installer.download_ggml_model(model_key, Path(self._ggml_model_dir()))
-        except Exception as e:
-            self._close_install_progress()
-            if self._install_was_cancelled():
-                print("ℹ️ Download cancelled")
-                return
-            self.logger.error(f"Failed to download ggml model {model_key}: {e}")
-            print(f"❌ Failed to download the [{model_key}] model: {e}")
-            dialogs.show_error(title, f"Download failed:\n\n{str(e)[:600]}")
-            return
-        finally:
-            self._close_install_progress()
-            with self._state_lock:
-                self._runtime_install_running = False
-                self._runtime_installer = None
-            self.system_tray.set_status_text(None)
-
-        self.system_tray.refresh_menu()
-        self.request_model_change(model_key)
 
     def get_runtimes(self) -> list:
         with self._runtimes_lock:
@@ -828,11 +841,9 @@ class StateManager:
             return False
 
         if runtime.state == INSTALLABLE:
-            with self._state_lock:
-                if self._runtime_install_running:
-                    print("⏳ A runtime is already being installed...")
-                    return False
-                self._runtime_install_running = True
+            if not self._begin_engine_switch():
+                print("⏳ A runtime is already being installed...")
+                return False
             threading.Thread(target=self._install_and_switch_runtime, args=(runtime,), daemon=True).start()
             return True
 
@@ -924,11 +935,13 @@ class StateManager:
             return
         if self.config_manager.get_setting('onboarding', 'whisper_server_upgrade') == 'declined':
             return
-        with self._state_lock:
-            if self._runtime_install_running:
-                return
-            self._runtime_install_running = True
-        threading.Thread(target=self._install_and_switch_runtime, args=(current_runtime, True), daemon=True).start()
+        threading.Thread(target=self._offer_whisper_server_rebuild, args=(current_runtime,), daemon=True).start()
+
+    def _offer_whisper_server_rebuild(self, runtime: Runtime):
+        option = self._choose_install_option(runtime, upgrade=True)
+        if option is None or not self._begin_engine_switch():
+            return
+        self._install_and_switch_runtime(runtime, upgrade=True, option=option)
 
     def _choose_install_option(self, runtime: Runtime, upgrade: bool = False):
         from .runtime_installer import install_options
@@ -982,17 +995,21 @@ class StateManager:
         installer = self._runtime_installer
         return bool(installer and installer.cancelled)
 
-    def _install_and_switch_runtime(self, runtime: Runtime, upgrade: bool = False, model_key: Optional[str] = None) -> bool:
+    def _install_and_switch_runtime(self, runtime: Runtime, upgrade: bool = False, model_key: Optional[str] = None,
+                                    option=None) -> bool:
         from .runtime_installer import RuntimeInstaller, install_options
 
         self._runtime_installer = RuntimeInstaller(on_progress=self._report_install_progress)
+        installed = False
         try:
-            option = install_options(runtime.key)[0] if model_key else self._choose_install_option(runtime, upgrade)
+            if option is None:
+                option = install_options(runtime.key)[0] if model_key else self._choose_install_option(runtime, upgrade)
             if option is None:
                 return False
             print(f"📦 Installing [{runtime.label}]: {option.description}")
             self._show_install_progress(f"Installing {runtime.label}")
             self._runtime_installer.install(runtime.key, option, model_key=self.whisper_engine.model_key)
+            installed = True
         except Exception as e:
             self._close_install_progress()
             if self._install_was_cancelled():
@@ -1004,24 +1021,24 @@ class StateManager:
             return False
         finally:
             self._close_install_progress()
-            with self._state_lock:
-                self._runtime_install_running = False
-                self._runtime_installer = None
-            self.system_tray.set_status_text(None)
+            self._end_engine_switch(refresh_ui=not installed)
 
         print(f"✅ {runtime.label} installed")
-        self.refresh_runtimes()
-        installed_runtime = next(candidate for candidate in self.get_runtimes() if candidate.key == runtime.key)
-        current_runtime = self.get_current_runtime()
-        if model_key:
-            self.config_manager.update_user_setting('whisper', 'model', model_key)
-        if current_runtime and current_runtime.key == installed_runtime.key:
-            self._reload_current_engine()
-        elif installed_runtime.needs_restart:
-            self._restart_into_runtime(installed_runtime)
-        else:
-            self.system_tray.refresh_menu()
-            self.request_runtime_change(installed_runtime.key, model_key=model_key)
+        try:
+            self.refresh_runtimes()
+            installed_runtime = next(candidate for candidate in self.get_runtimes() if candidate.key == runtime.key)
+            current_runtime = self.get_current_runtime()
+            if model_key:
+                self.config_manager.update_user_setting('whisper', 'model', model_key)
+            if current_runtime and current_runtime.key == installed_runtime.key:
+                self._reload_current_engine()
+            elif installed_runtime.needs_restart:
+                self._restart_into_runtime(installed_runtime)
+            else:
+                self.system_tray.refresh_menu()
+                self.request_runtime_change(installed_runtime.key, model_key=model_key)
+        finally:
+            self._update_ui_state(self.get_current_state())
         return True
 
     def _confirm_restart_into_runtime(self, runtime: Runtime):

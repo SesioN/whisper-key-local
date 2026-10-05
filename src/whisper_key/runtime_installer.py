@@ -36,6 +36,8 @@ ORT_CUDA_LIBRARIES = ["nvidia-cuda-nvrtc-cu12~=12.0", "nvidia-cuda-runtime-cu12~
 ORT_PROVIDER_NAMES = {ONNX_DIRECTML: "DmlExecutionProvider", ONNX_CUDA: "CUDAExecutionProvider"}
 HF_TREE_URL = "https://huggingface.co/api/models/{repo}/tree/{revision}?recursive=true"
 HF_FILE_URL = "https://huggingface.co/{repo}/resolve/{revision}/{path}"
+CT2_MODEL_FILES = ("config.json", "preprocessor_config.json", "model.bin", "tokenizer.json")
+CT2_REQUIRED_FILES = ("config.json", "model.bin")
 
 ROCM_SYSTEM_SDK_VERSION = "7.2"
 ROCM_SYSTEM_DLLS = ("amdhip64_7.dll", "hipblas.dll", "rocblas.dll")
@@ -417,14 +419,32 @@ class RuntimeInstaller:
     def download_onnx_model(self, model_registry, model_key: str) -> Path:
         from .onnx_asr_engine import matches_any_pattern, onnx_model_file_patterns, onnx_required_file_patterns
         model = model_registry.get_model(model_key)
-        model_dir = Path(model_registry.get_onnx_model_dir(model_key))
         patterns = onnx_model_file_patterns(model.onnx_model_type, model.quantization)
+        required_groups = [required_group[:2] for required_group in onnx_required_file_patterns(model.onnx_model_type, model.quantization)]
+        return self._download_hf_model(model_key, model.source, model.revision,
+                                       Path(model_registry.get_onnx_model_dir(model_key)),
+                                       Path(model_registry.get_onnx_complete_marker(model_key)),
+                                       lambda path: matches_any_pattern(path, patterns),
+                                       [lambda path, group=group: matches_any_pattern(path, group) for group in required_groups])
+
+    def download_whisper_model(self, model_registry, model_key: str) -> Path:
+        repo = model_registry.get_hf_repo(model_key)
+        if not repo:
+            raise RuntimeInstallError(f"The [{model_key}] model has no Hugging Face source to download from")
+        return self._download_hf_model(model_key, repo, model_registry.get_revision(model_key),
+                                       Path(model_registry.get_whisper_model_dir(model_key)),
+                                       Path(model_registry.get_whisper_complete_marker(model_key)),
+                                       lambda path: path in CT2_MODEL_FILES or path.startswith("vocabulary."),
+                                       [lambda path, name=name: path == name for name in CT2_REQUIRED_FILES])
+
+    def _download_hf_model(self, model_key: str, repo: str, revision: str, model_dir: Path, marker: Path,
+                           wanted, required_checks: list) -> Path:
         self._report("Fetching the model file list...")
-        tree = self._fetch_json(HF_TREE_URL.format(repo=model.source, revision=model.revision))
-        files = [entry for entry in tree if entry.get("type") == "file" and matches_any_pattern(entry["path"], patterns)]
-        for required_group in onnx_required_file_patterns(model.onnx_model_type, model.quantization):
-            if not any(matches_any_pattern(entry["path"], required_group[:2]) for entry in files):
-                raise RuntimeInstallError(f"{model.source} has no file matching {required_group[1]} for [{model_key}]")
+        tree = self._fetch_json(HF_TREE_URL.format(repo=repo, revision=revision))
+        files = [entry for entry in tree if entry.get("type") == "file" and wanted(entry["path"])]
+        for required in required_checks:
+            if not any(required(entry["path"]) for entry in files):
+                raise RuntimeInstallError(f"{repo} is missing a required model file for [{model_key}]")
         total_bytes = sum(entry.get("size", 0) for entry in files)
         model_dir.mkdir(parents=True, exist_ok=True)
         ensure_free_space(model_dir, total_bytes)
@@ -435,11 +455,10 @@ class RuntimeInstaller:
                 continue
             destination.parent.mkdir(parents=True, exist_ok=True)
             self._report(f"Downloading {entry['path']} ({index}/{len(files)}, {entry.get('size', 0) / 1e9:.2f} GB)...")
-            self._download_file(HF_FILE_URL.format(repo=model.source, revision=model.revision, path=entry["path"]),
+            self._download_file(HF_FILE_URL.format(repo=repo, revision=revision, path=entry["path"]),
                                 destination, expected_sha256)
-        Path(model_registry.get_onnx_complete_marker(model_key)).write_text(
-            json.dumps({"source": model.source, "revision": model.revision, "files": [entry["path"] for entry in files]}, indent=2),
-            encoding="utf-8")
+        marker.write_text(json.dumps({"source": repo, "revision": revision, "files": [entry["path"] for entry in files]}, indent=2),
+                          encoding="utf-8")
         self._report(f"[{model_key}] downloaded")
         return model_dir
 

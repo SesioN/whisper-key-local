@@ -33,6 +33,30 @@ class ModelRegistry:
         model = self.get_model(key)
         return model.source if model else key
 
+    def get_load_source(self, key: str) -> str:
+        if self.is_whisper_model_downloaded(key):
+            return self.get_whisper_model_dir(key)
+        return self.get_source(key)
+
+    def get_hf_repo(self, key: str) -> Optional[str]:
+        model = self.get_model(key)
+        source = model.source if model else key
+        if model and model.is_local_path:
+            return None
+        if "/" in source:
+            return source
+        return _MODELS.get(source)
+
+    def get_revision(self, key: str) -> str:
+        model = self.get_model(key)
+        return model.revision if model else "main"
+
+    def is_english_only(self, key: str) -> bool:
+        return key.endswith(".en") or self.get_source(key).endswith(".en")
+
+    def is_known_model(self, key: str) -> bool:
+        return key in self.whisper_models or key in _MODELS
+
     def supports_prompt(self, key: str) -> bool:
         model = self.get_model(key)
         return model.supports_prompt if model else True
@@ -70,6 +94,25 @@ class ModelRegistry:
         marker = self.get_onnx_complete_marker(key)
         return bool(marker) and os.path.isfile(marker)
 
+    def get_whisper_model_dir(self, key: str) -> Optional[str]:
+        if self.get_engine_family(key) != WHISPER_FAMILY:
+            return None
+        repo = self.get_hf_repo(key)
+        if not repo:
+            return None
+        from .runtime_loader import get_runtimes_dir
+        return str(get_runtimes_dir().parent / "models" / repo.replace("/", "--") / self.get_revision(key))
+
+    def get_whisper_complete_marker(self, key: str) -> Optional[str]:
+        model_dir = self.get_whisper_model_dir(key)
+        if not model_dir:
+            return None
+        return os.path.join(model_dir, "download-complete-ct2.json")
+
+    def is_whisper_model_downloaded(self, key: str) -> bool:
+        marker = self.get_whisper_complete_marker(key)
+        return bool(marker) and os.path.isfile(marker)
+
     def get_hf_cache_path(self) -> str:
         userprofile = os.environ.get('USERPROFILE')
         if userprofile:
@@ -82,10 +125,15 @@ class ModelRegistry:
             return self.is_onnx_model_downloaded(key)
         if model and model.is_local_path:
             return os.path.exists(os.path.join(model.source, 'model.bin'))
+        if self.is_whisper_model_downloaded(key):
+            return True
         cache_folder = self.get_cache_folder(key)
         if not cache_folder:
             return False
-        return os.path.exists(os.path.join(self.get_hf_cache_path(), cache_folder))
+        snapshots_dir = os.path.join(self.get_hf_cache_path(), cache_folder, 'snapshots')
+        if not os.path.isdir(snapshots_dir):
+            return False
+        return any(os.path.isfile(os.path.join(snapshots_dir, snapshot, 'model.bin')) for snapshot in os.listdir(snapshots_dir))
 
     def _is_streaming_model_cached(self, key: str) -> bool:
         model = self.streaming_models.get(key)

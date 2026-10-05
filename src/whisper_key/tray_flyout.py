@@ -500,6 +500,7 @@ class _FlyoutView:
         top, body, footer = self._describe(title, items)
         theme = self.theme
 
+        self.highlighted = None
         if self.container:
             self.container.destroy()
         border = 0 if self.dwm_frame else 1
