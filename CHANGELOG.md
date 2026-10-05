@@ -4,6 +4,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-06
+
 ### Changed
 - **Model downloads use the installer window** - picking a faster-whisper model that is not downloaded yet asks first, then downloads it with progress and cancel (like ONNX and whisper.cpp models), instead of freezing while it downloads in the background
 - **Transcription pauses while switching** - while a model or runtime is downloading, installing or loading, recording is off and an active recording is cancelled; the floating button and orb turn gray and faded until the new model is ready
