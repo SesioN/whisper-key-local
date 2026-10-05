@@ -14,7 +14,7 @@ import signal
 import sys
 import threading
 
-from .platform import app, permissions, console, IS_WINDOWS
+from .platform import app, permissions, console, autostart, IS_WINDOWS
 from .config_manager import ConfigManager
 from .audio_recorder import AudioRecorder
 from .hotkey_listener import HotkeyListener
@@ -418,6 +418,13 @@ def prune_stale_envs_in_background(logger: logging.Logger):
     except Exception as ex:
         logger.warning(f"Could not prune stale PyApp environments: {ex}")
 
+def refresh_autostart(logger: logging.Logger):
+    try:
+        if autostart.refresh():
+            logger.info("Updated autostart entry to the current launcher")
+    except OSError as ex:
+        logger.warning(f"Could not update autostart entry: {ex}")
+
 def main():
     console.setup()
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -451,6 +458,7 @@ def main():
         check_for_updates(config_manager, test_mode=args.test)
         if not args.test:
             threading.Thread(target=prune_stale_envs_in_background, args=(logger,), daemon=True).start()
+        refresh_autostart(logger)
 
         whisper_config = config_manager.get_whisper_config()
         audio_config = config_manager.get_audio_config()
