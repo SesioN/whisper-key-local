@@ -1,4 +1,6 @@
+import logging
 import os
+import shutil
 import subprocess
 import sys
 import importlib.resources
@@ -8,13 +10,18 @@ from pathlib import Path
 class OptionalComponent:
     def __init__(self, component):
         self._component = component
-    
+        self._reported_missing = set()
+
     def __getattr__(self, name):
-        if self._component and hasattr(self._component, name):
-            attr = getattr(self._component, name)
-            return attr
-        else:
-            # Return a no-op function for missing methods/attributes
+        if self._component is None:
+            return lambda *args, **kwargs: None
+        try:
+            return getattr(self._component, name)
+        except AttributeError:
+            if name not in self._reported_missing:
+                self._reported_missing.add(name)
+                logging.getLogger(__name__).error(
+                    f"{type(self._component).__name__} has no attribute '{name}', ignoring the call", exc_info=True)
             return lambda *args, **kwargs: None
 
 
@@ -85,6 +92,34 @@ def restart_or_exit(message_restart, message_exit):
     else:
         print(message_exit)
     sys.exit(0)
+
+
+def restart_app():
+    pyapp_exe = os.environ.get('PYAPP', '')
+    command = [pyapp_exe] if os.path.isfile(pyapp_exe) else list(sys.orig_argv)
+    restart_helper = str(Path(__file__).with_name('restart_helper.py'))
+    creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
+    subprocess.Popen([sys.executable, restart_helper, str(os.getpid()), *command], creationflags=creationflags)
+    import signal
+    signal.raise_signal(signal.SIGINT)
+
+
+def prune_stale_pyapp_envs():
+    if not os.environ.get('PYAPP'):
+        return []
+
+    current_env = Path(sys.prefix).resolve()
+    hash_dir = current_env.parent
+    if hash_dir.parent.name != 'whisper-key-local' or hash_dir.parent.parent.name != 'data':
+        return []
+
+    removed = []
+    for sibling in hash_dir.iterdir():
+        if sibling.is_dir() and sibling != current_env and (sibling / 'pyvenv.cfg').is_file():
+            shutil.rmtree(sibling, ignore_errors=True)
+            if not sibling.exists():
+                removed.append(sibling.name)
+    return removed
 
 
 def get_version():

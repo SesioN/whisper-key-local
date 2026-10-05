@@ -7,22 +7,25 @@ import urllib.error
 from .terminal_ui import BOLD_GREEN, BOLD_RED, RESET, prompt_choice
 from .utils import get_version, restart_or_exit
 
-PYPI_URL = "https://pypi.org/pypi/whisper-key-local/json"
-PYPI_TIMEOUT = 3
+RELEASES_URL = "https://api.github.com/repos/SesioN/whisper-key-local/releases/latest"
+RELEASES_TIMEOUT = 3
 
 UPDATE_NOW = 1
 ALWAYS_UPDATE = 2
 NOT_NOW = 3
 
 
-def fetch_latest_version():
+def fetch_latest_release():
     try:
-        req = urllib.request.Request(PYPI_URL)
-        with urllib.request.urlopen(req, timeout=PYPI_TIMEOUT) as response:
+        req = urllib.request.Request(RELEASES_URL, headers={"Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=RELEASES_TIMEOUT) as response:
             data = json.loads(response.read())
-            return data["info"]["version"]
+        wheel_urls = [asset["browser_download_url"] for asset in data["assets"] if asset["name"].endswith(".whl")]
+        if not wheel_urls:
+            return None, None
+        return data["tag_name"].removeprefix("v"), wheel_urls[0]
     except Exception:
-        return None
+        return None, None
 
 
 def is_newer(latest, current):
@@ -37,7 +40,7 @@ def check_for_updates(config_manager, test_mode=False):
     version = get_version()
     is_dev = version.endswith("-dev") or test_mode
 
-    latest = fetch_latest_version()
+    latest, wheel_url = fetch_latest_release()
     compare_version = version.replace("-dev", "") if version.endswith("-dev") else version
     if not latest or not is_newer(latest, compare_version):
         return
@@ -49,7 +52,7 @@ def check_for_updates(config_manager, test_mode=False):
     update_config = config_manager.get_update_config()
 
     if update_config.get('mode') == 'auto':
-        run_update(latest)
+        run_update(latest, wheel_url)
         return
 
     choice = prompt_choice("Update available: {} -> {}".format(version, latest), [
@@ -59,17 +62,17 @@ def check_for_updates(config_manager, test_mode=False):
     ])
 
     if choice == UPDATE_NOW:
-        run_update(latest)
+        run_update(latest, wheel_url)
     elif choice == ALWAYS_UPDATE:
         config_manager.update_user_setting('update', 'mode', 'auto')
-        run_update(latest)
+        run_update(latest, wheel_url)
     else:
         print()
 
 
-def run_update(version):
+def run_update(version, wheel_url):
     print(f"\n{BOLD_GREEN}Whisper Key {version} available. Downloading and installing update...{RESET}\n")
-    result = subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "whisper-key-local"])
+    result = subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", wheel_url])
     if result.returncode != 0:
         print(f"\n{BOLD_RED}Update failed. Please try again later.{RESET}\n")
         return

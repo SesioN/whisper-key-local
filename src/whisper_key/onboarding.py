@@ -114,6 +114,7 @@ def _prompt_enable_manually_installed_gpu(gpu_class, gpu_name, config_manager):
     if choice == INSTALL_GPU:
         config_manager.update_user_setting('whisper', 'device', 'cuda')
         config_manager.update_user_setting('whisper', 'compute_type', 'float16')
+        config_manager.update_user_setting('whisper', 'runtime', gpu_runtime_for_class(gpu_class))
         config_manager.update_user_setting('onboarding', 'gpu_class', gpu_class)
         config_manager.update_user_setting('onboarding', 'gpu', 'complete')
         print(f"{BOLD_GREEN}GPU acceleration enabled.{RESET}\n")
@@ -158,9 +159,21 @@ def _prompt_and_install(gpu_class, gpu_name, config_manager):
         _ensure_cpu_config(config_manager)
 
 
+def gpu_runtime_for_class(gpu_class):
+    return 'rocm' if gpu_class and gpu_class.startswith('amd') else 'cuda'
+
+
+def install_gpu_runtime(gpu_class, gpu_name, config_manager):
+    if gpu_class == 'amd_rdna1':
+        _prompt_rdna1(gpu_name, config_manager)
+    else:
+        _install_gpu_packages(gpu_class, gpu_name, config_manager)
+
+
 def _ensure_cpu_config(config_manager):
     config_manager.update_user_setting('whisper', 'device', 'cpu')
     config_manager.update_user_setting('whisper', 'compute_type', 'int8')
+    config_manager.update_user_setting('whisper', 'runtime', 'cpu')
 
 
 def _install_gpu_packages(gpu_class, gpu_name, config_manager):
@@ -187,6 +200,7 @@ def _install_gpu_packages(gpu_class, gpu_name, config_manager):
 
     config_manager.update_user_setting('whisper', 'device', 'cuda')
     config_manager.update_user_setting('whisper', 'compute_type', 'float16')
+    config_manager.update_user_setting('whisper', 'runtime', gpu_runtime_for_class(gpu_class))
 
     restart_or_exit(
         f"\n{BOLD_GREEN}GPU acceleration installed. Restarting...{RESET}\n",

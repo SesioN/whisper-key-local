@@ -1,4 +1,8 @@
+import logging
+
 from .platform import app
+
+logger = logging.getLogger(__name__)
 
 BOLD_GREEN = "\x1b[1;32m"
 BOLD_RED = "\x1b[1;31m"
@@ -9,6 +13,10 @@ RESET = "\x1b[0m"
 
 
 def prompt_choice(title: str, options: list[tuple[str, str]], subtitle: str = None) -> int:
+    if not app.has_interactive_terminal():
+        logger.info("No interactive terminal; skipping prompt: %s", title)
+        return -1
+
     all_texts = [title]
     if subtitle:
         all_texts.append(subtitle)

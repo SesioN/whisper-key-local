@@ -1,13 +1,21 @@
+import gc
 import logging
 import time
 import threading
+from pathlib import Path
 import platform
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import sounddevice as sd
 
 from .audio_recorder import AudioRecorder
-from .whisper_engine import WhisperEngine
+from .whisper_engine import WhisperEngine, create_whisper_engine
+from .runtime_options import (FASTER_WHISPER, INSTALLABLE, ONNX_ASR, UNSUPPORTED, WHISPER_CPP, Runtime, best_onnx_runtime,
+                              choose_compute_type, current_runtime_key, detect_runtimes, runtimes_for_engine_family,
+                              with_whisper_cpp_paths)
+from .runtime_loader import CPU, ONNX_CUDA, ONNX_DIRECTML, VULKAN, whisper_cpp_runtime_paths
+from .model_registry import ONNX_FAMILY
+from .platform import dialogs
 from .clipboard_manager import ClipboardManager
 from .system_tray import SystemTray
 from .config_manager import ConfigManager
@@ -18,7 +26,15 @@ from .voice_activity_detection import VadEvent, VadManager
 from .voice_commands import VoiceCommandManager
 from .terminal_title import TerminalTitle
 
+if TYPE_CHECKING:
+    from .floating_widget import FloatingWidget
+
 class StateManager:
+    MIN_VAD_HYSTERESIS_GAP = 0.05
+    MIN_VAD_OFFSET_THRESHOLD = 0.05
+    MAX_VAD_ONSET_THRESHOLD = 0.95
+    AUTO_TRIGGER_COOLDOWN_SECONDS = 1.0  # Lets feedback sounds die out before the VAD may start a recording
+
     def __init__(self,
                  audio_recorder: AudioRecorder,
                  whisper_engine: WhisperEngine,
@@ -41,15 +57,41 @@ class StateManager:
         self.text_postprocessor = text_postprocessor
         self.voice_command_manager = voice_command_manager
         self.terminal_title = OptionalComponent(terminal_title)
+        self.floating_widget = OptionalComponent(None)
+        self.floating_widget_available = False
 
         self.is_processing = False
         self.is_model_loading = False
+        self.is_muted = False
         self.last_transcription = None
         self._pending_model_change = None
         self._pending_device_change = None
         self._command_mode = False
         self._state_lock = threading.Lock()
+        self._recording_stop_lock = threading.Lock()
+        self._monitoring_lock = threading.Lock()
+        self._toggle_lock = threading.Lock()
+        self._mute_lock = threading.Lock()
         self._streaming_display_active = False
+        self.auto_trigger_enabled = config_manager.get_setting('vad', 'auto_trigger_enabled')
+        self._auto_triggered_recording = False
+        self.vad_sensitivity_window = OptionalComponent(None)
+        self.vad_sensitivity_window_attached = False
+        self._vad_sensitivity_window_open = False
+        self._vad_hysteresis_gap = None
+        self._auto_trigger_resume_time = 0.0
+        self._auto_trigger_paste = config_manager.get_setting('vad', 'auto_trigger_paste')
+        self._auto_trigger_lock = threading.Lock()
+        self._start_lock = threading.Lock()
+
+        self._runtimes = None
+        self._runtime_install_running = False
+        self._runtime_installer = None
+        self._install_progress_window = None
+        self._runtime_key = None
+        self._runtimes_lock = threading.Lock()
+        self._fallback_runtime = None
+        self._failed_runtime_key = None
 
         self.logger = logging.getLogger(__name__)
         self._current_audio_host = None
@@ -57,14 +99,21 @@ class StateManager:
 
     def attach_components(self,
                           audio_recorder: AudioRecorder,
-                          system_tray: Optional[SystemTray]):
+                          system_tray: Optional[SystemTray],
+                          floating_widget: Optional["FloatingWidget"] = None):
         self.audio_recorder = audio_recorder
         self.system_tray = OptionalComponent(system_tray)
+        self.floating_widget = OptionalComponent(floating_widget)
+        self.floating_widget_available = floating_widget is not None
         self._ensure_audio_device_for_host(self._current_audio_host)
+        self._apply_auto_trigger()
 
     def _update_ui_state(self, state: str):
+        if state == "idle" and self.is_muted:
+            state = "muted"
         self.system_tray.update_state(state)
         self.terminal_title.update_state(state)
+        self.floating_widget.update_state(state)
 
     def handle_max_recording_duration_reached(self, audio_data):
         self.logger.info("Max recording duration reached - starting transcription")
@@ -72,12 +121,114 @@ class StateManager:
 
     def handle_vad_event(self, event: VadEvent):
         if event == VadEvent.SILENCE_TIMEOUT:
-            self.logger.info("VAD silence timeout detected - stopping recording")
-            timeout_seconds = int(self.vad_manager.vad_silence_timeout_seconds)
-            self._clear_streaming_display()
-            print(f"⏰ Stopping recording after {timeout_seconds} seconds of silence...")
-            audio_data = self.audio_recorder.stop_recording()
+            with self._recording_stop_lock:
+                if not self.audio_recorder.get_recording_status():
+                    return
+                self.logger.info("VAD silence timeout detected - stopping recording")
+                timeout_seconds = int(self.vad_manager.vad_silence_timeout_seconds)
+                self._clear_streaming_display()
+                print(f"⏰ Stopping recording after {timeout_seconds} seconds of silence...")
+                audio_data = self.audio_recorder.stop_recording()
             self._transcription_pipeline(audio_data, use_auto_enter=False)
+        elif event == VadEvent.SPEECH_START:
+            self._handle_auto_trigger_speech_start()
+        elif event == VadEvent.SPEECH_END:
+            self._handle_auto_trigger_speech_end()
+
+    def _handle_auto_trigger_speech_start(self):
+        # Don't let our own feedback sounds trigger a new recording
+        if time.monotonic() < self._auto_trigger_resume_time:
+            self.logger.debug("Auto-trigger: ignoring speech during feedback cooldown")
+            return
+        with self._start_lock:
+            if not self.auto_trigger_enabled or self._vad_sensitivity_window_open or not self.can_start_recording():
+                return
+            self.logger.info("Auto-trigger: speech detected, starting recording")
+            self._begin_recording(auto_triggered=True)
+
+    def _resume_auto_trigger_if_speaking(self):
+        detector = self.audio_recorder.continuous_vad
+        if detector and detector.is_speech_active():
+            self._handle_auto_trigger_speech_start()
+
+    def _start_auto_trigger_cooldown(self):
+        self._auto_trigger_resume_time = time.monotonic() + self.AUTO_TRIGGER_COOLDOWN_SECONDS
+
+    def play_ready_sound(self):
+        self._start_auto_trigger_cooldown()
+        self.audio_feedback.play_ready_sound()
+
+    def _handle_auto_trigger_speech_end(self):
+        if not self._auto_triggered_recording or not self.is_transcription_recording():
+            return
+        self.logger.info("Auto-trigger: speech ended, stopping recording")
+        self.stop_recording()
+
+    def attach_vad_sensitivity_window(self, vad_sensitivity_window):
+        self.vad_sensitivity_window = OptionalComponent(vad_sensitivity_window)
+        self.vad_sensitivity_window_attached = vad_sensitivity_window is not None
+
+    def is_vad_sensitivity_window_available(self) -> bool:
+        return self.vad_sensitivity_window_attached and self.audio_recorder.continuous_vad is not None
+
+    def open_vad_sensitivity_window(self):
+        self._vad_sensitivity_window_open = True
+        self.vad_sensitivity_window.open()
+
+    def handle_vad_sensitivity_window_opened(self):
+        self._vad_sensitivity_window_open = True
+        self._apply_auto_trigger()
+
+    def handle_vad_sensitivity_window_closed(self):
+        self._vad_sensitivity_window_open = False
+        threading.Thread(target=self._apply_auto_trigger, daemon=True).start()
+
+    def handle_vad_probability(self, probability: float):
+        if self._vad_sensitivity_window_open:
+            self.vad_sensitivity_window.update_probability(probability)
+
+    def update_vad_onset_threshold(self, onset_threshold: float):
+        onset_threshold = round(min(onset_threshold, self.MAX_VAD_ONSET_THRESHOLD), 2)
+        if self._vad_hysteresis_gap is None:
+            self._vad_hysteresis_gap = max(self.MIN_VAD_HYSTERESIS_GAP, self.vad_manager.vad_onset_threshold - self.vad_manager.vad_offset_threshold)
+        offset_threshold = round(max(self.MIN_VAD_OFFSET_THRESHOLD, onset_threshold - self._vad_hysteresis_gap), 2)
+        self.vad_manager.vad_onset_threshold = onset_threshold
+        self.vad_manager.vad_offset_threshold = offset_threshold
+        if self.audio_recorder.continuous_vad:
+            self.audio_recorder.continuous_vad.set_thresholds(onset_threshold, offset_threshold)
+        self.config_manager.update_user_setting('vad', 'vad_onset_threshold', onset_threshold)
+        self.config_manager.update_user_setting('vad', 'vad_offset_threshold', offset_threshold)
+
+    def _apply_auto_trigger(self):
+        with self._monitoring_lock:
+            if not (self.auto_trigger_enabled or self._vad_sensitivity_window_open):
+                self.audio_recorder.stop_monitoring()
+            elif not self.audio_recorder.start_monitoring():
+                self.logger.warning("Microphone monitoring needs real-time VAD (vad.vad_realtime_enabled) and ten-vad")
+                print("⚠️ Voice-activated recording cannot run: it needs vad.vad_realtime_enabled and ten-vad")
+                return False
+            return True
+
+    def handle_monitoring_failed(self, error: Exception):
+        # Runtime-only switch-off: the saved setting stays on so a restart retries
+        self.logger.error(f"Voice-activated recording stopped: {error}")
+        print("❌ Voice-activated recording turned off (microphone stream failed). Re-enable it from the tray menu.")
+        self.auto_trigger_enabled = False
+        self.vad_sensitivity_window.update_probability(0.0)
+        self.system_tray.refresh_menu()
+
+    def is_auto_trigger_available(self) -> bool:
+        return self.audio_recorder.continuous_vad is not None
+
+    def update_auto_trigger(self, enabled: bool):
+        with self._auto_trigger_lock:
+            self.auto_trigger_enabled = enabled
+            if self._apply_auto_trigger():
+                self.config_manager.update_user_setting('vad', 'auto_trigger_enabled', enabled)
+                print("🎙️ Voice-activated recording on: the microphone is listening" if enabled else "🎙️ Voice-activated recording off")
+            else:
+                self.auto_trigger_enabled = False
+        self.system_tray.refresh_menu()
 
     def handle_streaming_result(self, text: str, is_final: bool):
         if is_final:
@@ -95,20 +246,20 @@ class StateManager:
             self._streaming_display_active = False
     
     def stop_recording(self, use_auto_enter: bool = False) -> bool:
-        currently_recording = self.audio_recorder.get_recording_status()
-
-        if currently_recording:
+        with self._recording_stop_lock:
+            if not self.audio_recorder.get_recording_status():
+                return False
             self._clear_streaming_display()
             audio_data = self.audio_recorder.stop_recording()
-            self._transcription_pipeline(audio_data, use_auto_enter)
-            return True
-        else:
-            return False
+
+        self._transcription_pipeline(audio_data, use_auto_enter)
+        return True
     
     def cancel_active_recording(self):
         self._clear_streaming_display()
         self._command_mode = False
         self.audio_recorder.cancel_recording()
+        self._start_auto_trigger_cooldown()
         self.audio_feedback.play_cancel_sound()
         self._update_ui_state("idle")
     
@@ -123,48 +274,90 @@ class StateManager:
             return False
     
     def start_recording(self):
-        if not self.can_start_recording():
-            current_state = self.get_current_state()
-            if self.is_processing:
-                print("⏳ Still processing previous recording...")
-            elif self.is_model_loading:
-                print("⏳ Still loading model...")
-            else:
-                print(f"⏳ Cannot record while {current_state}...")
-            return
+        with self._start_lock:
+            if self.can_start_recording():
+                self._begin_recording()
+                return
 
-        self._begin_recording()
+        current_state = self.get_current_state()
+        if self.is_muted:
+            print("🔇 Microphone is muted - unmute to record")
+        elif self.is_processing:
+            print("⏳ Still processing previous recording...")
+        elif self.is_model_loading:
+            print("⏳ Still loading model...")
+        else:
+            print(f"⏳ Cannot record while {current_state}...")
+
+    def toggle_recording(self):
+        if not self._toggle_lock.acquire(blocking=False):
+            return
+        try:
+            if self.audio_recorder.get_recording_status():
+                self.stop_recording()
+            else:
+                self.start_recording()
+        except Exception:
+            self.logger.exception("Toggle recording failed")
+        finally:
+            self._toggle_lock.release()
 
     def start_command_recording(self):
-        if not self.can_start_recording():
-            return
+        with self._start_lock:
+            if self.can_start_recording():
+                self._begin_command_recording()
+            elif self.is_muted:
+                print("🔇 Microphone is muted - unmute to record")
 
+    def _begin_command_recording(self):
         with self._state_lock:
             self._command_mode = True
+            self._auto_triggered_recording = False
 
         self.logger.info("Starting command mode recording")
         success = self.audio_recorder.start_recording()
+        if success and self.is_muted:
+            self.audio_recorder.cancel_recording()
+            with self._state_lock:
+                self._command_mode = False
+            print("🔇 Microphone is muted - unmute to record")
+            return
         if success:
             print("\n🎤 Command mode activated! Speak a command...")
             self.config_manager.print_command_stop_instructions()
             self.audio_feedback.play_start_sound()
             self._update_ui_state("recording")
 
-    def _begin_recording(self):
-        success = self.audio_recorder.start_recording()
+    def _begin_recording(self, auto_triggered: bool = False):
+        # Set before starting so a quick SPEECH_END on another thread already sees it
+        self._auto_triggered_recording = auto_triggered
+        success = self.audio_recorder.start_recording(voice_activated=auto_triggered)
 
-        if success:
+        if not success:
+            self._auto_triggered_recording = False
+        elif self.is_muted:
+            self._auto_triggered_recording = False
+            self.audio_recorder.cancel_recording()
+            print("🔇 Microphone is muted - unmute to record")
+        else:
             print("\n🎤 Recording started! Speak now...")
-            self.config_manager.print_stop_instructions_based_on_config()
+            if not auto_triggered:
+                self.config_manager.print_stop_instructions_based_on_config()
             self.audio_feedback.play_start_sound()
             self._update_ui_state("recording")
     
     def _transcription_pipeline(self, audio_data, use_auto_enter: bool = False):
+        fallback_to = None
         try:
             with self._state_lock:
+                if self.is_model_loading:
+                    print("⏳ Runtime is switching, recording discarded")
+                    return
                 self.is_processing = True
                 command_mode = self._command_mode
                 self._command_mode = False
+                engine = self.whisper_engine
+                auto_triggered = self._auto_triggered_recording
 
             self.audio_feedback.play_stop_sound()
 
@@ -176,7 +369,17 @@ class StateManager:
 
             self._update_ui_state("processing")
 
-            transcribed_text = self.whisper_engine.transcribe_audio(audio_data)
+            try:
+                transcribed_text = engine.transcribe_audio(audio_data)
+            except Exception:
+                fallback = self._fallback_runtime
+                if fallback and engine is self.whisper_engine:
+                    self._fallback_runtime = None
+                    self._failed_runtime_key = self._runtime_key
+                    fallback_to = fallback
+                raise
+            self._fallback_runtime = None
+            self._failed_runtime_key = None
 
             if not transcribed_text:
                 return
@@ -189,9 +392,12 @@ class StateManager:
                 self._handle_command_transcription(transcribed_text, use_auto_enter)
                 return
 
-            success = self.clipboard_manager.deliver_transcription(
-                transcribed_text, use_auto_enter
-            )
+            if auto_triggered and not self._auto_trigger_paste:
+                success = self.clipboard_manager.copy_with_notification(transcribed_text)
+            else:
+                success = self.clipboard_manager.deliver_transcription(
+                    transcribed_text, use_auto_enter
+                )
 
             if success:
                 self.last_transcription = transcribed_text
@@ -204,23 +410,35 @@ class StateManager:
         finally:
             with self._state_lock:
                 self.is_processing = False
+                self._auto_triggered_recording = False
+                self._start_auto_trigger_cooldown()
                 pending_model = self._pending_model_change
                 pending_device = self._pending_device_change
+                self._pending_model_change = None
+                self._pending_device_change = None
+                if pending_model:
+                    self.is_model_loading = True
 
             if pending_device:
                 device_id, device_name = pending_device
                 self.logger.info(f"Executing pending device change to: {device_name}")
                 self._execute_audio_device_change(device_id, device_name)
-                self._pending_device_change = None
 
             if pending_model:
                 self.logger.info(f"Executing pending model change to: {pending_model}")
                 print(f"🔄 Processing complete, now switching to [{pending_model}] model...")
                 self._execute_model_change(pending_model)
-                self._pending_model_change = None
 
             if not (pending_device or pending_model):
                 self._update_ui_state("idle")
+
+            if self._apply_auto_trigger() and self.auto_trigger_enabled:
+                threading.Timer(self.AUTO_TRIGGER_COOLDOWN_SECONDS, self._resume_auto_trigger_if_speaking).start()
+
+            if fallback_to and not pending_model:
+                runtime, compute_type = fallback_to
+                print(f"⚠️ New runtime failed during transcription, falling back to [{runtime.label}]")
+                self.request_runtime_change(runtime.key, compute_type)
 
     def _log_transcription(self, text: str):
         log_config = self.config_manager.get_logging_config()
@@ -270,27 +488,35 @@ class StateManager:
 
         if self.audio_recorder.get_recording_status():
             self.audio_recorder.stop_recording()
+        self.vad_sensitivity_window.stop()
+        self.audio_recorder.stop_monitoring()
+
+        installer = self._runtime_installer
+        if installer:
+            installer.cancel()
 
         self.system_tray.stop()
         self.terminal_title.stop()
+        self.floating_widget.stop()
+        try:
+            self.whisper_engine.close()
+        except Exception as e:
+            self.logger.error(f"Failed to close the transcription engine: {e}")
     
     def set_model_loading(self, loading: bool):
         with self._state_lock:
             old_state = self.is_model_loading
             self.is_model_loading = loading
-            
-            if old_state != loading:
-                if loading:
-                    self._update_ui_state("processing")
-                else:
-                    self._update_ui_state("idle")
+
+        if old_state != loading:
+            self._update_ui_state("processing" if loading else "idle")
     
     def is_transcription_recording(self) -> bool:
         return self.audio_recorder.get_recording_status() and not self._command_mode
 
     def can_start_recording(self) -> bool:
         with self._state_lock:
-            return not (self.is_processing or self.is_model_loading or self.audio_recorder.get_recording_status())
+            return not (self.is_muted or self.is_processing or self.is_model_loading or self.audio_recorder.get_recording_status())
     
     def get_current_state(self) -> str:
         with self._state_lock:
@@ -304,41 +530,553 @@ class StateManager:
                 return "idle"
     
     def request_model_change(self, new_model_key: str) -> bool:
-        current_state = self.get_current_state()
-        
         if new_model_key == self.whisper_engine.model_key:
             return True
-        
-        if current_state == "model_loading":
-            print("⏳ Model already loading, please wait...")
+
+        download_state = self.get_model_download_state(new_model_key)
+        if download_state == "download":
+            with self._state_lock:
+                if self._runtime_install_running:
+                    print("⏳ A download is already running...")
+                    return False
+                self._runtime_install_running = True
+            target = self._download_onnx_model_and_switch if self._is_onnx_model(new_model_key) else self._download_ggml_model_and_switch
+            threading.Thread(target=target, args=(new_model_key,), daemon=True).start()
+            return True
+        if download_state == "unavailable":
+            print(f"⚠️ The [{new_model_key}] model is not available for the current runtime")
             return False
-        
-        if current_state == "recording":
+
+        if self._is_onnx_model(new_model_key) != self._is_onnx_engine():
+            return self._switch_engine_family(new_model_key)
+
+        if self.get_current_state() == "recording":
             print(f"🎤 Cancelling recording to switch to [{new_model_key}] model...")
             self.cancel_active_recording()
-            self._execute_model_change(new_model_key)
+
+        with self._state_lock:
+            if self.is_model_loading:
+                print("⏳ Model already loading, please wait...")
+                return False
+            if self.is_processing:
+                print(f"⏳ Queueing model change to [{new_model_key}] until transcription completes...")
+                self._pending_model_change = new_model_key
+                return True
+            self.is_model_loading = True
+
+        self._update_ui_state("processing")
+        self._execute_model_change(new_model_key)
+        return True
+
+    def toggle_mute(self):
+        self.set_muted(not self.is_muted)
+
+    def set_muted(self, muted: bool):
+        with self._mute_lock:
+            with self._state_lock:
+                if self.is_muted == muted:
+                    return
+                self.is_muted = muted
+            if muted:
+                print("🔇 Microphone muted - recording disabled")
+                if self.audio_recorder.get_recording_status():
+                    self.cancel_active_recording()
+            else:
+                print("🎤 Microphone unmuted")
+            self.floating_widget.set_muted(muted)
+            self._update_ui_state(self.get_current_state())
+
+    def update_floating_widget_enabled(self, enabled: bool):
+        self.config_manager.update_user_setting('floating_widget', 'enabled', enabled)
+        if enabled:
+            self.floating_widget.show()
+        else:
+            self.floating_widget.hide()
+
+    def update_floating_widget_size(self, size: str):
+        self.config_manager.update_user_setting('floating_widget', 'size', size)
+        self.floating_widget.set_size(size)
+
+    def update_floating_widget_save_position(self, save_position: bool):
+        self.config_manager.update_user_setting('floating_widget', 'save_position', save_position)
+        self.floating_widget.set_save_position(save_position)
+
+    def save_floating_widget_position(self, position: str):
+        self.config_manager.update_user_setting('floating_widget', 'position', position)
+
+    def save_floating_widget_locked(self, locked: bool):
+        self.config_manager.update_user_setting('floating_widget', 'locked', locked)
+
+    def _ggml_model_dir(self) -> Optional[str]:
+        return with_whisper_cpp_paths(self.config_manager.get_whisper_config()).get('cpp_model_dir')
+
+    def _is_onnx_engine(self) -> bool:
+        return self.whisper_engine.ENGINE_TYPE == ONNX_ASR
+
+    def _is_onnx_model(self, model_key: str) -> bool:
+        return self.whisper_engine.registry.get_engine_family(model_key) == ONNX_FAMILY
+
+    def _whisper_models_use_whisper_cpp(self) -> bool:
+        engine_type = self.whisper_engine.ENGINE_TYPE
+        if engine_type == ONNX_ASR:
+            return self.config_manager.get_setting('whisper', 'runtime') == VULKAN
+        return engine_type == WHISPER_CPP
+
+    def get_model_download_state(self, model_key: str) -> Optional[str]:
+        registry = self.whisper_engine.registry
+        if self._is_onnx_model(model_key):
+            return "ready" if registry.is_onnx_model_downloaded(model_key) else "download"
+        if not self._whisper_models_use_whisper_cpp():
+            return None
+        engine = self.whisper_engine
+        if engine.ENGINE_TYPE == WHISPER_CPP and engine._is_model_cached(model_key):
+            return "ready"
+        from .runtime_installer import ggml_model_name
+        model_dir = self._ggml_model_dir()
+        ggml_name = ggml_model_name(model_key)
+        if model_dir and ggml_name and (Path(model_dir) / f"ggml-{ggml_name}.bin").is_file():
+            return "ready"
+        if model_dir and ggml_name:
+            return "download"
+        return "unavailable"
+
+    def _download_onnx_model_and_switch(self, model_key: str):
+        from .runtime_installer import RuntimeInstaller
+
+        model = self.whisper_engine.registry.get_model(model_key)
+        title = f"Download {model.label}"
+        self._runtime_installer = RuntimeInstaller(on_progress=self._report_install_progress)
+        try:
+            if not dialogs.confirm(title, f"{model.label} is not downloaded yet. Download it now?"):
+                return
+            print(f"📦 Downloading the [{model_key}] model...")
+            self._show_install_progress(title)
+            self._runtime_installer.download_onnx_model(self.whisper_engine.registry, model_key)
+        except Exception as e:
+            self._close_install_progress()
+            if self._install_was_cancelled():
+                print("ℹ️ Download cancelled, already downloaded files are kept for the next attempt")
+                return
+            self.logger.error(f"Failed to download ONNX model {model_key}: {e}")
+            print(f"❌ Failed to download the [{model_key}] model: {e}")
+            dialogs.show_error(title, f"Download failed:\n\n{str(e)[:600]}")
+            return
+        finally:
+            self._close_install_progress()
+            with self._state_lock:
+                self._runtime_install_running = False
+                self._runtime_installer = None
+            self.system_tray.set_status_text(None)
+
+        self.system_tray.refresh_menu()
+        self.request_model_change(model_key)
+
+    def _switch_engine_family(self, model_key: str) -> bool:
+        runtimes = self.get_runtimes()
+        if self._is_onnx_model(model_key):
+            gpu_runtime = self._installable_onnx_gpu_runtime(runtimes)
+            if gpu_runtime:
+                threading.Thread(target=self._offer_onnx_gpu_runtime, args=(gpu_runtime, model_key), daemon=True).start()
+                return True
+            runtime = best_onnx_runtime(runtimes, self.config_manager.get_setting('whisper', 'onnx_runtime'))
+            compute_type = None
+        else:
+            runtime_key = self.config_manager.get_setting('whisper', 'runtime')
+            runtime = next((candidate for candidate in runtimes if candidate.key == runtime_key and candidate.available), None)
+            runtime = runtime or next((candidate for candidate in runtimes if candidate.key == CPU and candidate.available), None)
+            compute_type = self.config_manager.get_setting('whisper', 'compute_type')
+        if runtime is None:
+            print(f"❌ No runtime can run the [{model_key}] model")
+            return False
+        return self.request_runtime_change(runtime.key, compute_type, model_key=model_key)
+
+    def _installable_onnx_gpu_runtime(self, runtimes: list) -> Optional[Runtime]:
+        if self.config_manager.get_setting('onboarding', 'onnx_gpu') == 'declined':
+            return None
+        onnx_runtimes = {runtime.key: runtime for runtime in runtimes if runtime.engine_type == ONNX_ASR}
+        if any(onnx_runtimes[key].available for key in (ONNX_CUDA, ONNX_DIRECTML) if key in onnx_runtimes):
+            return None
+        return next((onnx_runtimes[key] for key in (ONNX_CUDA, ONNX_DIRECTML)
+                     if key in onnx_runtimes and onnx_runtimes[key].state == INSTALLABLE), None)
+
+    def _offer_onnx_gpu_runtime(self, runtime: Runtime, model_key: str):
+        message = (f"ONNX models can run on your GPU with {runtime.label}.\n\n"
+                   f"Install it now? (download {runtime.install_size}, Whisper Key restarts afterwards)\n"
+                   f"No: use the CPU. You can change this later in the tray Runtime menu.")
+        if not dialogs.confirm(f"Use the GPU for {model_key}", message):
+            self.config_manager.update_user_setting('onboarding', 'onnx_gpu', 'declined')
+            self._switch_engine_family(model_key)
+            return
+        with self._state_lock:
+            if self._runtime_install_running:
+                print("⏳ A runtime is already being installed...")
+                return
+            self._runtime_install_running = True
+        if not self._install_and_switch_runtime(runtime, model_key=model_key):
+            print("ℹ️ Using the CPU for ONNX models")
+            self.config_manager.update_user_setting('onboarding', 'onnx_gpu', 'declined')
+            self._switch_engine_family(model_key)
+
+    def _download_ggml_model_and_switch(self, model_key: str):
+        from .runtime_installer import RuntimeInstaller
+
+        title = "Download whisper.cpp model"
+        self._runtime_installer = RuntimeInstaller(on_progress=self._report_install_progress)
+        try:
+            if not dialogs.confirm(title, f"The whisper.cpp file for the [{model_key}] model is not downloaded yet. Download it now?"):
+                return
+            print(f"📦 Downloading the whisper.cpp model for [{model_key}]...")
+            self._show_install_progress(title)
+            self._runtime_installer.download_ggml_model(model_key, Path(self._ggml_model_dir()))
+        except Exception as e:
+            self._close_install_progress()
+            if self._install_was_cancelled():
+                print("ℹ️ Download cancelled")
+                return
+            self.logger.error(f"Failed to download ggml model {model_key}: {e}")
+            print(f"❌ Failed to download the [{model_key}] model: {e}")
+            dialogs.show_error(title, f"Download failed:\n\n{str(e)[:600]}")
+            return
+        finally:
+            self._close_install_progress()
+            with self._state_lock:
+                self._runtime_install_running = False
+                self._runtime_installer = None
+            self.system_tray.set_status_text(None)
+
+        self.system_tray.refresh_menu()
+        self.request_model_change(model_key)
+
+    def get_runtimes(self) -> list:
+        with self._runtimes_lock:
+            if self._runtimes is None:
+                from .whisper_cpp_engine import find_whisper_cli
+                installed_binary, _ = whisper_cpp_runtime_paths()
+                whisper_cpp_binary = (self.config_manager.get_setting('whisper', 'cpp_binary')
+                                      or installed_binary or find_whisper_cli())
+                try:
+                    self._runtimes = detect_runtimes(whisper_cpp_binary)
+                except Exception as e:
+                    self.logger.error(f"Runtime detection failed: {e}")
+                    self._runtimes = []
+            return self._runtimes
+
+    def refresh_runtimes(self):
+        with self._runtimes_lock:
+            self._runtimes = None
+
+    def get_current_runtime(self) -> Optional[Runtime]:
+        runtimes = self.get_runtimes()
+        if self._runtime_key is None:
+            engine = self.whisper_engine
+            if engine.ENGINE_TYPE == ONNX_ASR:
+                self._runtime_key = engine.onnx_runtime
+            else:
+                self._runtime_key = current_runtime_key(engine.ENGINE_TYPE, getattr(engine, 'device', 'cpu'), runtimes)
+        return next((runtime for runtime in runtimes if runtime.key == self._runtime_key), None)
+
+    def get_menu_runtimes(self) -> list:
+        return runtimes_for_engine_family(self.get_runtimes(), self._is_onnx_engine())
+
+    def get_current_compute_type(self) -> Optional[str]:
+        if self.whisper_engine.ENGINE_TYPE != FASTER_WHISPER:
+            return None
+        return self.whisper_engine.compute_type
+
+    def request_compute_type_change(self, compute_type: str) -> bool:
+        current_runtime = self.get_current_runtime()
+        return bool(current_runtime) and self.request_runtime_change(current_runtime.key, compute_type)
+
+    def request_runtime_change(self, runtime_key: str, compute_type: Optional[str] = None, model_key: Optional[str] = None) -> bool:
+        runtime = next((runtime for runtime in self.get_runtimes() if runtime.key == runtime_key), None)
+        if not runtime or runtime.state == UNSUPPORTED:
+            return False
+
+        if runtime.state == INSTALLABLE:
+            with self._state_lock:
+                if self._runtime_install_running:
+                    print("⏳ A runtime is already being installed...")
+                    return False
+                self._runtime_install_running = True
+            threading.Thread(target=self._install_and_switch_runtime, args=(runtime,), daemon=True).start()
             return True
-        
-        if current_state == "processing":
-            print(f"⏳ Queueing model change to [{new_model_key}] until transcription completes...")
-            self._pending_model_change = new_model_key
+
+        if runtime.needs_restart:
+            threading.Thread(target=self._confirm_restart_into_runtime, args=(runtime,), daemon=True).start()
             return True
-        
-        if current_state == "idle":
-            self._execute_model_change(new_model_key)
+
+        compute_type = choose_compute_type(runtime, compute_type or self.get_current_compute_type())
+        current_runtime = self.get_current_runtime()
+        model_changes = model_key is not None and model_key != self.whisper_engine.model_key
+        if current_runtime and current_runtime.key == runtime.key and compute_type == self.get_current_compute_type() and not model_changes:
             return True
-        
-        self.logger.warning(f"Unexpected state for model change: {current_state}")
-        return False
-    
+
+        if self.get_current_state() == "recording":
+            print(f"🎤 Cancelling recording to switch to [{runtime.label}]...")
+            self.cancel_active_recording()
+
+        with self._state_lock:
+            if self.is_model_loading:
+                print("⏳ Model already loading, please wait...")
+                return False
+            if self.is_processing or self.audio_recorder.get_recording_status():
+                print("⏳ Busy transcribing, change the runtime again in a moment...")
+                return False
+            self.is_model_loading = True
+
+        self._update_ui_state("processing")
+        threading.Thread(target=self._execute_runtime_change, args=(runtime, compute_type, model_key), daemon=True).start()
+        return True
+
+    def _execute_runtime_change(self, runtime: Runtime, compute_type: Optional[str], model_key: Optional[str] = None):
+        description = runtime.label if runtime.engine_type != FASTER_WHISPER else f"{runtime.label}, {compute_type}"
+        if model_key:
+            description = f"{model_key} on {description}"
+        print(f"🔄 Switching runtime to [{description}]...")
+
+        old_engine = self.whisper_engine
+        old_runtime = self.get_current_runtime()
+        old_compute_type = self.get_current_compute_type()
+        changes_engine_family = (runtime.engine_type == ONNX_ASR) != (old_engine.ENGINE_TYPE == ONNX_ASR)
+        whisper_config = with_whisper_cpp_paths(self.config_manager.get_whisper_config())
+        whisper_config['model'] = model_key or old_engine.model_key
+        if runtime.engine_type == FASTER_WHISPER:
+            whisper_config['device'] = runtime.device
+            whisper_config['compute_type'] = compute_type
+        if runtime.engine_type == ONNX_ASR:
+            whisper_config['onnx_runtime'] = runtime.key
+
+        release_first = getattr(old_engine, 'device', 'cpu') != "cpu" or runtime.device != "cpu"
+        if release_first:
+            old_engine.unload()
+            gc.collect()
+
+        new_engine = None
+        try:
+            new_engine = create_whisper_engine(runtime.engine_type, whisper_config, self.vad_manager, old_engine.registry)
+            new_engine.warm_up()
+        except Exception as e:
+            self.logger.error(f"Failed to switch runtime to {description}: {e}")
+            print(f"❌ Failed to switch runtime: {e}")
+            if new_engine:
+                new_engine.close()
+            new_engine = None
+            gc.collect()
+            if release_first:
+                self._restore_engine(old_engine)
+        else:
+            with self._state_lock:
+                self.whisper_engine = new_engine
+                self._runtime_key = runtime.key
+                retry_allowed = old_runtime and old_runtime.key != self._failed_runtime_key and not changes_engine_family
+                self._fallback_runtime = (old_runtime, old_compute_type) if retry_allowed else None
+            old_engine.unload()
+            del old_engine
+            gc.collect()
+            self._persist_runtime(runtime, compute_type)
+            if model_key:
+                self.config_manager.update_user_setting('whisper', 'model', model_key)
+            print(f"✅ Now transcribing with [{description}]")
+        finally:
+            self.set_model_loading(False)
+            self.system_tray.refresh_menu()
+
+    def offer_whisper_server_upgrade(self):
+        from .whisper_cpp_engine import find_whisper_server
+        installed_binary, _ = whisper_cpp_runtime_paths()
+        current_runtime = self.get_current_runtime()
+        if not installed_binary or find_whisper_server(installed_binary) or not current_runtime or current_runtime.key != VULKAN:
+            return
+        if self.config_manager.get_setting('onboarding', 'whisper_server_upgrade') == 'declined':
+            return
+        with self._state_lock:
+            if self._runtime_install_running:
+                return
+            self._runtime_install_running = True
+        threading.Thread(target=self._install_and_switch_runtime, args=(current_runtime, True), daemon=True).start()
+
+    def _choose_install_option(self, runtime: Runtime, upgrade: bool = False):
+        from .runtime_installer import install_options
+        options = install_options(runtime.key)
+        if upgrade:
+            if not options:
+                return None
+            if dialogs.confirm(f"Upgrade {runtime.label}", (
+                    f"The installed {runtime.label} runtime predates whisper-server, so the model is reloaded for every recording.\n\n"
+                    f"Rebuild it now to keep the model loaded?\nDownload: {options[0].download_size}")):
+                return options[0]
+            self.config_manager.update_user_setting('onboarding', 'whisper_server_upgrade', 'declined')
+            print("ℹ️ whisper-server rebuild skipped, this prompt will not be shown again")
+            return None
+        title = f"Install {runtime.label}"
+        restart_note = "" if runtime.key == VULKAN else "\n\nWhisper Key restarts afterwards to use it."
+        if len(options) >= 2:
+            first, second = options[0], options[1]
+            choice = dialogs.choose(title, (
+                f"{runtime.label} is not installed yet.\n\n"
+                f"Yes: {first.description} (download {first.download_size})\n"
+                f"No: {second.description} (download {second.download_size})"
+                f"{restart_note}"
+            ))
+            if choice is None:
+                return None
+            return first if choice else second
+        if options and dialogs.confirm(title, f"{options[0].description}.\nDownload: {options[0].download_size}{restart_note}"):
+            return options[0]
+        return None
+
+    def _report_install_progress(self, message: str):
+        print(f"   {message}")
+        self.system_tray.set_status_text(message)
+        window = self._install_progress_window
+        if window:
+            window.set_status(message)
+
+    def _show_install_progress(self, title: str):
+        from .install_progress_window import InstallProgressWindow
+        self._install_progress_window = InstallProgressWindow(title, on_cancel=self._runtime_installer.cancel)
+        self._install_progress_window.show()
+
+    def _close_install_progress(self):
+        window = self._install_progress_window
+        self._install_progress_window = None
+        if window:
+            window.close()
+
+    def _install_was_cancelled(self) -> bool:
+        installer = self._runtime_installer
+        return bool(installer and installer.cancelled)
+
+    def _install_and_switch_runtime(self, runtime: Runtime, upgrade: bool = False, model_key: Optional[str] = None) -> bool:
+        from .runtime_installer import RuntimeInstaller, install_options
+
+        self._runtime_installer = RuntimeInstaller(on_progress=self._report_install_progress)
+        try:
+            option = install_options(runtime.key)[0] if model_key else self._choose_install_option(runtime, upgrade)
+            if option is None:
+                return False
+            print(f"📦 Installing [{runtime.label}]: {option.description}")
+            self._show_install_progress(f"Installing {runtime.label}")
+            self._runtime_installer.install(runtime.key, option, model_key=self.whisper_engine.model_key)
+        except Exception as e:
+            self._close_install_progress()
+            if self._install_was_cancelled():
+                print(f"ℹ️ {runtime.label} installation cancelled")
+                return False
+            self.logger.error(f"Failed to install runtime {runtime.key}: {e}")
+            print(f"❌ Failed to install {runtime.label}: {e}")
+            dialogs.show_error(f"Install {runtime.label}", f"Installation failed:\n\n{str(e)[:600]}\n\nDetails are in the log file.")
+            return False
+        finally:
+            self._close_install_progress()
+            with self._state_lock:
+                self._runtime_install_running = False
+                self._runtime_installer = None
+            self.system_tray.set_status_text(None)
+
+        print(f"✅ {runtime.label} installed")
+        self.refresh_runtimes()
+        installed_runtime = next(candidate for candidate in self.get_runtimes() if candidate.key == runtime.key)
+        current_runtime = self.get_current_runtime()
+        if model_key:
+            self.config_manager.update_user_setting('whisper', 'model', model_key)
+        if current_runtime and current_runtime.key == installed_runtime.key:
+            self._reload_current_engine()
+        elif installed_runtime.needs_restart:
+            self._restart_into_runtime(installed_runtime)
+        else:
+            self.system_tray.refresh_menu()
+            self.request_runtime_change(installed_runtime.key, model_key=model_key)
+        return True
+
+    def _confirm_restart_into_runtime(self, runtime: Runtime):
+        if dialogs.confirm(f"Switch to {runtime.label}", f"Whisper Key restarts to switch to {runtime.label}."):
+            self._restart_into_runtime(runtime)
+
+    def _restart_into_runtime(self, runtime: Runtime):
+        with self._state_lock:
+            busy = self.is_model_loading or self.is_processing or self.audio_recorder.get_recording_status()
+            if not busy:
+                self.is_model_loading = True
+        if busy:
+            message = f"{runtime.label} is installed. Select it again in the Runtime menu once the current recording is done."
+            print(f"⏳ {message}")
+            dialogs.confirm(f"Switch to {runtime.label}", message)
+            return
+        self._update_ui_state("processing")
+        if runtime.engine_type == ONNX_ASR:
+            self.config_manager.update_user_setting('whisper', 'onnx_runtime', runtime.key)
+        else:
+            self.config_manager.update_user_setting('whisper', 'runtime', runtime.key)
+            self.config_manager.update_user_setting('whisper', 'engine_type', runtime.engine_type)
+            self.config_manager.update_user_setting('whisper', 'device', runtime.device)
+            self.config_manager.update_user_setting('whisper', 'compute_type', choose_compute_type(runtime, None))
+        print(f"🔄 Restarting Whisper Key to switch to [{runtime.label}]...")
+        from .utils import restart_app
+        try:
+            restart_app()
+        except Exception as e:
+            self.logger.error(f"Failed to restart into {runtime.label}: {e}")
+            print(f"❌ Failed to restart, restart Whisper Key manually: {e}")
+            self.set_model_loading(False)
+
+    def _reload_current_engine(self):
+        with self._state_lock:
+            busy = self.is_model_loading or self.is_processing or self.audio_recorder.get_recording_status()
+            if not busy:
+                self.is_model_loading = True
+        if busy:
+            print("⏳ Restart Whisper Key or switch the runtime again to use the upgraded runtime")
+            return
+        self._update_ui_state("processing")
+        try:
+            self.whisper_engine.reload()
+        except Exception as e:
+            self.logger.error(f"Failed to reload the upgraded runtime: {e}")
+            print(f"❌ Failed to reload the upgraded runtime, restart Whisper Key: {e}")
+        finally:
+            self.set_model_loading(False)
+            self.system_tray.refresh_menu()
+
+    def _restore_engine(self, engine):
+        print("🔄 Restoring previous runtime...")
+        try:
+            engine.reload()
+        except Exception as e:
+            self.logger.error(f"Failed to restore previous runtime: {e}")
+            print(f"❌ Failed to restore previous runtime, restart Whisper Key: {e}")
+
+    def _persist_runtime(self, runtime: Runtime, compute_type: Optional[str]):
+        try:
+            if runtime.engine_type == ONNX_ASR:
+                self.config_manager.update_user_setting('whisper', 'onnx_runtime', runtime.key)
+                return
+            self.config_manager.update_user_setting('whisper', 'runtime', runtime.key)
+            if runtime.engine_type == FASTER_WHISPER:
+                self.config_manager.update_user_setting('whisper', 'device', runtime.device)
+                self.config_manager.update_user_setting('whisper', 'compute_type', compute_type)
+            self.config_manager.update_user_setting('whisper', 'engine_type', runtime.engine_type)
+        except Exception as e:
+            self.logger.error(f"Failed to save runtime settings: {e}")
+            print(f"⚠️ Runtime switched but settings could not be saved: {e}")
+
     def update_transcription_mode(self, value):
         self.config_manager.update_user_setting('clipboard', 'auto_paste', value)
         self.clipboard_manager.update_auto_paste(value)
+
+    def update_audio_feedback(self, enabled: bool):
+        self.audio_feedback.set_enabled(enabled)
+        self.config_manager.update_user_setting('audio_feedback', 'enabled', enabled)
+
+    def update_copy_to_clipboard(self, value):
+        self.clipboard_manager.update_copy_to_clipboard(value)
+        self.config_manager.update_user_setting('clipboard', 'copy_to_clipboard', value)
 
     def _execute_model_change(self, new_model_key: str):
         def progress_callback(message: str):
             if "ready" in message.lower() or "already loaded" in message.lower():
                 print(f"✅ Successfully switched to [{new_model_key}] model")
+                self.config_manager.update_user_setting('whisper', 'model', new_model_key)
                 self.set_model_loading(False)
             elif "failed" in message.lower():
                 print(f"❌ Failed to change model: {message}")
@@ -347,8 +1085,8 @@ class StateManager:
                 print(f"🔄 {message}")
                 self.set_model_loading(True)
         
+        self._fallback_runtime = None
         try:
-            self.set_model_loading(True)
             print(f"🔄 Switching to [{new_model_key}] model...")
             
             self.whisper_engine.change_model(new_model_key, progress_callback)
@@ -465,16 +1203,23 @@ class StateManager:
                 vad_manager=vad_manager,
                 streaming_manager=streaming_manager,
                 on_streaming_result=on_streaming_result,
-                device=device_id if device_id != -1 else None
+                on_vad_probability=self.handle_vad_probability,
+                device=device_id if device_id != -1 else None,
+                on_monitoring_failed=self.handle_monitoring_failed
             )
 
+            previous_recorder = self.audio_recorder
             self.audio_recorder = new_recorder
+            previous_recorder.stop_monitoring()
+            previous_recorder.cancel_recording()
 
             print(f"✅ Successfully switched audio device to: {device_name}")
 
         except Exception as e:
             self.logger.error(f"Failed to change audio device: {e}")
             print(f"❌ Failed to switch audio device: {e}")
+
+        self._apply_auto_trigger()
 
     def _initialize_audio_host(self):
         try:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "whisper-key-local"
-version = "0.8.3"
+version = "1.0.0"
 description = "Global hotkeys to record speech and transcribe directly to your cursor"
 readme = "README.md"
 license = "MIT"
@@ -19,6 +19,8 @@ dependencies = [
     "numpy>=1.24.0",
     "soxr>=0.3.0",
     "sherpa-onnx>=1.11.3",
+    "onnx-asr==0.12.0",
+    "onnxruntime==1.24.4",
     "sounddevice>=0.4.6",
     "pyperclip>=1.8.2",
     "ruamel.yaml>=0.18.14",

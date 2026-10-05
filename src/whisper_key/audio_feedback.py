@@ -1,9 +1,29 @@
 import logging
 import os
 import platform
+import subprocess
 import threading
 
-from playsound3 import playsound
+
+def _import_playsound():
+    if platform.system() != "Windows":
+        from playsound3 import playsound
+        return playsound
+    original_run = subprocess.run
+
+    def run_without_window(*args, **kwargs):
+        kwargs.setdefault("creationflags", subprocess.CREATE_NO_WINDOW)
+        return original_run(*args, **kwargs)
+
+    subprocess.run = run_without_window
+    try:
+        from playsound3 import playsound
+    finally:
+        subprocess.run = original_run
+    return playsound
+
+
+playsound = _import_playsound()
 
 SOUND_BACKEND = "winmm" if platform.system() == "Windows" else None
 
@@ -44,6 +64,14 @@ class AudioFeedback:
 
         if self.ready_sound_path and not os.path.isfile(self.ready_sound_path):
             self.logger.warning(f"Ready sound file not found: {self.ready_sound_path}")
+
+    def set_enabled(self, enabled: bool):
+        if enabled == self.enabled:
+            return
+        if enabled:
+            self._validate_sound_files()
+        self.enabled = enabled
+        self.logger.info(f"Audio feedback {'enabled' if enabled else 'disabled'}")
 
     def _play_sound_file_async(self, file_path: str):
         def play():

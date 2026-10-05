@@ -9,7 +9,7 @@ from ruamel.yaml import YAML
 from .utils import resolve_asset_path, beautify_hotkey, get_user_app_data_path, get_version
 from .platform import IS_MACOS
 
-REPO_URL = "https://github.com/PinW/whisper-key-local"
+REPO_URL = "https://github.com/SesioN/whisper-key-local"
 
 
 def _build_settings_header():
@@ -138,6 +138,24 @@ class ConfigManager:
         for section in sections_to_remove:
             del user_config[section]
     
+    def _fill_missing_runtime(self, user_config: Dict[str, Any]):
+        from .runtime_loader import derive_runtime
+        whisper_settings = user_config.get('whisper') or {}
+        if 'runtime' in whisper_settings:
+            return
+        derived_runtime = derive_runtime(dict(whisper_settings), dict(user_config.get('onboarding') or {}))
+        if derived_runtime != 'cpu':
+            user_config.setdefault('whisper', {})['runtime'] = derived_runtime
+
+    def _migrate_legacy_keys(self, user_config: Dict[str, Any]):
+        clipboard = user_config.get('clipboard')
+        if not isinstance(clipboard, dict) or 'type_also_copy_to_clipboard' not in clipboard:
+            return
+        legacy = clipboard.get('type_also_copy_to_clipboard')
+        if 'copy_to_clipboard' not in clipboard and legacy and clipboard.get('delivery_method') == 'type':
+            clipboard['copy_to_clipboard'] = True
+            self.logger.info("Migrated clipboard.type_also_copy_to_clipboard to clipboard.copy_to_clipboard")
+
     def _load_config(self):
 
         default_config = self._load_default_config()
@@ -158,7 +176,9 @@ class ConfigManager:
                 if user_config is None:
                     user_config = {}
 
+                self._migrate_legacy_keys(user_config)
                 self._remove_unused_keys_from_user_config(user_config, default_config)
+                self._fill_missing_runtime(user_config)
                 merged_config = deep_merge_config(default_config, user_config)
                 resolved_config = _resolve_platform_values(merged_config)
                 self.logger.info(f"Loaded user configuration from {self.config_path}")
@@ -276,6 +296,9 @@ class ConfigManager:
     
     def get_whisper_config(self) -> Dict[str, Any]:
         return self.config['whisper'].copy()
+
+    def get_engine_type(self) -> str:
+        return self.config['whisper'].get('engine_type', 'faster_whisper')
     
     def get_hotkey_config(self) -> Dict[str, Any]:
         return self.config['hotkey'].copy()
@@ -298,6 +321,9 @@ class ConfigManager:
     def get_system_tray_config(self) -> Dict[str, Any]:
         return self.config['system_tray'].copy()
     
+    def get_floating_widget_config(self) -> Dict[str, Any]:
+        return self.config['floating_widget'].copy()
+
     def get_audio_feedback_config(self) -> Dict[str, Any]:
         return self.config['audio_feedback'].copy()
 
@@ -312,6 +338,9 @@ class ConfigManager:
 
     def get_console_config(self) -> Dict[str, Any]:
         return self.config.get('console', {}).copy()
+
+    def get_loading_screen_config(self) -> Dict[str, Any]:
+        return self.config.get('loading_screen', {}).copy()
 
     def get_update_config(self) -> Dict[str, Any]:
         return self.config.get('update', {}).copy()
@@ -414,10 +443,50 @@ def validate_config(config, default_config, logger):
     _validate_numeric_range(config, default_config, 'vad.vad_offset_threshold', logger, min_val=0.0, max_val=1.0)
     _validate_numeric_range(config, default_config, 'vad.vad_min_speech_duration', logger, min_val=0.001, max_val=5.0)
     _validate_numeric_range(config, default_config, 'vad.vad_silence_timeout_seconds', logger, min_val=1.0, max_val=36000.0)
+    _validate_numeric_range(config, default_config, 'vad.auto_trigger_silence_seconds', logger, min_val=0.2, max_val=60.0)
+
+    runtime = _get_config_value_at_path(config, 'whisper.runtime')
+    if runtime not in ('cpu', 'cuda', 'rocm', 'vulkan'):
+        _set_to_default(config, default_config, 'whisper.runtime', runtime, logger)
+
+    onnx_runtime = _get_config_value_at_path(config, 'whisper.onnx_runtime')
+    if onnx_runtime not in ('onnx-cpu', 'onnx-directml', 'onnx-cuda'):
+        _set_to_default(config, default_config, 'whisper.onnx_runtime', onnx_runtime, logger)
+
+    auto_trigger_enabled = _get_config_value_at_path(config, 'vad.auto_trigger_enabled')
+    if not isinstance(auto_trigger_enabled, bool):
+        _set_to_default(config, default_config, 'vad.auto_trigger_enabled', auto_trigger_enabled, logger)
+
+    auto_trigger_paste = _get_config_value_at_path(config, 'vad.auto_trigger_paste')
+    if not isinstance(auto_trigger_paste, bool):
+        _set_to_default(config, default_config, 'vad.auto_trigger_paste', auto_trigger_paste, logger)
+
+    auto_trigger_silence = _get_config_value_at_path(config, 'vad.auto_trigger_silence_seconds')
+    silence_timeout = _get_config_value_at_path(config, 'vad.vad_silence_timeout_seconds')
+    if auto_trigger_silence >= silence_timeout:
+        logger.warning(f"vad.auto_trigger_silence_seconds ({auto_trigger_silence}) must be below vad.vad_silence_timeout_seconds ({silence_timeout})")
+        _set_to_default(config, default_config, 'vad.auto_trigger_silence_seconds', auto_trigger_silence, logger)
+
+    engine_type = _get_config_value_at_path(config, 'whisper.engine_type')
+    if engine_type not in ('faster_whisper', 'whisper_cpp'):
+        _set_to_default(config, default_config, 'whisper.engine_type', engine_type, logger)
 
     recording_mode = _get_config_value_at_path(config, 'hotkey.recording_mode')
     if recording_mode not in ('toggle', 'push_to_talk'):
         _set_to_default(config, default_config, 'hotkey.recording_mode', recording_mode, logger)
+
+    floating_widget_size = _get_config_value_at_path(config, 'floating_widget.size')
+    if floating_widget_size not in ('small', 'medium', 'big'):
+        _set_to_default(config, default_config, 'floating_widget.size', floating_widget_size, logger)
+
+    for floating_widget_flag in ('floating_widget.enabled', 'floating_widget.save_position', 'floating_widget.locked'):
+        flag_value = _get_config_value_at_path(config, floating_widget_flag)
+        if not isinstance(flag_value, bool):
+            _set_to_default(config, default_config, floating_widget_flag, flag_value, logger)
+
+    floating_widget_position = _get_config_value_at_path(config, 'floating_widget.position')
+    if floating_widget_position is not None and not isinstance(floating_widget_position, str):
+        _set_to_default(config, default_config, 'floating_widget.position', floating_widget_position, logger)
 
     stop_key = _get_config_value_at_path(config, 'hotkey.stop_key')
     auto_send_key = _get_config_value_at_path(config, 'hotkey.auto_send_key')

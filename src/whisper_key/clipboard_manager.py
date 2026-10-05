@@ -11,7 +11,7 @@ class ClipboardManager:
     def __init__(self, auto_paste, delivery_method, paste_hotkey,
                  paste_pre_paste_delay, paste_preserve_clipboard,
                  paste_clipboard_restore_delay,
-                 type_also_copy_to_clipboard, type_auto_enter_delay,
+                 copy_to_clipboard, type_auto_enter_delay,
                  type_auto_enter_delay_per_100_chars,
                  macos_key_simulation_delay):
         self.logger = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ class ClipboardManager:
         self.paste_pre_paste_delay = paste_pre_paste_delay
         self.paste_preserve_clipboard = paste_preserve_clipboard
         self.paste_clipboard_restore_delay = paste_clipboard_restore_delay
-        self.type_also_copy_to_clipboard = type_also_copy_to_clipboard
+        self.copy_to_clipboard = copy_to_clipboard
         self.type_auto_enter_delay = type_auto_enter_delay
         self.type_auto_enter_delay_per_100_chars = type_auto_enter_delay_per_100_chars
         keyboard.set_delay(macos_key_simulation_delay)
@@ -48,6 +48,8 @@ class ClipboardManager:
                 print(f"   ✓ Auto-paste is ENABLED using clipboard paste ({hotkey_display})")
         else:
             print(f"   ✗ Auto-paste is DISABLED - paste manually with {hotkey_display}")
+        if self.auto_paste and self.copy_to_clipboard:
+            print("   ✓ Transcription is also kept on the clipboard")
 
     def copy_text(self, text: str) -> bool:
         if not text:
@@ -99,7 +101,7 @@ class ClipboardManager:
     def _type_delivery(self, text: str) -> bool:
         try:
             keyboard.type_text(text)
-            if self.type_also_copy_to_clipboard:
+            if self.copy_to_clipboard:
                 pyperclip.copy(text)
             print(f"   ✓ Auto-pasted via text injection")
             return True
@@ -110,7 +112,7 @@ class ClipboardManager:
     def _clipboard_paste(self, text: str) -> bool:
         try:
             original_content = None
-            if self.paste_preserve_clipboard:
+            if self.paste_preserve_clipboard and not self.copy_to_clipboard:
                 original_content = pyperclip.paste()
 
             if not self.copy_text(text):
@@ -174,4 +176,8 @@ class ClipboardManager:
 
     def update_auto_paste(self, enabled: bool):
         self.auto_paste = enabled
+        self._print_status()
+
+    def update_copy_to_clipboard(self, enabled: bool):
+        self.copy_to_clipboard = enabled
         self._print_status()

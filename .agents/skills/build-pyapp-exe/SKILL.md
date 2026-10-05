@@ -1,12 +1,13 @@
 ---
 name: build-pyapp-exe
 description: "Build pyapp executable"
-argument-hint: "[-Clean] [-Test]"
+argument-hint: "[-Clean] [-FromSource]"
 ---
 [FLAGS]=$ARGUMENTS
 
 1. Build: `powershell.exe -ExecutionPolicy Bypass -File pyapp-build/build-pyapp.ps1` (pass through flags from [FLAGS])
    - `-Clean`: Clean Rust target directory before building (full rebuild)
+   - `-FromSource`: Embed a wheel of the current commit instead of the PyPI release
 2. Watch for "Build successful!" message
 3. Note the executable path from output
 

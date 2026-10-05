@@ -41,6 +41,8 @@ class VadState(Enum):
 class VadEvent(Enum):
     NO_EVENT = "no_event"
     SILENCE_TIMEOUT = "silence_timeout"
+    SPEECH_START = "speech_start"
+    SPEECH_END = "speech_end"
 
 class VadManager:
     def __init__(self,
@@ -49,7 +51,8 @@ class VadManager:
                  vad_onset_threshold: float = 0.7,
                  vad_offset_threshold: float = 0.55,
                  vad_min_speech_duration: float = 0.1,
-                 vad_silence_timeout_seconds: float = 20.0):
+                 vad_silence_timeout_seconds: float = 20.0,
+                 auto_trigger_silence_seconds: float = 1.5):
 
         self.vad_precheck_enabled = vad_precheck_enabled
         self.vad_realtime_enabled = vad_realtime_enabled
@@ -57,6 +60,7 @@ class VadManager:
         self.vad_offset_threshold = vad_offset_threshold
         self.vad_min_speech_duration = vad_min_speech_duration
         self.vad_silence_timeout_seconds = vad_silence_timeout_seconds
+        self.auto_trigger_silence_seconds = auto_trigger_silence_seconds
 
         self.logger = logging.getLogger(__name__)
 
@@ -115,7 +119,9 @@ class VadManager:
             self.logger.warning(f"TEN VAD check failed after {vad_time:.1f}ms: {e}")
             return True
 
-    def create_continuous_detector(self, event_callback: Optional[Callable[[VadEvent], None]] = None) -> Optional["ContinuousVoiceDetector"]:
+    def create_continuous_detector(self,
+                                   event_callback: Optional[Callable[[VadEvent], None]] = None,
+                                   probability_callback: Optional[Callable[[float], None]] = None) -> Optional["ContinuousVoiceDetector"]:
         if not self.vad_realtime_enabled or not self.ten_vad:
             return None
 
@@ -125,7 +131,10 @@ class VadManager:
             vad_offset_threshold=self.vad_offset_threshold,
             vad_silence_timeout_seconds=self.vad_silence_timeout_seconds,
             frame_duration_sec=VAD_HOP_DURATION_SEC,
-            event_callback=event_callback
+            min_speech_duration_seconds=self.vad_min_speech_duration,
+            speech_end_silence_seconds=self.auto_trigger_silence_seconds,
+            event_callback=event_callback,
+            probability_callback=probability_callback
         )
 
     def is_available(self) -> bool:
@@ -165,7 +174,9 @@ class Hysteresis:
 class ContinuousVoiceDetector:
     def __init__(self, ten_vad, vad_onset_threshold, vad_offset_threshold,
                  vad_silence_timeout_seconds, frame_duration_sec,
-                 event_callback: Optional[Callable[[VadEvent], None]] = None):
+                 min_speech_duration_seconds, speech_end_silence_seconds,
+                 event_callback: Optional[Callable[[VadEvent], None]] = None,
+                 probability_callback: Optional[Callable[[float], None]] = None):
         self.ten_vad = ten_vad
         self.hysteresis = Hysteresis(high_threshold=vad_onset_threshold,
                                    low_threshold=vad_offset_threshold,
@@ -174,15 +185,24 @@ class ContinuousVoiceDetector:
         self.frame_duration_sec = frame_duration_sec
         self.silence_frame_count = 0
         self.frames_for_timeout = int(self.silence_timeout_sec / self.frame_duration_sec)
+        self.frames_for_speech_start = max(1, int(min_speech_duration_seconds / self.frame_duration_sec))
+        self.frames_for_speech_end = max(1, int(speech_end_silence_seconds / self.frame_duration_sec))
+        self.speech_frame_count = 0
+        self.speech_end_pending = False
         self.probability_buffer = deque(maxlen=self.frames_for_timeout) # Control memory growth with circular buffer
         self.state = VadState.SILENCE_COUNTING
         self._lock = threading.Lock()
         self.event_callback = event_callback
+        self.probability_callback = probability_callback
         self.logger = logging.getLogger(__name__)
 
     def _dispatch_event(self, event: VadEvent):
         if self.event_callback:
             threading.Thread(target=self.event_callback, args=(event,), daemon=True).start()
+
+    def set_thresholds(self, onset_threshold: float, offset_threshold: float):
+        self.hysteresis.high_threshold = onset_threshold
+        self.hysteresis.low_threshold = offset_threshold
 
     def process_chunk(self, audio_chunk: np.ndarray) -> VadEvent:
         if not self.ten_vad:
@@ -193,11 +213,18 @@ class ContinuousVoiceDetector:
             probability, _ = self.ten_vad.process(audio_int16)
             speech_detected = self.hysteresis.detect_speech(probability)
             self.probability_buffer.append(probability)
-            return self._update_state(speech_detected)
+            event = self._update_state(speech_detected)
 
         except Exception as e:
             self.logger.error(f"Error processing VAD chunk: {e}")
             return VadEvent.NO_EVENT
+
+        if self.probability_callback:
+            try:
+                self.probability_callback(probability)
+            except Exception as e:
+                self.logger.error(f"VAD probability callback failed: {e}")
+        return event
 
     def _update_state(self, speech_detected: bool) -> VadEvent:
         with self._lock:
@@ -207,34 +234,58 @@ class ContinuousVoiceDetector:
             if current_state == VadState.SPEECH_DETECTED:
                 if speech_detected:
                     self.silence_frame_count = 0
+                    event = self._count_speech_frame()
                 else:
                     self.state = VadState.SILENCE_COUNTING
                     self.silence_frame_count = 1
+                    self.speech_frame_count = 0
 
             elif current_state == VadState.SILENCE_COUNTING:
                 if speech_detected:
                     self.state = VadState.SPEECH_DETECTED
                     self.silence_frame_count = 0
+                    event = self._count_speech_frame()
                 else:
                     self.silence_frame_count += 1
                     if self.silence_frame_count >= self.frames_for_timeout:
                         self.state = VadState.TIMEOUT_TRIGGERED
+                        self.speech_end_pending = False
                         event = VadEvent.SILENCE_TIMEOUT
+                    elif self.speech_end_pending and self.silence_frame_count >= self.frames_for_speech_end:
+                        self.speech_end_pending = False
+                        event = VadEvent.SPEECH_END
 
             elif current_state == VadState.TIMEOUT_TRIGGERED:
-                pass
+                if speech_detected:
+                    self.state = VadState.SPEECH_DETECTED
+                    self.silence_frame_count = 0
+                    event = self._count_speech_frame()
 
             if event != VadEvent.NO_EVENT:
-                threading.Thread(target=self._dispatch_event, args=(event,), daemon=True).start()
+                self._dispatch_event(event)
 
             return event
+
+    def _count_speech_frame(self) -> VadEvent:
+        self.speech_frame_count += 1
+        # speech_end_pending latches SPEECH_START once per utterance, so short dips don't re-fire it
+        if self.speech_frame_count >= self.frames_for_speech_start and not self.speech_end_pending:
+            self.speech_end_pending = True
+            return VadEvent.SPEECH_START
+        return VadEvent.NO_EVENT
 
     def reset(self):
         with self._lock:
             self.state = VadState.SILENCE_COUNTING
             self.silence_frame_count = 0
+            self.speech_frame_count = 0
+            self.speech_end_pending = False
             self.probability_buffer.clear()
             self.hysteresis.speech_detected = False
+
+    def is_speech_active(self) -> bool:
+        with self._lock:
+            return self.speech_end_pending
 
     def get_state(self) -> VadState:
         with self._lock:

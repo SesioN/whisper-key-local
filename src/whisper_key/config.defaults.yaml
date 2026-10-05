@@ -9,18 +9,39 @@
 # macOS: ~/.whisperkey/user_settings.yaml
 
 whisper: # Whisper AI Model Settings
+    # Engine backend
+    # Derived from runtime at startup (vulkan selects whisper_cpp), set runtime instead
+    # Options: faster_whisper (CTranslate2), whisper_cpp (whisper-server/whisper-cli with Vulkan)
+    engine_type: faster_whisper
+
     # Model selection
     # See "models" below for more information
     model: tiny
 
-    # Transcription device
+    # Transcription runtime (choose from the tray "Runtime" menu)
+    # Options: cpu, cuda (NVIDIA), rocm (AMD), vulkan (whisper.cpp)
+    # GPU runtimes are installed on demand into %LOCALAPPDATA%\whisperkey\runtimes
+    runtime: cpu
+
+    # Runtime for ONNX models (Parakeet, Qwen3-ASR), chosen from the tray "Runtime" menu while one is selected
+    # Options: onnx-cpu, onnx-directml (any DirectX 12 GPU), onnx-cuda (NVIDIA)
+    onnx_runtime: onnx-cpu
+
+    # Transcription device (only for faster_whisper engine, set from runtime)
     # Options: cpu, cuda (for both NVIDIA and AMD)
-    # For GPU setup, see https://github.com/PinW/whisper-key-local/blob/master/docs/gpu-setup.md
+    # For GPU setup, see https://github.com/SesioN/whisper-key-local/blob/master/docs/gpu-setup.md
     device: cpu
 
-    # Compute Precision
-    # Options: int8, float16, float32
+    # Compute Precision (only for faster_whisper engine)
+    # Options: int8, int8_float32, int8_float16, int8_bfloat16, int16, float16, bfloat16, float32
+    # Supported values depend on the device; the tray "Precision" menu only enables those
     compute_type: int8
+
+    # whisper.cpp engine settings
+    # Custom path to whisper-cli.exe (auto-detected if not set)
+    cpp_binary: ""
+    # Custom path to ggml model directory (auto-detected if not set)
+    cpp_model_dir: ""
 
     # Language detection
     # Options: auto (auto-detect), en, es, fr, de, etc.
@@ -101,6 +122,44 @@ whisper: # Whisper AI Model Settings
             source: distil-whisper/distil-large-v3.5-ct2
             label: "Distil-Large-V3.5 (English, 1.4GB)"
             group: custom
+            enabled: true
+
+        # ONNX models — run on CPU, DirectML (any DirectX 12 GPU) or NVIDIA CUDA, see the tray "Runtime" menu
+        # Only the selected variant is downloaded, into %LOCALAPPDATA%\whisperkey\models
+        parakeet-tdt-0.6b-v3: # NVIDIA Parakeet, 25 European languages, automatic language detection
+            source: istupakov/parakeet-tdt-0.6b-v3-onnx
+            revision: 8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce
+            engine: onnx_asr
+            onnx_model_type: nemo-conformer-tdt
+            label: "Parakeet-TDT-0.6B-V3 (25 languages, 2.5GB)"
+            group: onnx
+            enabled: true
+        parakeet-tdt-0.6b-v3-int8:
+            source: istupakov/parakeet-tdt-0.6b-v3-onnx
+            revision: 8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce
+            engine: onnx_asr
+            onnx_model_type: nemo-conformer-tdt
+            quantization: int8
+            label: "Parakeet-TDT-0.6B-V3 int8 (25 languages, 670MB)"
+            group: onnx
+            enabled: true
+        qwen3-asr-1.7b: # Qwen3-ASR, 30 languages; uses the "language" setting (auto = detect)
+            source: OpenVoiceOS/qwen3-asr-1.7b-onnx
+            revision: 895b989354254bda979d2ba2fc413007ac89361c
+            engine: onnx_asr
+            onnx_model_type: speech-llm
+            label: "Qwen3-ASR-1.7B (30 languages, 9.4GB)"
+            group: onnx
+            enabled: true
+        qwen3-asr-1.7b-int8:
+            source: OpenVoiceOS/qwen3-asr-1.7b-onnx
+            revision: 895b989354254bda979d2ba2fc413007ac89361c
+            engine: onnx_asr
+            onnx_model_type: speech-llm
+            quantization: int8
+            directml: false # int8 runs faster on the CPU than with DirectML
+            label: "Qwen3-ASR-1.7B int8 (30 languages, 2.4GB)"
+            group: onnx
             enabled: true
 
 streaming: # Real-time STT (Experimental, speech preview only)
@@ -188,6 +247,14 @@ vad: # Voice Activity Detection (VAD)
     vad_realtime_enabled: true # Enables continuous silence detection and automatic recording stop
     vad_silence_timeout_seconds: 30.0 # Auto-stop recording after this many seconds of silence
 
+    # Voice-activated recording (requires vad_realtime_enabled)
+    # Starts recording when speech is detected and stops after a short silence.
+    # Hotkeys keep working as usual.
+    # NOTE: the microphone stays open the whole time the app is running
+    auto_trigger_enabled: false
+    auto_trigger_silence_seconds: 1.5 # Silence after speech that ends a voice-activated recording
+    auto_trigger_paste: true # false = voice-activated recordings are only copied to the clipboard, never pasted
+
 audio: # Audio Recording Settings
     # Sample rate is fixed at 16000 Hz for optimal Whisper and TEN VAD performance
 
@@ -224,6 +291,10 @@ clipboard: # Clipboard Behavior
     # false = only copy to clipboard (paste manually)
     auto_paste: true
 
+    # Keep the transcription on the clipboard after auto-paste
+    # Disables paste_preserve_clipboard; always on when auto_paste is false
+    copy_to_clipboard: false
+
     # Delivery method for auto-paste
     # "paste" = clipboard copy + simulated Ctrl+V paste
     # "type" = direct text injection (Windows only)
@@ -247,9 +318,6 @@ clipboard: # Clipboard Behavior
 
     # Delay before clipboard restore (seconds, paste mode)
     paste_clipboard_restore_delay: 0.5
-
-    # Also copy transcription to clipboard after delivery (type mode)
-    type_also_copy_to_clipboard: false
 
     # Delay before sending ENTER key after text injection (seconds, type mode)
     # Terminal apps need time to process typed characters before Enter submits
@@ -316,6 +384,23 @@ system_tray: # System Tray Settings
     # Tooltip text when hovering over tray icon
     tooltip: Whisper Key
 
+floating_widget: # Floating Recording Button (Windows only)
+    # Show an always-on-top button that starts/stops recording with a mouse click
+    # Drag the icon to move it, click the label below it to lock it in place
+    enabled: false
+
+    # Button size: small, medium, big
+    size: big
+
+    # Restore the last dragged position on startup
+    save_position: false
+
+    # Keep the button locked in place (toggled with the label below the icon)
+    locked: false
+
+    # Last position as "+x+y" (managed automatically)
+    position: null
+
 terminal_title: # Terminal Tab Title Status
     # Tab title shows "<prefix> Whisper Key" based on app state
     # Each state is a static prefix string, or a list of [prefix, seconds]
@@ -335,6 +420,10 @@ console: # Console Window Management (whisper-key-hideable.exe only)
     # Hide console window after startup (requires system tray)
     start_hidden: false
 
+loading_screen: # Startup Loading Screen (Windows only)
+    # Show a small window with startup progress while models load
+    enabled: true
+
 update: # Update Settings
     # How to handle available updates
     # "prompt" = ask user before updating
@@ -349,6 +438,14 @@ onboarding: # First-run setup state (managed automatically)
     # Detected GPU class (set automatically)
     # nvidia | amd_rdna2+ | amd_rdna1 | null
     gpu_class: null
+
+    # Answer to the whisper-server rebuild prompt for an older Vulkan runtime
+    # pending | declined
+    whisper_server_upgrade: pending
+
+    # Answer to the offer to run ONNX models on the GPU
+    # pending | declined
+    onnx_gpu: pending
 
 voice_commands: # Voice Command Settings
     # Enable/disable voice commands feature

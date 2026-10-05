@@ -17,6 +17,7 @@ Convert Windows path to WSL: `C:\Users\...` → `/mnt/c/Users/.../`
 3. Show installed package info: run `"<exe-wsl-path>" self pip show whisper-key-local`
 4. Check if editable: Location field shows source path if editable, site-packages if normal install
 5. Report: venv path, installed version, editable or not, which source path if editable
+6. Only the running version's venv should exist; the exe prunes older sibling version dirs on startup
 
 ### install [worktree-path]
 Installs current worktree (or specified path) as editable into the pyapp venv.

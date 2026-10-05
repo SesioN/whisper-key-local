@@ -10,6 +10,12 @@ Thanks for your interest in contributing!
 
 Check the [roadmap](docs/roadmap/roadmap.md) to see what's planned
 
+## Branches
+
+- Branch from `dev` (`feat/…`, `fix/…`) and open the PR against `dev`
+- `master` only receives release merges; releases are tagged `vX.Y.Z` there and built by GitHub Actions
+- Commit messages follow semantic style (`feat:`, `fix:`, `docs:`, …)
+
 ## Questions?
 
-Join the [Discord](https://discord.gg/uZnXV8snhz) to chat about ideas before diving in.
+Open an [issue](https://github.com/SesioN/whisper-key-local/issues).

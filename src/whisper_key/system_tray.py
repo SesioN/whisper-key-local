@@ -1,15 +1,18 @@
 import logging
 import os
 import signal
+import threading
 from typing import Optional, TYPE_CHECKING
 from pathlib import Path
 
 from .utils import open_file
 from .platform import permissions, icons, console
+from .runtime_options import COMPUTE_TYPES
 
 try:
     import pystray
     from PIL import Image
+    from .icon_effects import create_muted_icon
     TRAY_AVAILABLE = True
 except ImportError:
     TRAY_AVAILABLE = False
@@ -63,6 +66,7 @@ class SystemTray:
                 "idle": self._create_fallback_icon("idle"),
                 "recording": self._create_fallback_icon("recording"),
                 "processing": self._create_fallback_icon("processing"),
+                "muted": create_muted_icon(self._create_fallback_icon("idle")),
             }
         
     def _create_fallback_icon(self, state: str) -> Image.Image:
@@ -103,13 +107,38 @@ class SystemTray:
             first_group = False
 
             for model in models:
+                download_state = self.state_manager.get_model_download_state(model.key)
                 items.append(pystray.MenuItem(
-                    model.label,
+                    f"{model.label} (download)" if download_state == "download" else model.label,
                     make_model_selector(model.key),
                     radio=True,
                     checked=make_is_current(model.key),
-                    enabled=model_selection_enabled
+                    enabled=False if download_state == "unavailable" else model_selection_enabled
                 ))
+
+        return items
+
+    def _build_floating_widget_menu_items(self) -> list:
+        if not self.state_manager.floating_widget_available:
+            return []
+
+        enabled = self.config_manager.get_setting('floating_widget', 'enabled')
+        save_position = self.config_manager.get_setting('floating_widget', 'save_position')
+        current_size = self.config_manager.get_setting('floating_widget', 'size')
+
+        def make_size_selector(size):
+            return lambda icon, item: self._set_floating_widget_size(size)
+
+        def make_is_current_size(size):
+            return lambda item: size == current_size
+
+        items = [
+            pystray.MenuItem("Show", lambda icon, item: self._set_floating_widget_enabled(not self.config_manager.get_setting('floating_widget', 'enabled')), checked=lambda item: enabled),
+            pystray.MenuItem("Remember position", lambda icon, item: self._set_floating_widget_save_position(not self.config_manager.get_setting('floating_widget', 'save_position')), checked=lambda item: save_position),
+            pystray.Menu.SEPARATOR,
+        ]
+        for size in ("small", "medium", "big"):
+            items.append(pystray.MenuItem(size.title(), make_size_selector(size), radio=True, checked=make_is_current_size(size)))
 
         return items
 
@@ -118,7 +147,6 @@ class SystemTray:
             app_state = self.state_manager.get_application_state()
             is_model_loading = app_state.get('model_loading', False)
 
-            auto_paste_enabled = self.config_manager.get_setting('clipboard', 'auto_paste')
             current_model = self.config_manager.get_setting('whisper', 'model')
 
             available_hosts = self.state_manager.get_available_audio_hosts()
@@ -169,8 +197,11 @@ class SystemTray:
                     )
 
             model_sub_menu_items = self._build_model_menu_items(current_model, is_model_loading)
+            floating_widget_menu_items = self._build_floating_widget_menu_items()
 
             voice_commands_enabled = self.config_manager.get_setting('voice_commands', 'enabled')
+            auto_trigger_available = self.state_manager.is_auto_trigger_available()
+            vad_sensitivity_window_available = self.state_manager.is_vad_sensitivity_window_available()
 
             menu_items = []
 
@@ -179,6 +210,8 @@ class SystemTray:
                 menu_items.append(pystray.Menu.SEPARATOR)
 
             menu_items += [
+                pystray.MenuItem("Mute microphone", self._toggle_mute, checked=lambda item: self.state_manager.is_muted),
+                pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Open log file...", self._open_log_file),
                 pystray.MenuItem("Open model cache...", self._open_model_cache),
                 pystray.Menu.SEPARATOR,
@@ -194,12 +227,19 @@ class SystemTray:
                     f"Audio Source",
                     pystray.Menu(*audio_device_items)
                 ),
+                pystray.MenuItem("Audio feedback", lambda icon, item: self._set_audio_feedback(not self._is_audio_feedback_enabled()), checked=lambda item: self._is_audio_feedback_enabled()),
                 pystray.Menu.SEPARATOR,
-                pystray.MenuItem("Auto-paste", lambda icon, item: self._set_transcription_mode(True), radio=True, checked=lambda item: auto_paste_enabled),
-                pystray.MenuItem("Copy to clipboard", lambda icon, item: self._set_transcription_mode(False), radio=True, checked=lambda item: not auto_paste_enabled),
+                pystray.MenuItem("Auto-paste", lambda icon, item: self._set_transcription_mode(not self._is_auto_paste_enabled()), checked=lambda item: self._is_auto_paste_enabled()),
+                pystray.MenuItem("Copy to clipboard", lambda icon, item: self._set_copy_to_clipboard(not self._is_copy_enabled()), checked=lambda item: self._is_copy_enabled(), enabled=lambda item: self._is_auto_paste_enabled()),
                 pystray.Menu.SEPARATOR,
+                pystray.MenuItem("Floating button", pystray.Menu(*floating_widget_menu_items)) if floating_widget_menu_items else None,
                 pystray.MenuItem(f"Model: {current_model.title()}", pystray.Menu(*model_sub_menu_items)),
+                pystray.Menu.SEPARATOR if auto_trigger_available else None,
+                pystray.MenuItem("Voice-activated recording", lambda icon, item: self._set_auto_trigger(not self.state_manager.auto_trigger_enabled), checked=lambda item: self.state_manager.auto_trigger_enabled) if auto_trigger_available else None,
+                pystray.MenuItem("Voice detection sensitivity...", self._open_vad_sensitivity_window) if vad_sensitivity_window_available else None,
             ]
+
+            menu_items += self._build_runtime_menu_items(is_model_loading or app_state.get('processing', False))
 
             menu_items.extend([
                 pystray.Menu.SEPARATOR,
@@ -213,6 +253,56 @@ class SystemTray:
         except Exception as e:
             self.logger.error(f"Error in _create_menu: {e}")
             raise
+
+    def _build_runtime_menu_items(self, is_busy: bool) -> list:
+        current_runtime = self.state_manager.get_current_runtime()
+        current_compute_type = self.state_manager.get_current_compute_type()
+
+        def make_runtime_selector(runtime_key):
+            return lambda icon, item: self.state_manager.request_runtime_change(runtime_key)
+
+        def make_compute_type_selector(compute_type):
+            return lambda icon, item: self.state_manager.request_compute_type_change(compute_type)
+
+        def make_is_current_runtime(runtime_key):
+            return lambda item: current_runtime is not None and runtime_key == current_runtime.key
+
+        def make_is_current_compute_type(compute_type):
+            return lambda item: compute_type == current_compute_type
+
+        runtime_items = [
+            pystray.MenuItem(
+                runtime.menu_label,
+                make_runtime_selector(runtime.key),
+                radio=True,
+                checked=make_is_current_runtime(runtime.key),
+                enabled=runtime.selectable and not is_busy
+            )
+            for runtime in self.state_manager.get_menu_runtimes()
+        ]
+
+        if current_runtime and current_runtime.compute_types:
+            precision_items = [
+                pystray.MenuItem(
+                    compute_type,
+                    make_compute_type_selector(compute_type),
+                    radio=True,
+                    checked=make_is_current_compute_type(compute_type),
+                    enabled=not is_busy
+                )
+                for compute_type in COMPUTE_TYPES if compute_type in current_runtime.compute_types
+            ]
+            precision_label = f"Precision: {current_compute_type}"
+        else:
+            precision_items = [pystray.MenuItem("Set by the model file", None, enabled=False)]
+            precision_label = "Precision: model file"
+
+        runtime_label = f"Runtime: {current_runtime.label}" if current_runtime else "Runtime"
+        return [
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem(runtime_label, pystray.Menu(*runtime_items)),
+            pystray.MenuItem(precision_label, pystray.Menu(*precision_items)),
+        ]
 
     def _open_config_folder(self, icon=None, item=None):
         try:
@@ -259,7 +349,33 @@ class SystemTray:
                     return
                 auto_paste = False
 
-        self.state_manager.update_transcription_mode(auto_paste)
+        try:
+            self.state_manager.update_transcription_mode(auto_paste)
+        except Exception as e:
+            self.logger.error(f"Error setting auto-paste to {auto_paste}: {e}")
+        self.icon.menu = self._create_menu()
+
+    def _is_audio_feedback_enabled(self):
+        return bool(self.config_manager.get_setting('audio_feedback', 'enabled'))
+
+    def _set_audio_feedback(self, enabled: bool):
+        try:
+            self.state_manager.update_audio_feedback(enabled)
+        except Exception as e:
+            self.logger.error(f"Error setting audio feedback to {enabled}: {e}")
+        self.icon.menu = self._create_menu()
+
+    def _is_auto_paste_enabled(self):
+        return bool(self.config_manager.get_setting('clipboard', 'auto_paste'))
+
+    def _is_copy_enabled(self):
+        return bool(self.config_manager.get_setting('clipboard', 'copy_to_clipboard')) or not self._is_auto_paste_enabled()
+
+    def _set_copy_to_clipboard(self, enabled: bool):
+        try:
+            self.state_manager.update_copy_to_clipboard(enabled)
+        except Exception as e:
+            self.logger.error(f"Error setting copy to clipboard to {enabled}: {e}")
         self.icon.menu = self._create_menu()
 
     def _select_model(self, model_key: str):
@@ -267,13 +383,21 @@ class SystemTray:
             success = self.state_manager.request_model_change(model_key)
 
             if success:
-                self.config_manager.update_user_setting('whisper', 'model', model_key)
                 self.icon.menu = self._create_menu()
             else:
                 self.logger.warning(f"Request to change model to {model_key} was not accepted")
 
         except Exception as e:
             self.logger.error(f"Error selecting model {model_key}: {e}")
+
+    def _set_auto_trigger(self, enabled: bool):
+        threading.Thread(target=self._apply_auto_trigger_toggle, args=(enabled,), daemon=True).start()
+
+    def _apply_auto_trigger_toggle(self, enabled: bool):
+        try:
+            self.state_manager.update_auto_trigger(enabled)
+        except Exception as e:
+            self.logger.error(f"Error toggling voice-activated recording: {e}")
 
     def _select_audio_host(self, host_name: str):
         try:
@@ -285,6 +409,9 @@ class SystemTray:
         except Exception as e:
             self.logger.error(f"Error selecting audio host {host_name}: {e}")
 
+    def _open_vad_sensitivity_window(self, icon=None, item=None):
+        self.state_manager.open_vad_sensitivity_window()
+
     def _select_audio_device(self, device_id: int, device_name: str):
         success = self.state_manager.request_audio_device_change(device_id, device_name)
 
@@ -293,6 +420,21 @@ class SystemTray:
             self.icon.menu = self._create_menu()
         else:
             self.logger.warning(f"Request to change audio device to {device_id} was not accepted")
+
+    def _set_floating_widget_enabled(self, enabled: bool):
+        self.state_manager.update_floating_widget_enabled(enabled)
+        self.icon.menu = self._create_menu()
+
+    def _set_floating_widget_save_position(self, save_position: bool):
+        self.state_manager.update_floating_widget_save_position(save_position)
+        self.icon.menu = self._create_menu()
+
+    def _set_floating_widget_size(self, size: str):
+        self.state_manager.update_floating_widget_size(size)
+        self.icon.menu = self._create_menu()
+
+    def _toggle_mute(self, icon=None, item=None):
+        self.state_manager.toggle_mute()
 
     def _show_console(self, icon=None, item=None):
         console.show()
@@ -304,8 +446,8 @@ class SystemTray:
             console.hide()
         console.start_minimize_monitor(console.hide)
 
-    def _quit_application_from_tray(self, icon=None, item=None):        
-        os.kill(os.getpid(), signal.SIGINT)
+    def _quit_application_from_tray(self, icon=None, item=None):
+        signal.raise_signal(signal.SIGINT)
     
     def update_state(self, new_state: str):
         if not TRAY_AVAILABLE or not self.is_running:
@@ -315,9 +457,17 @@ class SystemTray:
         
         try:
             self.icon.icon = self.icons[new_state]
+            self.icon.title = "Whisper Key (muted)" if new_state == "muted" else "Whisper Key"
             self.icon.menu = self._create_menu()
+            self.icon.title = self._get_title()
         except Exception as e:
             self.logger.error(f"Failed to update tray icon: {e}")
+
+    def set_status_text(self, text: Optional[str]):
+        if not self.icon:
+            return
+        tooltip = self.tray_config.get('tooltip', 'Whisper Key')
+        self.icon.title = f"{tooltip} - {text}"[:127] if text else tooltip
 
     def refresh_menu(self):
         if not self.icon:
@@ -325,8 +475,14 @@ class SystemTray:
 
         try:
             self.icon.menu = self._create_menu()
+            self.icon.title = self._get_title()
         except Exception as e:
             self.logger.error(f"Failed to refresh tray menu: {e}")
+
+    def _get_title(self) -> str:
+        if self.state_manager.auto_trigger_enabled:
+            return "Whisper Key - listening for speech"
+        return "Whisper Key"
     
     def start(self):
         if not self.available:
@@ -343,7 +499,7 @@ class SystemTray:
             self.icon = pystray.Icon(
                 name="whisper-key",
                 icon=idle_icon,
-                title="Whisper Key",
+                title=self._get_title(),
                 menu=menu
             )
 
