@@ -160,13 +160,23 @@ class HotkeyListener:
 
     def apply_hotkey_bindings(self, hotkey_bindings: dict):
         with self._listening_lock:
-            was_listening = self.is_listening
-            self.stop_listening()
-            self.hotkey_bindings_by_action = self._clean_bindings(hotkey_bindings)
-            self.keys_armed = True
-            self._setup_hotkeys()
-            if was_listening:
-                self.start_listening()
+            self._rebuild_hotkeys(lambda: setattr(self, 'hotkey_bindings_by_action', self._clean_bindings(hotkey_bindings)))
+
+    def set_recording_mode(self, recording_mode: str):
+        with self._listening_lock:
+            if recording_mode == self.recording_mode:
+                return
+            self._rebuild_hotkeys(lambda: setattr(self, 'recording_mode', recording_mode))
+            self.logger.info(f"Recording mode changed to {recording_mode}")
+
+    def _rebuild_hotkeys(self, apply_change):
+        was_listening = self.is_listening
+        self.stop_listening()
+        apply_change()
+        self.keys_armed = True
+        self._setup_hotkeys()
+        if was_listening:
+            self.start_listening()
 
     def is_active(self) -> bool:
         return self.is_listening

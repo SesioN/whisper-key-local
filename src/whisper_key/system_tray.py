@@ -19,6 +19,9 @@ except ImportError:
     pystray = None
     Image = None
 
+RECORDING_MODES = (("toggle", "Toggle - press to start, press to stop"),
+                   ("push_to_talk", "Push to talk - hold to record"))
+
 if TYPE_CHECKING:
     from .state_manager import StateManager
     from .config_manager import ConfigManager
@@ -40,6 +43,7 @@ class SystemTray:
         self.voice_command_manager_window = None
         self.logger = logging.getLogger(__name__)
                
+        self.recording_mode_changer = None
         self.icon = None  # pystray object, holds menu, state, etc.
         self.is_running = False
         self.current_state = "idle"
@@ -236,6 +240,7 @@ class SystemTray:
                 pystray.MenuItem("Auto-paste", lambda icon, item: self._set_transcription_mode(not self._is_auto_paste_enabled()), checked=lambda item: self._is_auto_paste_enabled()),
                 pystray.MenuItem("Copy to clipboard", lambda icon, item: self._set_copy_to_clipboard(not self._is_copy_enabled()), checked=lambda item: self._is_copy_enabled(), enabled=lambda item: self._is_auto_paste_enabled()),
                 pystray.Menu.SEPARATOR,
+                pystray.MenuItem("Recording mode", pystray.Menu(*self._build_recording_mode_menu_items())) if self.recording_mode_changer else None,
                 pystray.MenuItem("Floating button", pystray.Menu(*floating_widget_menu_items)) if floating_widget_menu_items else None,
                 pystray.MenuItem(f"Model: {current_model.title()}", pystray.Menu(*model_sub_menu_items)),
                 pystray.Menu.SEPARATOR if auto_trigger_available else None,
@@ -437,6 +442,31 @@ class SystemTray:
             self.icon.menu = self._create_menu()
         else:
             self.logger.warning(f"Request to change audio device to {device_id} was not accepted")
+
+    def attach_recording_mode_changer(self, recording_mode_changer):
+        self.recording_mode_changer = recording_mode_changer
+        self.refresh_menu()
+
+    def _build_recording_mode_menu_items(self) -> list:
+        def make_mode_selector(mode):
+            return lambda icon, item: self._set_recording_mode(mode)
+
+        def make_is_current_mode(mode):
+            return lambda item: self._current_recording_mode() == mode
+
+        return [pystray.MenuItem(label, make_mode_selector(mode), radio=True, checked=make_is_current_mode(mode))
+                for mode, label in RECORDING_MODES]
+
+    def _current_recording_mode(self):
+        return self.config_manager.get_setting('hotkey', 'recording_mode')
+
+    def _set_recording_mode(self, mode: str):
+        try:
+            if mode != self._current_recording_mode():
+                self.recording_mode_changer(mode)
+        except Exception as e:
+            self.logger.error(f"Error setting recording mode to {mode}: {e}")
+        self.refresh_menu()
 
     def _set_floating_widget_enabled(self, enabled: bool):
         self.state_manager.update_floating_widget_enabled(enabled)

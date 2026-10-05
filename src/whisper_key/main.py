@@ -399,6 +399,12 @@ def setup_shortcut_manager_window(config_manager, hotkey_listener, voice_command
         key_name_for_virtual_key=hotkeys.key_name_for_virtual_key
     )
 
+def change_recording_mode(config_manager, hotkey_listener, recording_mode):
+    hotkey_listener.set_recording_mode(recording_mode)
+    config_manager.update_user_setting('hotkey', 'recording_mode', recording_mode)
+    print(f"🎛️ Recording mode: {'push-to-talk' if recording_mode == 'push_to_talk' else 'toggle'}")
+    config_manager.print_startup_hotkey_instructions()
+
 def shutdown_app(hotkey_listener: HotkeyListener, state_manager: StateManager, logger: logging.Logger):
     try:
         if hotkey_listener:
@@ -511,6 +517,8 @@ def main():
         state_manager.attach_components(audio_recorder, system_tray, floating_widget)
         
         hotkey_listener = setup_hotkey_listener(config_manager, state_manager, voice_commands_config['enabled'])
+        system_tray.attach_recording_mode_changer(
+            lambda mode: change_recording_mode(config_manager, hotkey_listener, mode))
         system_tray.attach_shortcut_manager_window(
             setup_shortcut_manager_window(config_manager, hotkey_listener, voice_commands_config['enabled']))
         system_tray.attach_voice_command_manager_window(
