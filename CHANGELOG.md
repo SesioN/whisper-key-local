@@ -4,6 +4,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Fixed
+- **Qwen3-ASR int8 no longer drops long dictations** - its audio is split into chunks of at most 14 s (new per-model `max_chunk_seconds`, default 28 s), because the int8 decoder can return empty text for clips over ~15 s; an empty chunk that contains speech is logged as a warning
+
 ## [1.2.0] - 2026-10-06
 
 ### Changed

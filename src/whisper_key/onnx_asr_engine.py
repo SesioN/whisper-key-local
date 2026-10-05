@@ -11,8 +11,7 @@ from .runtime_loader import ONNX_CPU, ONNX_CUDA, ONNX_DIRECTML
 
 SPEECH_LLM = "speech-llm"
 SAMPLE_RATE = 16000
-SPEECH_LLM_MAX_SECONDS = 28
-SPEECH_LLM_SPLIT_SEARCH_START_SECONDS = 18
+SPEECH_LLM_MAX_CHUNK_SECONDS = 28
 
 PROVIDERS = {
     ONNX_CPU: ["CPUExecutionProvider"],
@@ -57,12 +56,13 @@ def onnx_required_file_patterns(onnx_model_type: str, quantization: Optional[str
     return groups
 
 
-def split_at_quiet_points(audio: np.ndarray) -> list:
+def split_at_quiet_points(audio: np.ndarray, max_seconds: float = SPEECH_LLM_MAX_CHUNK_SECONDS) -> list:
     chunks = []
     frame = SAMPLE_RATE // 50
-    while len(audio) > SPEECH_LLM_MAX_SECONDS * SAMPLE_RATE:
-        search_start = SPEECH_LLM_SPLIT_SEARCH_START_SECONDS * SAMPLE_RATE
-        search = audio[search_start:SPEECH_LLM_MAX_SECONDS * SAMPLE_RATE]
+    max_samples = int(max_seconds * SAMPLE_RATE)
+    search_start = max_samples * 2 // 3
+    while len(audio) > max_samples:
+        search = audio[search_start:max_samples]
         frame_energy = np.square(search[:len(search) // frame * frame].reshape(-1, frame)).mean(axis=1)
         split = search_start + int(frame_energy.argmin()) * frame + frame // 2
         chunks.append(audio[:split])
@@ -140,12 +140,16 @@ class OnnxAsrEngine:
         device = "cpu" if providers[0] == "CPUExecutionProvider" else "gpu"
         return manager._create_asr_adapter(asr), definition.onnx_model_type, device
 
+    def _chunk_seconds(self, model_key: str) -> float:
+        return self.registry.get_model(model_key).max_chunk_seconds or SPEECH_LLM_MAX_CHUNK_SECONDS
+
     def _load_model(self):
         print(f"🧠 Loading ONNX model [{self.model_key}] on [{self.onnx_runtime}]...")
         model, model_type, device = self._create_model(self.model_key)
         with self._model_lock:
             self.model = model
             self._model_type = model_type
+            self._max_chunk_seconds = self._chunk_seconds(self.model_key)
             self.device = device
         print(f"   ✓ ONNX model [{self.model_key}] ready")
 
@@ -180,8 +184,17 @@ class OnnxAsrEngine:
             if self._model_type != SPEECH_LLM:
                 return model.recognize(audio, sample_rate=SAMPLE_RATE)
             kwargs = self._recognize_kwargs()
-            texts = [model.recognize(chunk, sample_rate=SAMPLE_RATE, **kwargs).strip() for chunk in split_at_quiet_points(audio)]
+            texts = []
+            for chunk in split_at_quiet_points(audio, self._max_chunk_seconds):
+                text = model.recognize(chunk, sample_rate=SAMPLE_RATE, **kwargs).strip()
+                if not text:
+                    self._warn_if_speech_lost(chunk)
+                texts.append(text)
             return " ".join(text for text in texts if text)
+
+    def _warn_if_speech_lost(self, chunk: np.ndarray):
+        if self.vad_manager and self.vad_manager.is_available() and self.vad_manager.check_audio_for_speech(chunk):
+            self.logger.warning(f"[{self.model_key}] returned no text for a {len(chunk) / SAMPLE_RATE:.1f} s chunk that contains speech")
 
     def _load_model_async(self, new_model_key: str, progress_callback: Optional[Callable[[str], None]] = None):
         def _background_loader():
@@ -197,6 +210,7 @@ class OnnxAsrEngine:
                 with self._model_lock:
                     self.model = model
                     self._model_type = model_type
+                    self._max_chunk_seconds = self._chunk_seconds(new_model_key)
                     self.model_key = new_model_key
                     self.device = device
                 self.logger.info(f"ONNX model [{new_model_key}] loaded on [{self.onnx_runtime}]")
