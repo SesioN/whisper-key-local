@@ -58,16 +58,19 @@ python whisper-key.py
 | Cancel recording | `Esc` | `Shift` |
 | Voice command mode | `Alt+Win` | `Fn+Command` |
 
-Open the system tray / menu bar icon to:
-- Change transcription model, runtime (CPU / CUDA / ROCm / Vulkan / ONNX) and precision
-- Select audio host and input device, or mute the microphone
-- Toggle auto-paste, copy to clipboard, audio feedback and voice-activated recording
-- Switch the recording mode between toggle and push-to-talk
-- Start Whisper Key with Windows (**Start with Windows**, per-user, no admin rights; the packaged app starts without a console)
-- Open the voice detection sensitivity window and floating button options: button or animated voice orb style, orb look, lock, hide in fullscreen apps (Windows)
+Click the system tray icon (Windows: left or right click opens a Windows 11 style menu that follows the light/dark theme; macOS: menu bar menu) to:
+- See the status and current model, and mute the microphone (microphone button at the top)
+- **Recording**: switch the recording mode between toggle and push-to-talk, toggle voice-activated recording and audio feedback, open the voice detection sensitivity window
+- **Output**: toggle auto-paste and copy to clipboard
+- **Model**: change the transcription model, runtime (CPU / CUDA / ROCm / Vulkan / ONNX) and precision
+- **Microphone**: select the input device and audio host
+- **Floating button** (Windows): show it, button or animated voice orb style, size, lock, hide in fullscreen apps. **Orb skin** lists every skin with a preview; clicking one applies it right away and keeps the menu open, so you can click through them
 - Manage shortcuts: record a primary and secondary binding per action, or unset one (Windows, **Shortcuts...**)
 - Manage voice commands: add, edit, test and switch them on or off (Windows, **Voice commands...**)
-- Open the settings, commands and log files
+- Start Whisper Key with Windows (**Start with Windows**, per-user, no admin rights; the packaged app starts without a console)
+- **Files and logs**: open the settings, commands and log files, the config folder and the model cache
+
+The Windows menu works with the keyboard too: arrow keys move, Enter selects, Left/Right switch segmented options, Esc goes back or closes.
 
 ## 🗣️ Voice Commands
 
@@ -93,7 +96,7 @@ See the **[Voice Commands Guide](docs/voice-commands.md)** for full details.
 ## ⚡ GPU Acceleration
 
 On Windows, Whisper Key detects your GPU on first launch and offers to install the matching runtime. Runtimes can be
-installed and switched later from the tray **Runtime** menu; they are stored in `%LOCALAPPDATA%\whisperkey\runtimes`.
+installed and switched later from the tray **Model > Runtime** page; they are stored in `%LOCALAPPDATA%\whisperkey\runtimes`.
 
 | Runtime | Engine | Hardware |
 |---|---|---|
@@ -119,7 +122,7 @@ Delete this file and restart app to reset to defaults.
 |--------|---------|-------|
 | **Whisper** |||
 | `whisper.model` | `tiny` | Any model defined in `whisper.models` |
-| `whisper.runtime` | `cpu` | cpu, cuda, rocm or vulkan; set from the tray Runtime menu |
+| `whisper.runtime` | `cpu` | cpu, cuda, rocm or vulkan; set from the tray Model > Runtime page |
 | `whisper.onnx_runtime` | `onnx-cpu` | onnx-cpu, onnx-directml or onnx-cuda; used by ONNX models |
 | `whisper.engine_type` | `faster_whisper` | Derived from `whisper.runtime` (vulkan selects whisper_cpp) |
 | `whisper.device` | `cpu` | cpu or cuda (NVIDIA and AMD); set from the runtime — [setup guide](docs/gpu-setup.md) |
@@ -139,7 +142,7 @@ Delete this file and restart app to reset to defaults.
 | `hotkey.stop_key` | `[ctrl, ""]` / `[fn, ""]` | Stop recording |
 | `hotkey.auto_send_key` | `[alt, ""]` / `[option, ""]` | Stop + paste + Enter |
 | `hotkey.cancel_combination` | `[esc, ""]` / `[shift, ""]` | Cancel recording |
-| `hotkey.recording_mode` | `toggle` | toggle or push_to_talk; also switchable from the tray **Recording mode** menu without a restart |
+| `hotkey.recording_mode` | `toggle` | toggle or push_to_talk; also switchable from the tray **Recording mode** buttons without a restart |
 | `hotkey.command_hotkey` | `[alt+win, ""]` / `[fn+command, ""]` | Voice command mode |
 | **Voice Activity Detection** |||
 | `vad.vad_precheck_enabled` | `true` | Prevent hallucinations on silence |

@@ -8,7 +8,7 @@ Voice commands are configured in `commands.yaml`, located in your config folder:
 - **Windows:** `%APPDATA%\whisperkey\commands.yaml`
 - **macOS:** `~/.whisperkey/commands.yaml`
 
-You can open this file from the system tray menu: **Open commands file...**.
+You can open this file from the system tray menu: **Files and logs > Commands file**.
 
 ### Voice commands window (Windows)
 

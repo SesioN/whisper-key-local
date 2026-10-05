@@ -1,0 +1,24 @@
+import numpy as np
+from PIL import Image
+
+from . import get_skin
+
+PREVIEW_SUPERSAMPLE = 2
+PREVIEW_FILL = 0.82
+PREVIEW_TIME = 2.0
+
+
+def render_skin_preview(skin_name: str, size: int) -> Image.Image:
+    skin_class = get_skin(skin_name)
+    big_size = size * PREVIEW_SUPERSAMPLE
+    canvas = big_size * 2
+    renderer = skin_class(canvas, big_size * 0.5 / skin_class.VISUAL_SCALE * PREVIEW_FILL)
+    pixels = renderer.render("idle", 0.0, PREVIEW_TIME, 1.0)
+    alpha = pixels[..., 3].astype(np.float32)
+    rgb = pixels[..., 2::-1].astype(np.float32)
+    covered = alpha > 0
+    rgb[covered] = rgb[covered] * 255.0 / alpha[covered, None]
+    image = Image.fromarray(np.dstack([np.clip(rgb, 0, 255), alpha]).astype(np.uint8), "RGBA")
+    offset = (canvas - big_size) // 2
+    image = image.crop((offset, offset, offset + big_size, offset + big_size))
+    return image.resize((size, size), Image.LANCZOS)
