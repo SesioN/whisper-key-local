@@ -15,6 +15,7 @@ class AuroraSkin(OrbSkin):
     LABEL = "Aurora"
 
     CANVAS_FACTOR = 2.2
+    VISUAL_SCALE = 1.35
 
     def __init__(self, canvas: int, orb_radius: float):
         super().__init__(canvas, orb_radius)

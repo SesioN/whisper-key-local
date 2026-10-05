@@ -115,6 +115,7 @@ class NebulaSkin(OrbSkin):
     LABEL = "Nebula"
 
     CANVAS_FACTOR = 1.55
+    VISUAL_SCALE = 1.15
     SUPERSAMPLE = 1
     HANDLES_MUTED = True
     HANDLES_OUTCOMES = True

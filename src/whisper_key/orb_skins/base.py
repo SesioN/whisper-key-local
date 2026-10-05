@@ -17,6 +17,7 @@ def wrap_angle(a):
 class OrbSkin:
 
     CANVAS_FACTOR = 2.2
+    VISUAL_SCALE = 1.0
 
     SUPERSAMPLE = 1
     SS_BUDGET = 102_400
