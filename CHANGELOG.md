@@ -4,10 +4,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-05
+
+First release of the independent fork [SesioN/whisper-key-local](https://github.com/SesioN/whisper-key-local),
+based on upstream Whisper Key 0.8.3.
+
 ### Added
+- **Floating record button** - always-on-top click-to-record button with microphone mute toggle (Windows)
+- **Voice-activated recording** - starts on speech with 1 s pre-roll, stops after silence; sensitivity window with live speech meter
+- **Loading screen** - startup progress window with elapsed time (Windows)
+- **whisper.cpp engine** - Vulkan backend kept loaded via whisper-server; missing models download on demand
+- **ONNX ASR engine** - Parakeet-TDT-0.6B-v3 and Qwen3-ASR-1.7B
+- **Runtime and precision tray menus** - install and switch CPU / CUDA / ROCm / Vulkan runtimes on demand
+- **Audio feedback toggle** in the tray
+- **Release pipeline** - tagged releases are built by GitHub Actions and published with checksums
 - **`whisper-key-no-term.exe`** - Windows build that never opens a console window; a native splash shows first-run setup progress and reports setup or startup failures in an error dialog, then the loading screen takes over
 
 ### Changed
+- **Updates come from this fork's GitHub releases** - the in-app updater and `whisper-key self update` no longer install the upstream PyPI package
 - **Auto-paste and copy to clipboard are independent tray checkboxes** - New `clipboard.copy_to_clipboard` keeps the transcription on the clipboard after auto-paste in both delivery methods (disables `paste_preserve_clipboard`); voice-command text follows the same setting. Replaces `type_also_copy_to_clipboard`, which is migrated automatically
 
 ### Fixed
