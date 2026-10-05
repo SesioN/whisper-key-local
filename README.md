@@ -62,6 +62,7 @@ Open the system tray / menu bar icon to:
 - Change transcription model, runtime (CPU / CUDA / ROCm / Vulkan / ONNX) and precision
 - Select audio host and input device, or mute the microphone
 - Toggle auto-paste, copy to clipboard, audio feedback and voice-activated recording
+- Switch the recording mode between toggle and push-to-talk
 - Open the voice detection sensitivity window and floating button options (Windows)
 - Manage shortcuts: record a primary and secondary binding per action, or unset one (Windows, **Shortcuts...**)
 - Manage voice commands: add, edit, test and switch them on or off (Windows, **Voice commands...**)
@@ -137,7 +138,7 @@ Delete this file and restart app to reset to defaults.
 | `hotkey.stop_key` | `[ctrl, ""]` / `[fn, ""]` | Stop recording |
 | `hotkey.auto_send_key` | `[alt, ""]` / `[option, ""]` | Stop + paste + Enter |
 | `hotkey.cancel_combination` | `[esc, ""]` / `[shift, ""]` | Cancel recording |
-| `hotkey.recording_mode` | `toggle` | toggle or push_to_talk |
+| `hotkey.recording_mode` | `toggle` | toggle or push_to_talk; also switchable from the tray **Recording mode** menu without a restart |
 | `hotkey.command_hotkey` | `[alt+win, ""]` / `[fn+command, ""]` | Voice command mode |
 | **Voice Activity Detection** |||
 | `vad.vad_precheck_enabled` | `true` | Prevent hallucinations on silence |
