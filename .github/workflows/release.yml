@@ -59,9 +59,7 @@ jobs:
       - name: Build executables
         shell: pwsh
         run: |
-          $Flags = @("-FromSource")
-          if ("${{ github.ref_type }}" -eq "tag") { $Flags += "-Release" }
-          ./pyapp-build/build-pyapp.ps1 @Flags
+          ./pyapp-build/build-pyapp.ps1 -FromSource -Release:("${{ github.ref_type }}" -eq "tag")
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
       - name: Build wheel and sdist
