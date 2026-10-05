@@ -37,6 +37,7 @@ class SystemTray:
         self.model_registry = model_registry
         self.console_config = console_config or {}
         self.shortcut_manager_window = None
+        self.voice_command_manager_window = None
         self.logger = logging.getLogger(__name__)
                
         self.icon = None  # pystray object, holds menu, state, etc.
@@ -220,6 +221,7 @@ class SystemTray:
                 pystray.MenuItem("Open settings file...", self._open_config_file),
                 pystray.MenuItem("Open commands file...", self._open_commands_file) if voice_commands_enabled else None,
                 pystray.MenuItem("Shortcuts...", self._open_shortcut_manager_window) if self.shortcut_manager_window else None,
+                pystray.MenuItem("Voice commands...", self._open_voice_command_manager_window) if self.voice_command_manager_window and voice_commands_enabled else None,
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem(
                     "Audio Host",
@@ -319,13 +321,12 @@ class SystemTray:
         except Exception as e:
             self.logger.error(f"Failed to open config file: {e}")
 
+    def get_commands_file_path(self) -> str:
+        return os.path.join(os.path.dirname(self.config_manager.user_settings_path), "commands.yaml")
+
     def _open_commands_file(self, icon=None, item=None):
         try:
-            commands_path = os.path.join(
-                os.path.dirname(self.config_manager.user_settings_path),
-                "commands.yaml"
-            )
-            open_file(commands_path)
+            open_file(self.get_commands_file_path())
         except Exception as e:
             self.logger.error(f"Failed to open commands file: {e}")
 
@@ -417,6 +418,13 @@ class SystemTray:
 
     def _open_shortcut_manager_window(self, icon=None, item=None):
         self.shortcut_manager_window.open()
+
+    def attach_voice_command_manager_window(self, voice_command_manager_window):
+        self.voice_command_manager_window = voice_command_manager_window
+        self.refresh_menu()
+
+    def _open_voice_command_manager_window(self, icon=None, item=None):
+        self.voice_command_manager_window.open()
 
     def _open_vad_sensitivity_window(self, icon=None, item=None):
         self.state_manager.open_vad_sensitivity_window()
@@ -526,6 +534,8 @@ class SystemTray:
     def stop(self):
         if self.shortcut_manager_window:
             self.shortcut_manager_window.stop()
+        if self.voice_command_manager_window:
+            self.voice_command_manager_window.stop()
 
         if not self.is_running:
             return

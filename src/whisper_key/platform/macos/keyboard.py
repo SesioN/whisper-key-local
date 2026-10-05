@@ -72,6 +72,10 @@ def send_key(key: str):
     CGEventPost(kCGHIDEventTap, event)
 
 
+def can_send_key(key: str) -> bool:
+    return key.lower() in MODIFIER_FLAGS or key.lower() in KEY_CODES
+
+
 def send_hotkey(*keys: str):
     if not _quartz_available:
         logger.warning("Cannot send hotkey - Quartz not available")

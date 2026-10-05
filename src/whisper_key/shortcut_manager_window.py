@@ -6,10 +6,10 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable
 
+from .key_capture import KeyCapture
 from .utils import beautify_hotkey
 
 QUEUE_POLL_INTERVAL_MS = 100
-FOCUS_CHECK_DELAY_MS = 50
 STOP_TIMEOUT_SECONDS = 3.0
 BINDING_BUTTON_WIDTH = 22
 ERROR_COLOR = "#C62828"
@@ -26,7 +26,6 @@ ACTION_LABELS = {
     'cancel_combination': "Cancel recording",
 }
 SLOT_LABELS = ("Primary", "Secondary")
-MODIFIER_ORDER = ('ctrl', 'shift', 'alt', 'win')
 ACTIONS_NEEDING_MODIFIER = ('recording_hotkey', 'command_hotkey')
 TYPING_KEYS = ('space', 'enter', 'tab', 'backspace')
 NOT_SET_TEXT = "Not set"
@@ -56,12 +55,6 @@ def find_binding_problems(hotkey_bindings: dict) -> list:
             if action in ACTIONS_NEEDING_MODIFIER and len(keys) == 1 and _is_typing_key(keys[0]):
                 problems.append(f"{ACTION_LABELS[action]} needs a modifier with {beautify_hotkey(binding)} (it would fire while typing)")
     return problems
-
-
-def build_combination(pressed_keys: list) -> str:
-    modifiers = [key for key in MODIFIER_ORDER if key in pressed_keys]
-    other_keys = [key for key in pressed_keys if key not in MODIFIER_ORDER]
-    return '+'.join(modifiers + other_keys)
 
 
 class ShortcutManagerWindow:
@@ -136,7 +129,7 @@ class ShortcutManagerWindow:
             root.mainloop()
         finally:
             if editor:
-                editor.end_capture()
+                editor.key_capture.end()
             try:
                 root.destroy()
             except tk.TclError:
@@ -152,7 +145,6 @@ class _ShortcutEditor:
         self.saved_bindings = self._copy_bindings(window.get_hotkey_bindings())
         self.bindings = self._copy_bindings(self.saved_bindings)
         self.default_bindings = self._copy_bindings(window.get_default_hotkey_bindings())
-        self.capture = None
         self.binding_buttons = {}
         self.clear_buttons = {}
 
@@ -201,15 +193,14 @@ class _ShortcutEditor:
         self.save_button.pack(side=tk.RIGHT)
         ttk.Button(button_row, text="Cancel", command=self._close).pack(side=tk.RIGHT, padx=(0, 8))
 
-        root.bind("<KeyPress>", self._on_key_press)
-        root.bind("<KeyRelease>", self._on_key_release)
-        root.bind("<FocusOut>", self._on_focus_out)
+        self.key_capture = KeyCapture(root, self.window.pause_hotkeys, self.window.resume_hotkeys,
+                                      self.window.key_name_for_virtual_key, self._refresh)
         root.protocol("WM_DELETE_WINDOW", self._close)
 
     def _refresh(self):
         for (action, slot), binding_button in self.binding_buttons.items():
             binding = self.bindings[action][slot]
-            capturing = self.capture is not None and self.capture['target'] == (action, slot)
+            capturing = self.key_capture.target == (action, slot)
             binding_button.config(text=CAPTURE_TEXT if capturing else (beautify_hotkey(binding) or NOT_SET_TEXT))
             self.clear_buttons[(action, slot)].config(state=tk.NORMAL if binding else tk.DISABLED)
 
@@ -217,7 +208,7 @@ class _ShortcutEditor:
         self._show_message(self.problem_label, "\n".join(problems))
         disabled_actions = [ACTION_LABELS[action] for action, bindings in self.bindings.items() if not any(bindings)]
         self._show_message(self.hint_label, f"No shortcut, disabled: {', '.join(disabled_actions)}" if disabled_actions else "")
-        can_save = not problems and self.bindings != self.saved_bindings and self.capture is None
+        can_save = not problems and self.bindings != self.saved_bindings and not self.key_capture.is_active
         self.save_button.config(state=tk.NORMAL if can_save else tk.DISABLED)
 
     def _show_message(self, label, text: str):
@@ -228,91 +219,28 @@ class _ShortcutEditor:
             label.grid_remove()
 
     def _set_binding(self, action: str, slot: int, binding: str):
-        self.end_capture()
+        self.key_capture.end()
         self.bindings[action][slot] = binding
         self._refresh()
 
     def _reset_action(self, action: str):
-        self.end_capture()
+        self.key_capture.end()
         self.bindings[action] = list(self.default_bindings[action])
         self._refresh()
 
     def _restore_all_defaults(self):
-        self.end_capture()
+        self.key_capture.end()
         self.bindings = self._copy_bindings(self.default_bindings)
         self._refresh()
 
     def _toggle_capture(self, action: str, slot: int):
-        previous_target = self.capture['target'] if self.capture else None
-        self.end_capture()
-        if previous_target != (action, slot):
-            self._start_capture(action, slot)
-        self._refresh()
+        self.key_capture.toggle((action, slot), lambda combination: self._store_binding(action, slot, combination))
 
-    def _start_capture(self, action: str, slot: int):
-        try:
-            self.window.pause_hotkeys()
-        except Exception as e:
-            self.logger.error(f"Failed to pause hotkeys for recording a shortcut: {e}")
-            return
-        self.capture = {'target': (action, slot), 'held_keys': set(), 'pressed_keys': []}
-        self.root.focus_force()
-
-    def end_capture(self):
-        if self.capture is None:
-            return
-        self.capture = None
-        try:
-            self.window.resume_hotkeys()
-        except Exception as e:
-            self.logger.error(f"Failed to resume hotkeys after recording a shortcut: {e}")
-
-    def _finish_capture(self):
-        action, slot = self.capture['target']
-        combination = build_combination(self.capture['pressed_keys'])
-        self.end_capture()
-        if combination:
-            self.bindings[action][slot] = combination
-        self._refresh()
-
-    def _on_key_press(self, event):
-        if self.capture is None:
-            return None
-        key_name = self.window.key_name_for_virtual_key(event.keycode)
-        if not key_name:
-            self.logger.info(f"Unsupported key for shortcuts: keycode={event.keycode} keysym={event.keysym}")
-            return "break"
-        self.capture['held_keys'].add(key_name)
-        if key_name not in self.capture['pressed_keys']:
-            self.capture['pressed_keys'].append(key_name)
-        return "break"
-
-    def _on_key_release(self, event):
-        if self.capture is None:
-            return None
-        key_name = self.window.key_name_for_virtual_key(event.keycode)
-        if key_name not in self.capture['held_keys']:
-            return "break"
-        self.capture['held_keys'].discard(key_name)
-        if not self.capture['held_keys']:
-            self._finish_capture()
-        return "break"
-
-    def _on_focus_out(self, event):
-        if self.capture is not None:
-            self.root.after(FOCUS_CHECK_DELAY_MS, self._end_capture_if_window_inactive)
-
-    def _end_capture_if_window_inactive(self):
-        if self.capture is None or self.root.focus_get() is not None:
-            return
-        if self.capture['pressed_keys']:
-            self._finish_capture()
-        else:
-            self.end_capture()
-            self._refresh()
+    def _store_binding(self, action: str, slot: int, combination: str):
+        self.bindings[action][slot] = combination
 
     def _save(self):
-        self.end_capture()
+        self.key_capture.end()
         if find_binding_problems(self.bindings):
             self._refresh()
             return
@@ -325,7 +253,7 @@ class _ShortcutEditor:
         self._close()
 
     def _close(self):
-        self.end_capture()
+        self.key_capture.end()
         self.root.quit()
 
     def _process_command_queue(self):
