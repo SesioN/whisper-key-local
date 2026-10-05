@@ -166,6 +166,7 @@ whisper: # Whisper AI Model Settings
             onnx_model_type: speech-llm
             quantization: int8
             directml: false # int8 runs faster on the CPU than with DirectML
+            max_chunk_seconds: 14 # the int8 decoder can return empty text for clips over ~15 s
             label: "Qwen3-ASR-1.7B int8 (30 languages, 2.4GB)"
             group: onnx
             enabled: true

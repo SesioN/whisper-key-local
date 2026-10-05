@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Added
 - **Voice commands from normal recordings** - with `voice_commands.match_in_dictation: true`, a normal recording whose text contains a command trigger runs that command instead of being pasted; anything else is pasted as usual. Switch it on in the tray menu (**Voice commands in normal recordings**) or with `voice_commands.match_in_dictation: true`
 
+### Fixed
+- **Qwen3-ASR int8 no longer drops long dictations** - its audio is split into chunks of at most 14 s (new per-model `max_chunk_seconds`, default 28 s), because the int8 decoder can return empty text for clips over ~15 s; an empty chunk that contains speech is logged as a warning
+
 ## [1.2.0] - 2026-10-06
 
 ### Changed
