@@ -74,6 +74,11 @@ class SwitchableFloatingWidget:
             if isinstance(self._widget, VoiceOrb):
                 self._widget.set_locked(locked)
 
+    def set_orb_buttons(self, show_lock_button: bool, show_mute_button: bool):
+        with self._switch_lock:
+            if isinstance(self._widget, VoiceOrb):
+                self._widget.set_buttons(show_lock_button, show_mute_button)
+
     def set_orb_hide_on_fullscreen(self, hide_on_fullscreen: bool):
         with self._switch_lock:
             if isinstance(self._widget, VoiceOrb):

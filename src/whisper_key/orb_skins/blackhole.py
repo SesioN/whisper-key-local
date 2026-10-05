@@ -19,6 +19,10 @@ class BlackHoleSkin(OrbSkin):
 
     CANVAS_FACTOR = 2.1
     VISUAL_SCALE = 1.4
+
+    BADGE_FILL = (14, 8, 6)
+    BADGE_RING = COLOR_DISK_INNER
+    BADGE_GLYPH = COLOR_RING
     SUPERSAMPLE = 2
 
     TILT = 0.52

@@ -631,6 +631,12 @@ class StateManager:
     def update_orb_locked(self, locked: bool):
         self.config_manager.update_user_setting('floating_widget', 'locked', locked)
         self.floating_widget.set_orb_locked(locked)
+        self.system_tray.refresh_menu()
+
+    def update_orb_buttons(self, show_lock_button: bool, show_mute_button: bool):
+        self.config_manager.update_user_setting('floating_widget', 'orb_lock_button', show_lock_button)
+        self.config_manager.update_user_setting('floating_widget', 'orb_mute_button', show_mute_button)
+        self.floating_widget.set_orb_buttons(show_lock_button, show_mute_button)
 
     def update_orb_hide_on_fullscreen(self, hide_on_fullscreen: bool):
         self.config_manager.update_user_setting('floating_widget', 'orb_hide_on_fullscreen', hide_on_fullscreen)

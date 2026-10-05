@@ -238,7 +238,11 @@ def setup_floating_widget(config_manager, state_manager):
             save_position=floating_widget_config['save_position'],
             position=floating_widget_config['orb_position'],
             locked=floating_widget_config['locked'],
-            hide_on_fullscreen=floating_widget_config['orb_hide_on_fullscreen']
+            hide_on_fullscreen=floating_widget_config['orb_hide_on_fullscreen'],
+            on_lock_click=state_manager.update_orb_locked,
+            on_mute_click=state_manager.toggle_mute,
+            show_lock_button=floating_widget_config['orb_lock_button'],
+            show_mute_button=floating_widget_config['orb_mute_button']
         )
 
     return SwitchableFloatingWidget(

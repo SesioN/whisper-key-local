@@ -28,6 +28,10 @@ class OrbSkin:
     HANDLES_OUTCOMES = False
     IDLE_FPS = None
 
+    BADGE_FILL = (16, 18, 24)
+    BADGE_RING = (200, 204, 214)
+    BADGE_GLYPH = (236, 238, 244)
+
     def __init__(self, canvas: int, orb_radius: float):
         self.canvas = canvas
 
@@ -50,6 +54,9 @@ class OrbSkin:
 
     def shade(self, state: str, level: float, t: float):
         raise NotImplementedError
+
+    def badge_colors(self, state: str):
+        return self.BADGE_FILL, self.BADGE_RING, self.BADGE_GLYPH
 
     def _downsample(self, a):
         s = self.ss

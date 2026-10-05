@@ -20,6 +20,12 @@ class BlobSkin(OrbSkin):
     HARMONIC_SPEED = (0.61, -0.43, 0.29, -0.19)
     HARMONIC_WEIGHT = (0.055, 0.038, 0.026, 0.017)
 
+    def badge_colors(self, state: str):
+        if self.BADGE_RING is not OrbSkin.BADGE_RING:
+            return super().badge_colors(state)
+        fill = tuple(int(channel * 0.16) for channel in self.COLOR_EDGE)
+        return fill, self.COLOR_MID, self.COLOR_CORE
+
     def __init__(self, canvas: int, orb_radius: float):
         super().__init__(canvas, orb_radius)
         self.light = np.clip((-self.dx - self.dy) / (2.0 * self.r0) * 0.5 + 0.5, 0.0, 1.0)

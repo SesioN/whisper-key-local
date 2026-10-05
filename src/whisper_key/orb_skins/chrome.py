@@ -17,6 +17,10 @@ class ChromeSkin(BlobSkin):
     LABEL = "Chrome"
 
     CANVAS_FACTOR = 2.0
+
+    BADGE_FILL = (38, 44, 56)
+    BADGE_RING = COLOR_RIM
+    BADGE_GLYPH = COLOR_SKY
     SUPERSAMPLE = 2
 
     HARMONIC_WEIGHT = (0.032, 0.022, 0.014, 0.009)
