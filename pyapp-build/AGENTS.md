@@ -27,4 +27,7 @@ are not included (the source is taken from `git archive HEAD`). Building the whe
 access for the build dependencies. Each commit installs into its own pyapp directory; `whisper-key self update`
 replaces the branch build with the latest PyPI release once a newer one exists.
 
+`-Release` (with `-FromSource`) gives the embedded wheel the plain `pyproject.toml` version instead of
+`<version>+g<commit>`. The GitHub release workflow uses it for tagged builds.
+
 Produces three executables: `whisper-key.exe` (console), `whisper-key-hideable.exe` (GUI subsystem, for start_hidden/minimize-to-tray) and `whisper-key-no-term.exe` (GUI subsystem, never opens a console; only the loading screen, tray and widget are visible).

@@ -2,7 +2,8 @@ param(
     [string]$ProjectRoot = (Split-Path -Parent $PSScriptRoot),
     [string]$AppName = "whisper-key",
     [switch]$Clean,
-    [switch]$FromSource
+    [switch]$FromSource,
+    [switch]$Release
 )
 
 function Get-ResolvedPath {
@@ -42,7 +43,7 @@ function Build-SourceWheel {
         Write-Host "Warning: uncommitted changes are not included (building commit $Commit)" -ForegroundColor Yellow
     }
 
-    $WheelVersion = "$AppVersion+g$Commit"
+    $WheelVersion = if ($Release) { $AppVersion } else { "$AppVersion+g$Commit" }
     $StagingDir = Join-Path ([System.IO.Path]::GetTempPath()) "whisper-key-wheel-$([guid]::NewGuid())"
     $WheelDir = Join-Path $DistPath "wheel"
     if (Test-Path $WheelDir) { Remove-Item -Recurse -Force $WheelDir }
