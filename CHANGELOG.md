@@ -4,6 +4,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+- **Voice commands from normal recordings** - with `voice_commands.match_in_dictation: true`, a normal recording whose text contains a command trigger runs that command instead of being pasted; anything else is pasted as usual. Switch it on in the tray menu (**Voice commands in normal recordings**) or with `voice_commands.match_in_dictation: true`
+
 ## [1.2.0] - 2026-10-06
 
 ### Changed

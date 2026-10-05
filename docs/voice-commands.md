@@ -112,3 +112,13 @@ hotkey:
 - **auto_send_key** — same as stop key, but also sends Enter after `type` commands (ignored for `run` and `hotkey`)
 
 Both keys are shared between transcription and command modes.
+
+## Commands from normal recordings
+
+By default only the command hotkey runs voice commands. To check normal recordings too, switch on **Voice commands in normal recordings** in the tray menu (Output section), or set this in `user_settings.yaml`:
+```yaml
+voice_commands:
+  match_in_dictation: true
+```
+
+Each normal recording is then matched against your triggers first (same rules as in [Matching](#matching)). If a trigger matches, its command runs and nothing is pasted; otherwise the text is pasted as usual. This applies to voice-activated recordings as well, unless `vad.auto_trigger_paste` is `false` (clipboard only). Because triggers match as substrings, dictated sentences that contain a short trigger such as "undo" will run that command, so use distinctive trigger phrases when this is on.

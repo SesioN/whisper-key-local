@@ -188,7 +188,8 @@ def setup_voice_commands(voice_commands_config, clipboard_manager, log_transcrip
     return VoiceCommandManager(
         enabled=voice_commands_config['enabled'],
         clipboard_manager=clipboard_manager,
-        log_transcriptions=log_transcriptions
+        log_transcriptions=log_transcriptions,
+        match_in_dictation=voice_commands_config.get('match_in_dictation', False)
     )
 
 def setup_loading_screen(loading_screen_config):
