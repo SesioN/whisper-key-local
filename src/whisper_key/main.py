@@ -120,18 +120,26 @@ def setup_streaming(streaming_config, model_registry):
         model_registry=model_registry
     )
 
+def create_ready_engine(engine_type, whisper_config, vad_manager, model_registry):
+    engine = create_whisper_engine(engine_type, whisper_config, vad_manager, model_registry)
+    try:
+        engine.warm_up()
+    except Exception:
+        engine.close()
+        raise
+    return engine
+
 def setup_whisper_engine(whisper_config, vad_manager, model_registry, config_manager=None, loading_screen=None):
+    if not model_registry.is_known_model(whisper_config['model']):
+        logging.getLogger(__name__).warning(f"Unknown model [{whisper_config['model']}] in settings, falling back to [tiny]")
+        print(f"\n⚠️ Unknown model [{whisper_config['model']}], using the Tiny model for this session.\n")
+        whisper_config = {**whisper_config, 'model': 'tiny'}
     if model_registry.get_engine_family(whisper_config['model']) == ONNX_FAMILY:
         return _setup_onnx_engine(whisper_config, vad_manager, model_registry)
     whisper_config = apply_runtime_selection(whisper_config)
     engine_type = whisper_config['engine_type']
     try:
-        return create_whisper_engine(
-            engine_type=engine_type,
-            whisper_config=whisper_config,
-            vad_manager=vad_manager,
-            model_registry=model_registry,
-        )
+        return create_ready_engine(engine_type, whisper_config, vad_manager, model_registry)
     except (RuntimeError, OSError) as e:
         if engine_type == 'whisper_cpp':
             return _handle_whisper_cpp_failure(e, whisper_config, vad_manager, model_registry)
@@ -334,7 +342,7 @@ def run_gpu_onboarding(config_manager, whisper_config):
 def _setup_onnx_engine(whisper_config, vad_manager, model_registry):
     onnx_config = apply_onnx_runtime_selection(whisper_config)
     try:
-        return create_whisper_engine(ONNX_ASR, onnx_config, vad_manager, model_registry)
+        return create_ready_engine(ONNX_ASR, onnx_config, vad_manager, model_registry)
     except Exception as e:
         logging.getLogger(__name__).error(f"ONNX engine failed to start: {e}")
         print(f"\n❌ ONNX model [{whisper_config['model']}] unavailable: {e}")

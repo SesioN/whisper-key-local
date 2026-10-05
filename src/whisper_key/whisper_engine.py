@@ -37,6 +37,7 @@ class WhisperEngine:
 
         self._loading_thread = None
         self._progress_callback = None
+        self._warmed_model = None
 
         self.vad_manager = vad_manager
 
@@ -52,7 +53,7 @@ class WhisperEngine:
 
     def _get_model_source(self, model_key: str) -> str:
         if self.registry:
-            return self.registry.get_source(model_key)
+            return self.registry.get_load_source(model_key)
         return model_key
 
     def _is_model_cached(self, model_key: str = None) -> bool:
@@ -71,11 +72,13 @@ class WhisperEngine:
                 print("Downloading model, this may take a few minutes....")
 
             model_source = self._get_model_source(self.model_key)
-            self.model = WhisperModel(
+            model = WhisperModel(
                 model_source,
                 device=self.device,
                 compute_type=self.compute_type
             )
+            self._warm_up_model(model)
+            self.model = model
 
             if not was_cached:
                 print("\n")  # Workaround for download status bar misplacement
@@ -98,18 +101,33 @@ class WhisperEngine:
         self._load_model()
 
     def warm_up(self):
-        segments, _ = self.model.transcribe(np.zeros(16000, dtype=np.float32), beam_size=1, language=self.language or "en")
+        if self._warmed_model is not self.model:
+            self._warm_up_model(self.model)
+
+    def _warm_up_model(self, model):
+        segments, _ = model.transcribe(np.zeros(16000, dtype=np.float32), beam_size=1, language=self._warm_up_language())
         list(segments)
+        self._warmed_model = model
+
+    def _warm_up_language(self) -> str:
+        if self._is_english_only(self.model_key):
+            return "en"
+        return self.language or "en"
+
+    def _is_english_only(self, model_key: str) -> bool:
+        if self.registry:
+            return self.registry.is_english_only(model_key)
+        return model_key.endswith(".en")
 
     def _load_model_async(self,
                           new_model_key: str,
                           progress_callback: Optional[Callable[[str], None]] = None):
         def _background_loader():
+            old_model_key = self.model_key
             try:
                 if progress_callback:
                     progress_callback("Checking model cache...")
 
-                old_model_key = self.model_key
                 was_cached = self._is_model_cached(new_model_key)
 
                 if progress_callback:
@@ -126,9 +144,11 @@ class WhisperEngine:
                     device=self.device,
                     compute_type=self.compute_type
                 )
-                self.model = new_model
-
+                if progress_callback:
+                    progress_callback("Warming up model...")
                 self.model_key = new_model_key
+                self._warm_up_model(new_model)
+                self.model = new_model
                 self.logger.info(f"Whisper model [{new_model_key}] loaded successfully (async)")
 
                 if progress_callback:
@@ -139,7 +159,6 @@ class WhisperEngine:
                 self.logger.error(f"Failed to load Whisper model async: {e}")
                 if progress_callback:
                     progress_callback(f"Failed to load model: {e}")
-                raise
             finally:
                 self._loading_thread = None
                 self._progress_callback = None
@@ -184,7 +203,7 @@ class WhisperEngine:
             
             transcribe_kwargs = dict(
                 beam_size=self.beam_size,
-                language=self.language,
+                language="en" if self._is_english_only(self.model_key) else self.language,
                 condition_on_previous_text=False,
             )
             if self._model_supports_prompt():
