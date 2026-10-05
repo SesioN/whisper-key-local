@@ -31,6 +31,9 @@ def beautify_hotkey(hotkey_string: str) -> str:
 
     return hotkey_string.replace('+', '+').upper()
 
+def beautify_hotkey_bindings(hotkey_bindings: list) -> str:
+    return " / ".join(beautify_hotkey(binding) for binding in hotkey_bindings if binding)
+
 def parse_hotkey(hotkey_string: str) -> list:
     if not hotkey_string:
         return []

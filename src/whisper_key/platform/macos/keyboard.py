@@ -41,6 +41,10 @@ def validate_delivery_method(method: str) -> str:
     return method
 
 
+def is_foreground_input_blocked() -> bool:
+    return False
+
+
 def set_delay(delay: float):
     global _delay
     _delay = delay
@@ -70,6 +74,10 @@ def send_key(key: str):
     event = CGEventCreateKeyboardEvent(None, key_code, False)
     CGEventSetFlags(event, 0)
     CGEventPost(kCGHIDEventTap, event)
+
+
+def can_send_key(key: str) -> bool:
+    return key.lower() in MODIFIER_FLAGS or key.lower() in KEY_CODES
 
 
 def send_hotkey(*keys: str):

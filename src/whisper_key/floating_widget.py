@@ -105,6 +105,9 @@ class FloatingWidget:
         self.muted = muted
         self._send_to_window(REFRESH_MUTE)
 
+    def show_outcome(self, outcome: str):
+        pass
+
     def set_size(self, size: str):
         if size not in SIZES:
             return

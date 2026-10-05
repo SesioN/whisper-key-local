@@ -4,6 +4,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-05
+
+### Added
+- **Modern tray menu** - left or right click on the tray icon opens a Windows 11 style flyout (rounded corners, light/dark theme, accent colour, switches and segmented buttons) grouped into Recording, Output and Setup, with drill-in pages for Model, Microphone, Floating button and Files and logs. Status line and mute button at the top, keyboard navigation, scrolls when taller than the screen. Toggles and options apply without closing the menu (Windows; macOS keeps the native menu with the same structure)
+- **Orb skin picker** - **Floating button > Orb skin** shows a live preview of every skin; clicking one switches the orb immediately and the menu stays open to try the next (Windows)
+- **Large-V3-Turbo German model** - `large-v3-turbo-german` in the model menu: a CTranslate2 conversion of primeline/whisper-large-v3-turbo-german, fine-tuned for German transcription
+- **`supports_prompt: false` per model** - skips `initial_prompt` and `hotwords` for models that repeat or derail with them, such as TheStageAI's TheWhisper (faster-whisper and whisper.cpp)
+- **Recording mode in the tray** - switch between toggle and push-to-talk from the tray **Recording mode** menu; the hotkeys are re-registered right away
+- **Start with Windows** - tray toggle that registers Whisper Key in the per-user Run key; it uses `whisper-key-no-term.exe` when available and shows up in Task Manager's Startup tab (Windows)
+- **`python -m whisper_key`** starts the app
+- **Voice orb** - new `floating_widget.style: orb`: an animated, always-on-top orb that reacts to your voice level, with six looks (gold, silver, chrome, glass, aurora, black hole). Click to record, drag to move, scroll to resize, lock it and hide it in fullscreen apps from the tray. Switch between button and orb at runtime (Windows)
+- **Voice commands window** - tray **Voice commands...** lists, adds, edits, reorders and deletes voice commands; records hotkey actions by pressing the keys, test-runs a command, shows which command a phrase would trigger, and saves `commands.yaml` with its comments intact, applied without a restart. New optional `enabled: false` field switches a command off (Windows)
+- **Orb lock and mute buttons** - hovering the voice orb fades in two small buttons in the skin's colours: lock/unlock its position and mute/unmute the microphone. Each can be hidden from the tray (`orb_lock_button`, `orb_mute_button`) (Windows)
+- **Nebula orb skin** - an energy-vortex orb with its own look for idle, recording (live waveform), processing (spiral), muted (glass sphere) and new short success ✓ / error ! states shown after a transcription or voice command; other skins flash white on success and red on error (Windows)
+- **Hotkey voice commands accept F13-F24 and `page_up` / `page_down`**
+- **Shortcuts window** - tray **Shortcuts...** lists every hotkey; record a primary and a secondary binding per action by pressing the keys, unset or reset them, and apply them without a restart. Duplicate bindings are blocked (Windows)
+
+### Changed
+- **Hotkeys take two bindings** - `recording_hotkey`, `command_hotkey`, `stop_key`, `auto_send_key` and `cancel_combination` are now `[primary, secondary]` lists; single-string values from older settings are still read as the primary binding. A binding already used by an earlier action is disabled at startup; an action left with no binding falls back to its default
+
+### Fixed
+- **Voice orb skins share one size** - aurora, black hole and nebula drew noticeably smaller than the other skins; every skin now looks the same size at each orb size, so switching skins no longer changes it (Windows)
+- **Voice orb dragging is smooth** - the orb now follows the cursor at display rate instead of the animation frame rate (as low as 8 fps when idle) (Windows)
+- **Auto-paste into apps running as administrator** - Windows silently drops the simulated input, so the app reported "Auto-pasted" while nothing arrived. The text now stays on the clipboard and a tray notification asks you to paste with Ctrl+V (Windows)
+
 ## [1.0.0] - 2026-10-05
 
 First release of the independent fork [SesioN/whisper-key-local](https://github.com/SesioN/whisper-key-local),

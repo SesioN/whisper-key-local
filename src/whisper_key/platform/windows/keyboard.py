@@ -2,6 +2,26 @@ import ctypes
 import ctypes.wintypes as wintypes
 
 user32 = ctypes.windll.user32
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+
+user32.GetForegroundWindow.restype = wintypes.HWND
+user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.DWORD))
+user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+kernel32.OpenProcess.restype = wintypes.HANDLE
+kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+advapi32.OpenProcessToken.argtypes = (wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE))
+advapi32.GetTokenInformation.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD))
+advapi32.GetSidSubAuthorityCount.argtypes = (ctypes.c_void_p,)
+advapi32.GetSidSubAuthorityCount.restype = ctypes.POINTER(ctypes.c_ubyte)
+advapi32.GetSidSubAuthority.argtypes = (ctypes.c_void_p, wintypes.DWORD)
+advapi32.GetSidSubAuthority.restype = ctypes.POINTER(wintypes.DWORD)
+
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+TOKEN_QUERY = 0x0008
+TOKEN_INTEGRITY_LEVEL = 25
 
 INPUT_KEYBOARD = 1
 KEYEVENTF_KEYUP = 0x0002
@@ -77,6 +97,12 @@ for c in "abcdefghijklmnopqrstuvwxyz":
     VK_MAP[c] = ord(c.upper())
 for d in "0123456789":
     VK_MAP[d] = ord(d)
+for function_key_number in range(1, 25):
+    VK_MAP[f"f{function_key_number}"] = 0x6F + function_key_number
+VK_MAP.update({"page_up": 0x21, "page_down": 0x22, "del": 0x2E})
+
+def can_send_key(key: str) -> bool:
+    return key.lower() in VK_MAP
 
 def _make_vk_input(vk, flags=0):
     inp = INPUT()
@@ -99,6 +125,49 @@ def _send(inputs):
     n = len(inputs)
     array = (INPUT * n)(*inputs)
     user32.SendInput(n, array, ctypes.sizeof(INPUT))
+
+
+def _process_integrity_level(process_handle):
+    token = wintypes.HANDLE()
+    if not advapi32.OpenProcessToken(process_handle, TOKEN_QUERY, ctypes.byref(token)):
+        return None
+    try:
+        buffer = ctypes.create_string_buffer(64)
+        returned = wintypes.DWORD()
+        if not advapi32.GetTokenInformation(token, TOKEN_INTEGRITY_LEVEL, buffer, len(buffer), ctypes.byref(returned)):
+            return None
+        sid = ctypes.cast(buffer, ctypes.POINTER(ctypes.c_void_p))[0]
+        count = advapi32.GetSidSubAuthorityCount(sid)[0]
+        return advapi32.GetSidSubAuthority(sid, count - 1)[0]
+    finally:
+        kernel32.CloseHandle(token)
+
+
+def is_foreground_input_blocked() -> bool:
+    hwnd = user32.GetForegroundWindow()
+    if not hwnd:
+        return False
+
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    if not pid.value:
+        return False
+
+    own_level = _process_integrity_level(kernel32.GetCurrentProcess())
+    if own_level is None:
+        return False
+
+    process = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+    if not process:
+        return True
+    try:
+        target_level = _process_integrity_level(process)
+    finally:
+        kernel32.CloseHandle(process)
+
+    if target_level is None:
+        return True
+    return target_level > own_level
 
 
 def validate_delivery_method(method: str) -> str:

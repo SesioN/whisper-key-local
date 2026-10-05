@@ -8,7 +8,17 @@ Voice commands are configured in `commands.yaml`, located in your config folder:
 - **Windows:** `%APPDATA%\whisperkey\commands.yaml`
 - **macOS:** `~/.whisperkey/commands.yaml`
 
-You can open this file from the system tray menu: **Open commands file...**.
+You can open this file from the system tray menu: **Files and logs > Commands file**.
+
+### Voice commands window (Windows)
+
+Tray **Voice commands...** lists every command and edits them without touching the file:
+
+- Add, duplicate, delete and reorder commands; switch each one on or off
+- Hotkey commands: click the key button and press the shortcut to record it
+- **Test** minimizes the window and runs the selected command after 1 s in the app you return to (shell commands ask first)
+- **Phrase to test** shows which command a sentence would trigger
+- **Save** writes `commands.yaml` (comments are kept) and applies the changes without a restart
 
 ## Format
 
@@ -35,6 +45,7 @@ commands:
 | **run** | Shell command (`cmd.exe` on Windows, `/bin/sh` on macOS) |
 | **hotkey** | Keyboard shortcut to send (e.g. `ctrl+z`, `win+left`) |
 | **type** | Pre-written text to deliver to the active window |
+| **enabled** | Optional; `false` keeps the command but never matches it |
 
 ## Matching
 

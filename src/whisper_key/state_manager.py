@@ -115,6 +115,9 @@ class StateManager:
         self.terminal_title.update_state(state)
         self.floating_widget.update_state(state)
 
+    def _show_outcome(self, outcome: str):
+        self.floating_widget.show_outcome(outcome)
+
     def handle_max_recording_duration_reached(self, audio_data):
         self.logger.info("Max recording duration reached - starting transcription")
         self._transcription_pipeline(audio_data, use_auto_enter=False)
@@ -389,7 +392,8 @@ class StateManager:
             self._log_transcription(transcribed_text)
 
             if command_mode:
-                self._handle_command_transcription(transcribed_text, use_auto_enter)
+                command_ok = self._handle_command_transcription(transcribed_text, use_auto_enter)
+                self._show_outcome("success" if command_ok else "error")
                 return
 
             if auto_triggered and not self._auto_trigger_paste:
@@ -402,10 +406,12 @@ class StateManager:
             if success:
                 self.last_transcription = transcribed_text
                 self.audio_feedback.play_transcription_complete_sound()
-            
+            self._show_outcome("success" if success else "error")
+
         except Exception as e:
             self.logger.error(f"Error in processing workflow: {e}")
             print(f"❌ Error processing recording: {e}")
+            self._show_outcome("error")
         
         finally:
             with self._state_lock:
@@ -447,16 +453,16 @@ class StateManager:
         else:
             self.logger.info(f"Transcribed {len(text)} chars")
 
-    def _handle_command_transcription(self, text: str, use_auto_enter: bool = False):
+    def _handle_command_transcription(self, text: str, use_auto_enter: bool = False) -> bool:
         if not self.voice_command_manager.enabled:
             self.logger.warning("Voice commands disabled")
-            return
+            return False
 
         matched = self.voice_command_manager.match_command(text)
         if matched:
-            self.voice_command_manager.execute_command(matched, use_auto_enter)
-        else:
-            print("   ✗ No matching command found")
+            return self.voice_command_manager.execute_command(matched, use_auto_enter)
+        print("   ✗ No matching command found")
+        return False
 
     def get_application_state(self) -> dict:
         status = {
@@ -606,6 +612,35 @@ class StateManager:
 
     def save_floating_widget_locked(self, locked: bool):
         self.config_manager.update_user_setting('floating_widget', 'locked', locked)
+
+    def save_floating_widget_size(self, size: str):
+        self.config_manager.update_user_setting('floating_widget', 'size', size)
+        self.system_tray.refresh_menu()
+
+    def save_orb_position(self, position: str):
+        self.config_manager.update_user_setting('floating_widget', 'orb_position', position)
+
+    def update_floating_widget_style(self, style: str):
+        self.config_manager.update_user_setting('floating_widget', 'style', style)
+        self.floating_widget.set_style(style)
+
+    def update_orb_skin(self, skin: str):
+        self.config_manager.update_user_setting('floating_widget', 'orb_skin', skin)
+        self.floating_widget.set_orb_skin(skin)
+
+    def update_orb_locked(self, locked: bool):
+        self.config_manager.update_user_setting('floating_widget', 'locked', locked)
+        self.floating_widget.set_orb_locked(locked)
+        self.system_tray.refresh_menu()
+
+    def update_orb_buttons(self, show_lock_button: bool, show_mute_button: bool):
+        self.config_manager.update_user_setting('floating_widget', 'orb_lock_button', show_lock_button)
+        self.config_manager.update_user_setting('floating_widget', 'orb_mute_button', show_mute_button)
+        self.floating_widget.set_orb_buttons(show_lock_button, show_mute_button)
+
+    def update_orb_hide_on_fullscreen(self, hide_on_fullscreen: bool):
+        self.config_manager.update_user_setting('floating_widget', 'orb_hide_on_fullscreen', hide_on_fullscreen)
+        self.floating_widget.set_orb_hide_on_fullscreen(hide_on_fullscreen)
 
     def _ggml_model_dir(self) -> Optional[str]:
         return with_whisper_cpp_paths(self.config_manager.get_whisper_config()).get('cpp_model_dir')

@@ -14,7 +14,7 @@ import signal
 import sys
 import threading
 
-from .platform import app, permissions, console, IS_WINDOWS
+from .platform import app, permissions, console, autostart, IS_WINDOWS
 from .config_manager import ConfigManager
 from .audio_recorder import AudioRecorder
 from .hotkey_listener import HotkeyListener
@@ -34,7 +34,7 @@ from .voice_commands import VoiceCommandManager
 from .hardware_detection import detect_and_print as detect_hardware
 from .onboarding import check_gpu
 from .update_checker import check_for_updates
-from .utils import get_user_app_data_path, get_version, OptionalComponent, prune_stale_pyapp_envs
+from .utils import get_user_app_data_path, get_version, OptionalComponent, prune_stale_pyapp_envs, open_file
 
 def setup_logging(config_manager: ConfigManager):
     log_config = config_manager.get_logging_config()
@@ -203,23 +203,51 @@ def setup_system_tray(tray_config, config_manager, state_manager, model_registry
         console_config=console_config
     )
 
-def setup_floating_widget(floating_widget_config, state_manager):
+def setup_floating_widget(config_manager, state_manager):
     if not IS_WINDOWS:
         return None
     try:
         from .floating_widget import FloatingWidget
+        from .voice_orb import VoiceOrb
+        from .switchable_floating_widget import SwitchableFloatingWidget
     except ImportError as e:
         logging.getLogger(__name__).warning(f"Floating widget not available: {e}")
         return None
-    return FloatingWidget(
-        on_click=state_manager.toggle_recording,
-        on_position_changed=state_manager.save_floating_widget_position,
-        on_mute_click=state_manager.toggle_mute,
-        on_lock_changed=state_manager.save_floating_widget_locked,
-        size=floating_widget_config['size'],
-        save_position=floating_widget_config['save_position'],
-        position=floating_widget_config['position'],
-        locked=floating_widget_config['locked']
+
+    def create_button():
+        floating_widget_config = config_manager.get_floating_widget_config()
+        return FloatingWidget(
+            on_click=state_manager.toggle_recording,
+            on_position_changed=state_manager.save_floating_widget_position,
+            on_mute_click=state_manager.toggle_mute,
+            on_lock_changed=state_manager.save_floating_widget_locked,
+            size=floating_widget_config['size'],
+            save_position=floating_widget_config['save_position'],
+            position=floating_widget_config['position'],
+            locked=floating_widget_config['locked']
+        )
+
+    def create_orb():
+        floating_widget_config = config_manager.get_floating_widget_config()
+        return VoiceOrb(
+            on_click=state_manager.toggle_recording,
+            on_position_changed=state_manager.save_orb_position,
+            on_size_changed=state_manager.save_floating_widget_size,
+            size=floating_widget_config['size'],
+            skin=floating_widget_config['orb_skin'],
+            save_position=floating_widget_config['save_position'],
+            position=floating_widget_config['orb_position'],
+            locked=floating_widget_config['locked'],
+            hide_on_fullscreen=floating_widget_config['orb_hide_on_fullscreen'],
+            on_lock_click=state_manager.update_orb_locked,
+            on_mute_click=state_manager.toggle_mute,
+            show_lock_button=floating_widget_config['orb_lock_button'],
+            show_mute_button=floating_widget_config['orb_mute_button']
+        )
+
+    return SwitchableFloatingWidget(
+        widget_factories={'button': create_button, 'orb': create_orb},
+        style=config_manager.get_floating_widget_config()['style']
     )
 
 def run_gpu_onboarding(config_manager, whisper_config):
@@ -338,22 +366,78 @@ def setup_signal_handlers(shutdown_event):
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-def setup_hotkey_listener(hotkey_config, state_manager, voice_commands_enabled=True):
+def get_active_hotkey_bindings(hotkey_bindings, voice_commands_enabled):
+    if voice_commands_enabled:
+        return hotkey_bindings
+    return {**hotkey_bindings, 'command_hotkey': []}
+
+def setup_hotkey_listener(config_manager, state_manager, voice_commands_enabled=True):
     return HotkeyListener(
         state_manager=state_manager,
-        recording_hotkey=hotkey_config['recording_hotkey'],
-        stop_key=hotkey_config['stop_key'],
-        auto_send_key=hotkey_config.get('auto_send_key'),
-        cancel_combination=hotkey_config.get('cancel_combination'),
-        command_hotkey=hotkey_config.get('command_hotkey') if voice_commands_enabled else None,
-        recording_mode=hotkey_config.get('recording_mode', 'toggle')
+        hotkey_bindings=get_active_hotkey_bindings(config_manager.get_hotkey_bindings(), voice_commands_enabled),
+        recording_mode=config_manager.get_hotkey_config()['recording_mode']
     )
+
+def setup_voice_command_manager_window(voice_command_manager, hotkey_listener, system_tray):
+    if not IS_WINDOWS or not voice_command_manager.enabled:
+        return None
+    try:
+        from .voice_command_manager_window import VoiceCommandManagerWindow
+        from .platform import hotkeys
+    except ImportError as e:
+        logging.getLogger(__name__).warning(f"Voice command manager window not available: {e}")
+        return None
+
+    def save_command_entries(command_entries):
+        voice_command_manager.save_command_entries(command_entries)
+        print(f"   ✓ Voice commands saved ({len(voice_command_manager.commands)} active)")
+
+    return VoiceCommandManagerWindow(
+        load_command_entries=voice_command_manager.load_command_entries,
+        save_command_entries=save_command_entries,
+        execute_command=voice_command_manager.execute_command,
+        open_commands_file=lambda: open_file(system_tray.get_commands_file_path()),
+        pause_hotkeys=hotkey_listener.stop_listening,
+        resume_hotkeys=hotkey_listener.start_listening,
+        key_name_for_virtual_key=hotkeys.key_name_for_virtual_key
+    )
+
+def setup_shortcut_manager_window(config_manager, hotkey_listener, voice_commands_enabled):
+    if not IS_WINDOWS:
+        return None
+    try:
+        from .shortcut_manager_window import ShortcutManagerWindow
+        from .platform import hotkeys
+    except ImportError as e:
+        logging.getLogger(__name__).warning(f"Shortcut manager window not available: {e}")
+        return None
+
+    def save_hotkey_bindings(hotkey_bindings):
+        config_manager.update_hotkey_bindings(hotkey_bindings)
+        hotkey_listener.apply_hotkey_bindings(get_active_hotkey_bindings(config_manager.get_hotkey_bindings(), voice_commands_enabled))
+        print("   ✓ Shortcuts saved")
+        config_manager.print_startup_hotkey_instructions()
+
+    return ShortcutManagerWindow(
+        get_hotkey_bindings=config_manager.get_hotkey_bindings,
+        get_default_hotkey_bindings=config_manager.get_default_hotkey_bindings,
+        on_bindings_saved=save_hotkey_bindings,
+        pause_hotkeys=hotkey_listener.stop_listening,
+        resume_hotkeys=hotkey_listener.start_listening,
+        key_name_for_virtual_key=hotkeys.key_name_for_virtual_key
+    )
+
+def change_recording_mode(config_manager, hotkey_listener, recording_mode):
+    hotkey_listener.set_recording_mode(recording_mode)
+    config_manager.update_user_setting('hotkey', 'recording_mode', recording_mode)
+    print(f"🎛️ Recording mode: {'push-to-talk' if recording_mode == 'push_to_talk' else 'toggle'}")
+    config_manager.print_startup_hotkey_instructions()
 
 def shutdown_app(hotkey_listener: HotkeyListener, state_manager: StateManager, logger: logging.Logger):
     try:
-        if hotkey_listener and hotkey_listener.is_active():
+        if hotkey_listener:
             logger.info("Stopping hotkey listener...")
-            hotkey_listener.stop_listening()
+            hotkey_listener.shutdown()
     except Exception as ex:
         logger.error(f"Error stopping hotkey listener: {ex}")
 
@@ -367,6 +451,13 @@ def prune_stale_envs_in_background(logger: logging.Logger):
             logger.info(f"Removed stale PyApp environments: {', '.join(removed)}")
     except Exception as ex:
         logger.warning(f"Could not prune stale PyApp environments: {ex}")
+
+def refresh_autostart(logger: logging.Logger):
+    try:
+        if autostart.refresh():
+            logger.info("Updated autostart entry to the current launcher")
+    except OSError as ex:
+        logger.warning(f"Could not update autostart entry: {ex}")
 
 def main():
     console.setup()
@@ -401,10 +492,10 @@ def main():
         check_for_updates(config_manager, test_mode=args.test)
         if not args.test:
             threading.Thread(target=prune_stale_envs_in_background, args=(logger,), daemon=True).start()
+        refresh_autostart(logger)
 
         whisper_config = config_manager.get_whisper_config()
         audio_config = config_manager.get_audio_config()
-        hotkey_config = config_manager.get_hotkey_config()
         clipboard_config = config_manager.get_clipboard_config()
         tray_config = config_manager.get_system_tray_config()
         audio_feedback_config = config_manager.get_audio_feedback_config()
@@ -458,10 +549,19 @@ def main():
         audio_recorder = setup_audio_recorder(audio_config, state_manager, vad_manager, streaming_manager)
         state_manager.attach_vad_sensitivity_window(setup_vad_sensitivity_window(vad_config, state_manager))
         system_tray = setup_system_tray(tray_config, config_manager, state_manager, model_registry, console_config)
-        floating_widget = setup_floating_widget(floating_widget_config, state_manager)
+        clipboard_manager.on_delivery_blocked = system_tray.notify
+        floating_widget = setup_floating_widget(config_manager, state_manager)
+        if floating_widget:
+            audio_recorder.on_audio_level = floating_widget.set_level
         state_manager.attach_components(audio_recorder, system_tray, floating_widget)
         
-        hotkey_listener = setup_hotkey_listener(hotkey_config, state_manager, voice_commands_config['enabled'])
+        hotkey_listener = setup_hotkey_listener(config_manager, state_manager, voice_commands_config['enabled'])
+        system_tray.attach_recording_mode_changer(
+            lambda mode: change_recording_mode(config_manager, hotkey_listener, mode))
+        system_tray.attach_shortcut_manager_window(
+            setup_shortcut_manager_window(config_manager, hotkey_listener, voice_commands_config['enabled']))
+        system_tray.attach_voice_command_manager_window(
+            setup_voice_command_manager_window(voice_command_manager, hotkey_listener, system_tray))
 
         state_manager.get_runtimes()
         system_tray.start()

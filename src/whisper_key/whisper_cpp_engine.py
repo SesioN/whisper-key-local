@@ -145,6 +145,7 @@ class WhisperCppEngine:
             self.logger.warning("hotwords are not supported by whisper.cpp and will be ignored")
         self.vad_manager = vad_manager
         self.registry = model_registry
+        self._prompt_skip_logged_models = set()
 
         self._binary = binary_path or find_whisper_cli()
         self._model_dir = model_dir or _find_model_dir()
@@ -265,6 +266,14 @@ class WhisperCppEngine:
                 return
         print("   ⚠ whisper-server could not be restarted, using whisper-cli (slower)")
 
+    def _active_initial_prompt(self) -> Optional[str]:
+        if not self.registry or self.registry.supports_prompt(self.model_key):
+            return self.initial_prompt
+        if self.initial_prompt and self.model_key not in self._prompt_skip_logged_models:
+            self._prompt_skip_logged_models.add(self.model_key)
+            self.logger.info(f"Model {self.model_key} has supports_prompt: false, skipping initial_prompt")
+        return None
+
     def _transcribe_with_server(self, wav_bytes: bytes, timeout: float) -> Optional[str]:
         with self._server_lock:
             server_url = self._server_url
@@ -272,8 +281,9 @@ class WhisperCppEngine:
         if not server_url:
             return None
         fields = {"response_format": "json", "language": self.language or "auto"}
-        if self.initial_prompt:
-            fields["prompt"] = self.initial_prompt
+        initial_prompt = self._active_initial_prompt()
+        if initial_prompt:
+            fields["prompt"] = initial_prompt
         body, content_type = _multipart_body(fields, "file", "audio.wav", wav_bytes)
         request = urllib.request.Request(server_url, data=body, headers={"Content-Type": content_type}, method="POST")
         try:
@@ -493,8 +503,9 @@ class WhisperCppEngine:
         ]
         if self.beam_size:
             cmd.extend(["-bs", str(self.beam_size)])
-        if self.initial_prompt:
-            cmd.extend(["--prompt", self.initial_prompt])
+        initial_prompt = self._active_initial_prompt()
+        if initial_prompt:
+            cmd.extend(["--prompt", initial_prompt])
         return cmd
 
     @staticmethod

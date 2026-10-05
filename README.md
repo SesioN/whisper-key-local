@@ -58,12 +58,19 @@ python whisper-key.py
 | Cancel recording | `Esc` | `Shift` |
 | Voice command mode | `Alt+Win` | `Fn+Command` |
 
-Open the system tray / menu bar icon to:
-- Change transcription model, runtime (CPU / CUDA / ROCm / Vulkan / ONNX) and precision
-- Select audio host and input device, or mute the microphone
-- Toggle auto-paste, copy to clipboard, audio feedback and voice-activated recording
-- Open the voice detection sensitivity window and floating button options (Windows)
-- Open the settings, commands and log files
+Click the system tray icon (Windows: left or right click opens a Windows 11 style menu that follows the light/dark theme; macOS: menu bar menu) to:
+- See the status and current model, and mute the microphone (microphone button at the top)
+- **Recording**: switch the recording mode between toggle and push-to-talk, toggle voice-activated recording and audio feedback, open the voice detection sensitivity window
+- **Output**: toggle auto-paste and copy to clipboard
+- **Model**: change the transcription model, runtime (CPU / CUDA / ROCm / Vulkan / ONNX) and precision
+- **Microphone**: select the input device and audio host
+- **Floating button** (Windows): show it, button or animated voice orb style, size, lock, hide in fullscreen apps. **Orb skin** lists every skin with a preview; clicking one applies it right away and keeps the menu open, so you can click through them
+- Manage shortcuts: record a primary and secondary binding per action, or unset one (Windows, **Shortcuts...**)
+- Manage voice commands: add, edit, test and switch them on or off (Windows, **Voice commands...**)
+- Start Whisper Key with Windows (**Start with Windows**, per-user, no admin rights; the packaged app starts without a console)
+- **Files and logs**: open the settings, commands and log files, the config folder and the model cache
+
+The Windows menu works with the keyboard too: arrow keys move, Enter selects, Left/Right switch segmented options, Esc goes back or closes.
 
 ## 🗣️ Voice Commands
 
@@ -89,7 +96,7 @@ See the **[Voice Commands Guide](docs/voice-commands.md)** for full details.
 ## ⚡ GPU Acceleration
 
 On Windows, Whisper Key detects your GPU on first launch and offers to install the matching runtime. Runtimes can be
-installed and switched later from the tray **Runtime** menu; they are stored in `%LOCALAPPDATA%\whisperkey\runtimes`.
+installed and switched later from the tray **Model > Runtime** page; they are stored in `%LOCALAPPDATA%\whisperkey\runtimes`.
 
 | Runtime | Engine | Hardware |
 |---|---|---|
@@ -115,7 +122,7 @@ Delete this file and restart app to reset to defaults.
 |--------|---------|-------|
 | **Whisper** |||
 | `whisper.model` | `tiny` | Any model defined in `whisper.models` |
-| `whisper.runtime` | `cpu` | cpu, cuda, rocm or vulkan; set from the tray Runtime menu |
+| `whisper.runtime` | `cpu` | cpu, cuda, rocm or vulkan; set from the tray Model > Runtime page |
 | `whisper.onnx_runtime` | `onnx-cpu` | onnx-cpu, onnx-directml or onnx-cuda; used by ONNX models |
 | `whisper.engine_type` | `faster_whisper` | Derived from `whisper.runtime` (vulkan selects whisper_cpp) |
 | `whisper.device` | `cpu` | cpu or cuda (NVIDIA and AMD); set from the runtime — [setup guide](docs/gpu-setup.md) |
@@ -126,17 +133,17 @@ Delete this file and restart app to reset to defaults.
 | `whisper.beam_size` | `5` | Higher = more accurate but slower (1-10) |
 | `whisper.initial_prompt` | `""` | Guide transcription style, language variant, or script |
 | `whisper.hotwords` | `[]` | Words the model should favor (names, technical terms) |
-| `whisper.models` | (see config) | Add custom HuggingFace or local models |
+| `whisper.models` | (see config) | Add custom HuggingFace or local models; `supports_prompt: false` on a model skips `initial_prompt` and `hotwords` for models that repeat or derail with them |
 | **Post-Processing** |||
 | `post_processing.strip_trailing_period` | `false` | Strip trailing period from output |
 | `post_processing.corrections` | `{}` | Fix recurring misheard words, e.g. `CAPEX: [cap x]` |
 | **Hotkeys** |||
-| `hotkey.recording_hotkey` | `ctrl+win` / `fn+ctrl` | Windows / macOS |
-| `hotkey.stop_key` | `ctrl` / `fn` | Stop recording |
-| `hotkey.auto_send_key` | `alt` / `option` | Stop + paste + Enter |
-| `hotkey.cancel_combination` | `esc` / `shift` | Cancel recording |
-| `hotkey.recording_mode` | `toggle` | toggle or push_to_talk |
-| `hotkey.command_hotkey` | `alt+win` / `fn+command` | Voice command mode |
+| `hotkey.recording_hotkey` | `[ctrl+win, ""]` / `[fn+ctrl, ""]` | Start recording. Every hotkey takes `[primary, secondary]`; `""` leaves a slot unset, an action with no bindings is disabled. Edit them from the tray **Shortcuts...** window (Windows) |
+| `hotkey.stop_key` | `[ctrl, ""]` / `[fn, ""]` | Stop recording |
+| `hotkey.auto_send_key` | `[alt, ""]` / `[option, ""]` | Stop + paste + Enter |
+| `hotkey.cancel_combination` | `[esc, ""]` / `[shift, ""]` | Cancel recording |
+| `hotkey.recording_mode` | `toggle` | toggle or push_to_talk; also switchable from the tray **Recording mode** buttons without a restart |
+| `hotkey.command_hotkey` | `[alt+win, ""]` / `[fn+command, ""]` | Voice command mode |
 | **Voice Activity Detection** |||
 | `vad.vad_precheck_enabled` | `true` | Prevent hallucinations on silence |
 | `vad.vad_onset_threshold` | `0.7` | Speech detection start (0.0-1.0) |
@@ -154,7 +161,7 @@ Delete this file and restart app to reset to defaults.
 | `audio.max_duration` | `900` | Max recording seconds (0 = unlimited) |
 | `audio.input_device` | `default` | Device ID or "default" |
 | **Clipboard** |||
-| `clipboard.auto_paste` | `true` | false = clipboard only |
+| `clipboard.auto_paste` | `true` | false = clipboard only. Windows blocks typing into apps running as administrator; then the text stays on the clipboard and a notification asks you to press Ctrl+V |
 | `clipboard.copy_to_clipboard` | `false` | Keep transcription on clipboard after auto-paste |
 | `clipboard.delivery_method` | `paste` | paste (Ctrl+V) or type (direct injection) |
 | `clipboard.paste_hotkey` | `ctrl+v` / `cmd+v` | Paste key simulation |
@@ -186,6 +193,12 @@ Delete this file and restart app to reset to defaults.
 | `floating_widget.size` | `big` | small, medium or big |
 | `floating_widget.save_position` | `false` | Restore the last dragged position on startup |
 | `floating_widget.locked` | `false` | Keep the button locked in place |
+| `floating_widget.style` | `button` | button, or orb: an animated voice orb that reacts to your voice level; click to record, drag to move, scroll to resize |
+| `floating_widget.orb_skin` | `gold` | gold, silver, chrome, glass, aurora, blackhole or nebula; nebula has its own muted look and shows a ✓ after a delivered transcription or executed voice command and a ! after a failure; glass and blackhole cost the most CPU and may drop frames to stay within the orb's CPU budget |
+| `floating_widget.orb_hide_on_fullscreen` | `true` | Hide the orb while a fullscreen application is in front |
+| `floating_widget.orb_lock_button` | `true` | Show a lock button at the orb's lower left while hovering it; click to lock or unlock its position |
+| `floating_widget.orb_mute_button` | `true` | Show a mute button at the orb's lower right while hovering it; click to mute or unmute the microphone |
+| `floating_widget.orb_position` | `null` | Last orb position (managed automatically) |
 | **Streaming Preview (experimental)** |||
 | `streaming.streaming_enabled` | `false` | Live speech preview while recording (sherpa-onnx) |
 | `streaming.streaming_model` | `zipformer.tiny.en` | Streaming model |

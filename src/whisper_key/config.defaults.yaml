@@ -18,12 +18,12 @@ whisper: # Whisper AI Model Settings
     # See "models" below for more information
     model: tiny
 
-    # Transcription runtime (choose from the tray "Runtime" menu)
+    # Transcription runtime (choose from the tray "Model > Runtime" page)
     # Options: cpu, cuda (NVIDIA), rocm (AMD), vulkan (whisper.cpp)
     # GPU runtimes are installed on demand into %LOCALAPPDATA%\whisperkey\runtimes
     runtime: cpu
 
-    # Runtime for ONNX models (Parakeet, Qwen3-ASR), chosen from the tray "Runtime" menu while one is selected
+    # Runtime for ONNX models (Parakeet, Qwen3-ASR), chosen from the tray "Model > Runtime" page while one is selected
     # Options: onnx-cpu, onnx-directml (any DirectX 12 GPU), onnx-cuda (NVIDIA)
     onnx_runtime: onnx-cpu
 
@@ -34,7 +34,7 @@ whisper: # Whisper AI Model Settings
 
     # Compute Precision (only for faster_whisper engine)
     # Options: int8, int8_float32, int8_float16, int8_bfloat16, int16, float16, bfloat16, float32
-    # Supported values depend on the device; the tray "Precision" menu only enables those
+    # Supported values depend on the device; the tray "Model > Precision" options only enables those
     compute_type: int8
 
     # whisper.cpp engine settings
@@ -62,6 +62,7 @@ whisper: # Whisper AI Model Settings
     # Available models (set enabled: false to hide from menu)
     # To add custom models (CTranslate2 format), add entry with source (HuggingFace or local path)
     # Example: my-model: {source: "username/repo-ct2", label: "My Model", group: custom}
+    # supports_prompt: false skips initial_prompt and hotwords for models that repeat or derail with them
     models:
         # Official whisper models
         tiny:
@@ -124,7 +125,14 @@ whisper: # Whisper AI Model Settings
             group: custom
             enabled: true
 
-        # ONNX models — run on CPU, DirectML (any DirectX 12 GPU) or NVIDIA CUDA, see the tray "Runtime" menu
+        # Language-specific fine-tunes
+        large-v3-turbo-german: # primeline/whisper-large-v3-turbo-german, fine-tuned for German
+            source: TheTobyB/whisper-large-v3-turbo-german-ct2
+            label: "Large-V3-Turbo German (German, 1.6GB)"
+            group: custom
+            enabled: true
+
+        # ONNX models — run on CPU, DirectML (any DirectX 12 GPU) or NVIDIA CUDA, see the tray "Model > Runtime" page
         # Only the selected variant is downloaded, into %LOCALAPPDATA%\whisperkey\models
         parakeet-tdt-0.6b-v3: # NVIDIA Parakeet, 25 European languages, automatic language detection
             source: istupakov/parakeet-tdt-0.6b-v3-onnx
@@ -196,39 +204,40 @@ post_processing: # Text Post-Processing (applied to transcription output)
     corrections: {}
 
 hotkey: # Hotkey Configuration
-    # Key combination to start recording
+    # Easiest: tray menu > "Shortcuts..." (Windows) records and saves these for you.
+    #
+    # Each action takes a list of up to two bindings: [primary, secondary]
+    # Use "" to leave a slot unset; an action with no bindings is disabled
     # Format: modifier+modifier+key (use lowercase)
     # Windows modifiers: ctrl, shift, alt, win
     # macOS modifiers: cmd, ctrl, shift, option, fn
+    # Append " | macos: <keys>" to a binding to use different keys on macOS
+    # A binding used by an earlier action in this section is disabled
     # Examples:
-    #   - "ctrl+win"      (Windows default)
-    #   - "fn+ctrl"       (macOS default)
-    #   - "ctrl+alt+r"
-    #   - "win+v"
-    #   - "ctrl+shift+f12"
-    recording_hotkey: "ctrl+win | macos: fn+ctrl"
+    #   - ["ctrl+win", ""]
+    #   - ["ctrl+alt+r", "f9"]
+    #   - ["ctrl+shift+f12", ""]
 
-    # Key to stop recording (shared between transcription and command modes)
-    stop_key: "ctrl | macos: fn"
+    # Start recording
+    recording_hotkey: ["ctrl+win | macos: fn+ctrl", ""]
+
+    # Voice command mode: records speech and matches against user-defined commands
+    command_hotkey: ["alt+win | macos: fn+command", ""]
+
+    # Stop recording (shared between transcription and command modes)
+    stop_key: ["ctrl | macos: fn", ""]
 
     # Alternative stop key that also sends ENTER after pasting
     # Only works when auto-paste is enabled
-    auto_send_key: "alt | macos: option"
+    auto_send_key: ["alt | macos: option", ""]
 
-    # Key combination to cancel recording
-    # Format: modifier+modifier+key (use lowercase) or single key
-    # Examples: "esc", "ctrl+c", "shift+esc"
-    # Note: On macOS, ESC is system-reserved
-    cancel_combination: "esc | macos: shift"
+    # Cancel recording (Note: on macOS, ESC is system-reserved)
+    cancel_combination: ["esc | macos: shift", ""]
 
     # Recording mode
     # "toggle" = press hotkey to start, press stop key to stop (default)
     # "push_to_talk" = hold hotkey to record, release to stop and transcribe
     recording_mode: toggle
-
-    # Key combination for voice command mode
-    # Records speech and matches against user-defined commands
-    command_hotkey: "alt+win | macos: fn+command"
 
 vad: # Voice Activity Detection (VAD)
     # Voice Activity Detection (VAD) Pre-check
@@ -400,6 +409,26 @@ floating_widget: # Floating Recording Button (Windows only)
 
     # Last position as "+x+y" (managed automatically)
     position: null
+
+    # Style: button (icon with Movable/Mute labels) or orb (animated voice orb
+    # that reacts to your voice; scroll on it to resize, lock it from the tray)
+    style: button
+
+    # Orb skin (tray Floating button > Orb skin): gold, silver, chrome, glass, aurora, blackhole, nebula
+    # (nebula also shows a muted look and a short success/error state)
+    orb_skin: gold
+
+    # Show a lock button on the orb while hovering it
+    orb_lock_button: true
+
+    # Show a mute button on the orb while hovering it
+    orb_mute_button: true
+
+    # Hide the orb while a fullscreen application is in front
+    orb_hide_on_fullscreen: true
+
+    # Last orb position as "+x+y" in physical pixels (managed automatically)
+    orb_position: null
 
 terminal_title: # Terminal Tab Title Status
     # Tab title shows "<prefix> Whisper Key" based on app state

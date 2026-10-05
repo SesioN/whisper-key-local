@@ -178,3 +178,13 @@ def stop():
 
     for binding in _bindings:
         binding.is_active = False
+
+
+def clear():
+    global _bindings
+    stop()
+    _bindings = []
+
+
+def key_name_for_virtual_key(virtual_key: int):
+    return None
