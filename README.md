@@ -191,7 +191,7 @@ Delete this file and restart app to reset to defaults.
 | `floating_widget.save_position` | `false` | Restore the last dragged position on startup |
 | `floating_widget.locked` | `false` | Keep the button locked in place |
 | `floating_widget.style` | `button` | button, or orb: an animated voice orb that reacts to your voice level; click to record, drag to move, scroll to resize |
-| `floating_widget.orb_skin` | `gold` | gold, silver, chrome, glass, aurora or blackhole; glass and blackhole cost the most CPU and may drop frames to stay within the orb's CPU budget |
+| `floating_widget.orb_skin` | `gold` | gold, silver, chrome, glass, aurora, blackhole or nebula; nebula has its own muted look and shows a ✓ after a delivered transcription or executed voice command and a ! after a failure; glass and blackhole cost the most CPU and may drop frames to stay within the orb's CPU budget |
 | `floating_widget.orb_hide_on_fullscreen` | `true` | Hide the orb while a fullscreen application is in front |
 | `floating_widget.orb_position` | `null` | Last orb position (managed automatically) |
 | **Streaming Preview (experimental)** |||

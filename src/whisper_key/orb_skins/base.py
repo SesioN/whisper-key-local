@@ -23,6 +23,10 @@ class OrbSkin:
 
     LABEL = ""
 
+    HANDLES_MUTED = False
+    HANDLES_OUTCOMES = False
+    IDLE_FPS = None
+
     def __init__(self, canvas: int, orb_radius: float):
         self.canvas = canvas
 
@@ -55,11 +59,16 @@ class OrbSkin:
         n = self.canvas
         return a.reshape((n, s, n, s) + a.shape[2:]).mean(axis=(1, 3))
 
-    def render_into(self, pixels, state: str, level: float, t: float, opacity: float, flash: float = 0.0):
+    def render_into(self, pixels, state: str, level: float, t: float, opacity: float, flash: float = 0.0,
+                    flash_color=None):
         rgb, alpha = self.shade(state, level, t)
 
         if flash > 0.0:
-            rgb = rgb * np.float32(1.0 + 0.85 * flash)
+            if flash_color is None:
+                rgb = rgb * np.float32(1.0 + 0.85 * flash)
+            else:
+                tint = np.array(flash_color, dtype=np.float32)
+                rgb = rgb + (tint - rgb) * np.float32(0.6 * flash)
 
         alpha = np.clip(alpha, 0.0, 1.0)
         premul = np.clip(rgb, 0.0, 255.0)

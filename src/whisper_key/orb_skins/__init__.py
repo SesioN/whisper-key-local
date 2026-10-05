@@ -4,6 +4,7 @@ from .blackhole import BlackHoleSkin
 from .blob import BlobSkin
 from .chrome import ChromeSkin
 from .glass import GlassSkin
+from .nebula import NebulaSkin
 from .gold import GoldSkin
 from .silver import SilverSkin
 
@@ -14,6 +15,7 @@ SKINS = {
     "glass": GlassSkin,
     "aurora": AuroraSkin,
     "blackhole": BlackHoleSkin,
+    "nebula": NebulaSkin,
 }
 
 DEFAULT_SKIN = "gold"
@@ -25,4 +27,4 @@ def get_skin(name: str):
 
 __all__ = ["OrbSkin", "BlobSkin", "SKINS", "DEFAULT_SKIN", "get_skin",
            "GoldSkin", "SilverSkin", "ChromeSkin", "GlassSkin", "AuroraSkin",
-           "BlackHoleSkin"]
+           "BlackHoleSkin", "NebulaSkin"]

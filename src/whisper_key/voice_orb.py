@@ -175,6 +175,9 @@ POSITION_PATTERN = re.compile(r"^\+(-?\d+)\+(-?\d+)$")
 CLICK_SLOP = 4
 SNAP_DISTANCE = 16
 FLASH_DURATION = 0.45
+OUTCOME_SECONDS = {"success": 1.2, "error": 2.0}
+ERROR_FLASH_COLOR = (255, 60, 50)
+OPACITY_MUTED_SKIN = 0.85
 OPACITY_IDLE = 0.7
 OPACITY_MUTED = 0.3
 FPS_IDLE = 8
@@ -221,6 +224,9 @@ class VoiceOrb:
         self._level = 0.0
         self._level_smooth = 0.0
         self._flash_until = 0.0
+        self._flash_color = None
+        self._outcome = None
+        self._outcome_until = 0.0
 
         self._thread_lock = threading.Lock()
         self._thread = None
@@ -260,11 +266,30 @@ class VoiceOrb:
         self.visible = False
 
     def update_state(self, new_state: str):
-        if new_state == "idle" and self.state in ("processing", "recording"):
+        if new_state == "idle" and self.state in ("processing", "recording") and not self._skin_handles_outcomes():
+            self._flash_color = None
             self._flash_until = time.monotonic() + FLASH_DURATION
         self.state = new_state
         if new_state != "recording":
             self._level = 0.0
+
+    def show_outcome(self, outcome: str):
+        if outcome not in OUTCOME_SECONDS:
+            return
+        if self._skin_handles_outcomes():
+            self._outcome = outcome
+            self._outcome_until = time.monotonic() + OUTCOME_SECONDS[outcome]
+        elif outcome == "error":
+            self._flash_color = ERROR_FLASH_COLOR
+            self._flash_until = time.monotonic() + FLASH_DURATION * 2
+
+    def _skin_handles_outcomes(self) -> bool:
+        return get_skin(self.skin).HANDLES_OUTCOMES
+
+    def _active_outcome(self):
+        if self._outcome and time.monotonic() < self._outcome_until:
+            return self._outcome
+        return None
 
     def set_level(self, level: float):
         self._level = level
@@ -580,11 +605,11 @@ class VoiceOrb:
             self._wait_for_messages(next_frame_at - time.monotonic())
 
     def _target_fps(self) -> int:
-        if self.state == "recording":
+        if self.state == "recording" or self._active_outcome():
             return FPS_ACTIVE
         if self.state == "processing":
             return FPS_IDLE * 2
-        return FPS_IDLE
+        return get_skin(self.skin).IDLE_FPS or FPS_IDLE
 
     def _pump_messages(self):
         msg = wintypes.MSG()
@@ -636,15 +661,23 @@ class VoiceOrb:
         rate = 0.55 if target > self._level_smooth else 0.12
         self._level_smooth += (target - self._level_smooth) * rate
 
-        if self.muted:
-            state, level, opacity = "idle", 0.0, OPACITY_MUTED
+        skin = type(self._renderer)
+        outcome = self._active_outcome()
+        if outcome and self.state != "recording":
+            state, level, opacity = outcome, 0.0, 1.0
+        elif self.muted or self.state == "muted":
+            if skin.HANDLES_MUTED:
+                state, level, opacity = "muted", 0.0, OPACITY_MUTED_SKIN
+            else:
+                state, level, opacity = "idle", 0.0, OPACITY_MUTED
         else:
             state, level = self.state, self._level_smooth
             opacity = 1.0 if state in ("recording", "processing") else OPACITY_IDLE
-        flash = max(0.0, (self._flash_until - time.monotonic()) / FLASH_DURATION)
+        flash_length = FLASH_DURATION * 2 if self._flash_color else FLASH_DURATION
+        flash = max(0.0, (self._flash_until - time.monotonic()) / flash_length)
 
         surface = self._surface
-        self._renderer.render_into(surface["pixels"], state, level, t, opacity, flash)
+        self._renderer.render_into(surface["pixels"], state, level, t, opacity, flash, self._flash_color)
         gdi32.GdiFlush()
         self._pump_messages()
         if self._surface is not surface:

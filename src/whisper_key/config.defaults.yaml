@@ -407,7 +407,8 @@ floating_widget: # Floating Recording Button (Windows only)
     # that reacts to your voice; scroll on it to resize, lock it from the tray)
     style: button
 
-    # Orb look: gold, silver, chrome, glass, aurora, blackhole
+    # Orb look: gold, silver, chrome, glass, aurora, blackhole, nebula
+    # (nebula also shows a muted look and a short success/error state)
     orb_skin: gold
 
     # Hide the orb while a fullscreen application is in front
