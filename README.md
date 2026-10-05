@@ -62,7 +62,7 @@ Open the system tray / menu bar icon to:
 - Change transcription model, runtime (CPU / CUDA / ROCm / Vulkan / ONNX) and precision
 - Select audio host and input device, or mute the microphone
 - Toggle auto-paste, copy to clipboard, audio feedback and voice-activated recording
-- Open the voice detection sensitivity window and floating button options (Windows)
+- Open the voice detection sensitivity window and floating button options: button or animated voice orb style, orb look, lock, hide in fullscreen apps (Windows)
 - Manage shortcuts: record a primary and secondary binding per action, or unset one (Windows, **Shortcuts...**)
 - Manage voice commands: add, edit, test and switch them on or off (Windows, **Voice commands...**)
 - Open the settings, commands and log files
@@ -188,6 +188,10 @@ Delete this file and restart app to reset to defaults.
 | `floating_widget.size` | `big` | small, medium or big |
 | `floating_widget.save_position` | `false` | Restore the last dragged position on startup |
 | `floating_widget.locked` | `false` | Keep the button locked in place |
+| `floating_widget.style` | `button` | button, or orb: an animated voice orb that reacts to your voice level; click to record, drag to move, scroll to resize |
+| `floating_widget.orb_skin` | `gold` | gold, silver, chrome, glass, aurora or blackhole; glass and blackhole cost the most CPU and may drop frames to stay within the orb's CPU budget |
+| `floating_widget.orb_hide_on_fullscreen` | `true` | Hide the orb while a fullscreen application is in front |
+| `floating_widget.orb_position` | `null` | Last orb position (managed automatically) |
 | **Streaming Preview (experimental)** |||
 | `streaming.streaming_enabled` | `false` | Live speech preview while recording (sherpa-onnx) |
 | `streaming.streaming_model` | `zipformer.tiny.en` | Streaming model |

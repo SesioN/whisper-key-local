@@ -8,6 +8,7 @@ from ruamel.yaml import YAML
 
 from .utils import resolve_asset_path, beautify_hotkey_bindings, get_user_app_data_path, get_version
 from .platform import IS_MACOS
+from .orb_skins import SKINS as ORB_SKINS
 
 REPO_URL = "https://github.com/SesioN/whisper-key-local"
 
@@ -25,6 +26,8 @@ def _build_settings_header():
 
 HOTKEY_ACTIONS = ('recording_hotkey', 'command_hotkey', 'stop_key', 'auto_send_key', 'cancel_combination')
 HOTKEY_BINDING_SLOTS = 2
+FLOATING_WIDGET_STYLES = ('button', 'orb')
+ORB_SKIN_NAMES = tuple(ORB_SKINS)
 
 EXTENSIBLE_PATHS = {'whisper.models', 'streaming.models', 'post_processing.corrections'}
 
@@ -523,14 +526,21 @@ def validate_config(config, default_config, logger):
     if floating_widget_size not in ('small', 'medium', 'big'):
         _set_to_default(config, default_config, 'floating_widget.size', floating_widget_size, logger)
 
-    for floating_widget_flag in ('floating_widget.enabled', 'floating_widget.save_position', 'floating_widget.locked'):
+    if _get_config_value_at_path(config, 'floating_widget.style') not in FLOATING_WIDGET_STYLES:
+        _set_to_default(config, default_config, 'floating_widget.style', _get_config_value_at_path(config, 'floating_widget.style'), logger)
+
+    if _get_config_value_at_path(config, 'floating_widget.orb_skin') not in ORB_SKIN_NAMES:
+        _set_to_default(config, default_config, 'floating_widget.orb_skin', _get_config_value_at_path(config, 'floating_widget.orb_skin'), logger)
+
+    for floating_widget_flag in ('floating_widget.enabled', 'floating_widget.save_position', 'floating_widget.locked', 'floating_widget.orb_hide_on_fullscreen'):
         flag_value = _get_config_value_at_path(config, floating_widget_flag)
         if not isinstance(flag_value, bool):
             _set_to_default(config, default_config, floating_widget_flag, flag_value, logger)
 
-    floating_widget_position = _get_config_value_at_path(config, 'floating_widget.position')
-    if floating_widget_position is not None and not isinstance(floating_widget_position, str):
-        _set_to_default(config, default_config, 'floating_widget.position', floating_widget_position, logger)
+    for floating_widget_position_path in ('floating_widget.position', 'floating_widget.orb_position'):
+        floating_widget_position = _get_config_value_at_path(config, floating_widget_position_path)
+        if floating_widget_position is not None and not isinstance(floating_widget_position, str):
+            _set_to_default(config, default_config, floating_widget_position_path, floating_widget_position, logger)
 
     _normalize_hotkey_section(config)
     _resolve_hotkey_conflicts(config, default_config, logger)

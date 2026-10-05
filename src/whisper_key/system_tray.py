@@ -8,6 +8,7 @@ from pathlib import Path
 from .utils import open_file
 from .platform import permissions, icons, console
 from .runtime_options import COMPUTE_TYPES
+from .orb_skins import SKINS as ORB_SKINS
 
 try:
     import pystray
@@ -18,6 +19,8 @@ except ImportError:
     TRAY_AVAILABLE = False
     pystray = None
     Image = None
+
+FLOATING_WIDGET_STYLES = (("button", "Button"), ("orb", "Voice orb"))
 
 if TYPE_CHECKING:
     from .state_manager import StateManager
@@ -142,7 +145,56 @@ class SystemTray:
         for size in ("small", "medium", "big"):
             items.append(pystray.MenuItem(size.title(), make_size_selector(size), radio=True, checked=make_is_current_size(size)))
 
+        items.append(pystray.Menu.SEPARATOR)
+        items += self._build_floating_widget_style_menu_items()
         return items
+
+    def _build_floating_widget_style_menu_items(self) -> list:
+        current_style = self.config_manager.get_setting('floating_widget', 'style')
+        current_skin = self.config_manager.get_setting('floating_widget', 'orb_skin')
+
+        def make_style_selector(style):
+            return lambda icon, item: self._set_floating_widget_style(style)
+
+        def make_is_current_style(style):
+            return lambda item: style == current_style
+
+        def make_skin_selector(skin):
+            return lambda icon, item: self._set_orb_skin(skin)
+
+        def make_is_current_skin(skin):
+            return lambda item: skin == current_skin
+
+        items = [pystray.MenuItem(label, make_style_selector(style), radio=True, checked=make_is_current_style(style))
+                 for style, label in FLOATING_WIDGET_STYLES]
+        if current_style != 'orb':
+            return items
+
+        orb_locked = self.config_manager.get_setting('floating_widget', 'locked')
+        orb_hide_on_fullscreen = self.config_manager.get_setting('floating_widget', 'orb_hide_on_fullscreen')
+        skin_items = [pystray.MenuItem(skin_class.LABEL, make_skin_selector(skin), radio=True, checked=make_is_current_skin(skin))
+                      for skin, skin_class in ORB_SKINS.items()]
+        return items + [
+            pystray.MenuItem("Orb look", pystray.Menu(*skin_items)),
+            pystray.MenuItem("Lock position", lambda icon, item: self._set_orb_locked(not orb_locked), checked=lambda item: orb_locked),
+            pystray.MenuItem("Hide in fullscreen apps", lambda icon, item: self._set_orb_hide_on_fullscreen(not orb_hide_on_fullscreen), checked=lambda item: orb_hide_on_fullscreen),
+        ]
+
+    def _set_floating_widget_style(self, style: str):
+        self.state_manager.update_floating_widget_style(style)
+        self.refresh_menu()
+
+    def _set_orb_skin(self, skin: str):
+        self.state_manager.update_orb_skin(skin)
+        self.refresh_menu()
+
+    def _set_orb_locked(self, locked: bool):
+        self.state_manager.update_orb_locked(locked)
+        self.refresh_menu()
+
+    def _set_orb_hide_on_fullscreen(self, hide_on_fullscreen: bool):
+        self.state_manager.update_orb_hide_on_fullscreen(hide_on_fullscreen)
+        self.refresh_menu()
 
     def _create_menu(self):
         try:
