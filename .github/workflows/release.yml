@@ -102,8 +102,8 @@ jobs:
       - name: Extract changelog section
         run: |
           awk -v v="${{ needs.build-windows.outputs.version }}" '
-            $0 ~ "^## \\[" v "\\]" { found = 1; next }
-            found && /^## \[/ { exit }
+            index($0, "## [" v "]") == 1 { found = 1; next }
+            found && index($0, "## [") == 1 { exit }
             found { print }
           ' CHANGELOG.md > release-notes.md
           test -s release-notes.md || { echo "No CHANGELOG section for ${{ needs.build-windows.outputs.version }}"; exit 1; }
