@@ -3,12 +3,13 @@ import os
 import signal
 import threading
 from typing import Optional, TYPE_CHECKING
-from pathlib import Path
 
 from .utils import open_file
-from .platform import permissions, icons, console, autostart
+from .platform import IS_WINDOWS, permissions, icons, console, autostart
 from .runtime_options import COMPUTE_TYPES
 from .orb_skins import SKINS as ORB_SKINS
+from .orb_skins.preview import render_skin_preview
+from .tray_menu_model import Action, Choice, Footer, Header, Option, Section, Submenu, Toggle, to_pystray
 
 try:
     import pystray
@@ -20,9 +21,21 @@ except ImportError:
     pystray = None
     Image = None
 
-RECORDING_MODES = (("toggle", "Toggle - press to start, press to stop"),
-                   ("push_to_talk", "Push to talk - hold to record"))
+RECORDING_MODES = (("toggle", "Toggle"), ("push_to_talk", "Push to talk"))
 FLOATING_WIDGET_STYLES = (("button", "Button"), ("orb", "Voice orb"))
+FLOATING_WIDGET_SIZES = (("small", "Small"), ("medium", "Medium"), ("big", "Big"))
+STATUS_TEXTS = {"idle": "Ready", "recording": "Recording", "processing": "Transcribing", "muted": "Microphone muted"}
+
+ICON_MODEL = ""
+ICON_MICROPHONE = ""
+ICON_FLOATING_WIDGET = ""
+ICON_KEYBOARD = ""
+ICON_VOICE_COMMANDS = ""
+ICON_FOLDER = ""
+ICON_DOCUMENT = ""
+ICON_CONSOLE = ""
+ICON_EXIT = ""
+ICON_SLIDERS = ""
 
 if TYPE_CHECKING:
     from .state_manager import StateManager
@@ -44,16 +57,18 @@ class SystemTray:
         self.shortcut_manager_window = None
         self.voice_command_manager_window = None
         self.logger = logging.getLogger(__name__)
-               
+
         self.recording_mode_changer = None
         self.icon = None  # pystray object, holds menu, state, etc.
+        self.flyout = None
         self.is_running = False
         self.current_state = "idle"
         self.available = True
-        
+        self.audio_device_names = {}
+
         if self._check_tray_availability():
             self._load_icons_to_cache()
-    
+
     def _check_tray_availability(self) -> bool:
         if not self.tray_config['enabled']:
             self.logger.warning("   ✗ System tray disabled in configuration")
@@ -76,115 +91,187 @@ class SystemTray:
                 "processing": self._create_fallback_icon("processing"),
                 "muted": create_muted_icon(self._create_fallback_icon("idle")),
             }
-        
+
     def _create_fallback_icon(self, state: str) -> Image.Image:
         colors = {
             'idle': (128, 128, 128),      # Gray
-            'recording': (34, 139, 34),   # Green  
+            'recording': (34, 139, 34),   # Green
             'processing': (255, 165, 0)   # Orange
         }
-        
+
         color = colors.get(state, (128, 128, 128))  # Default to gray
         icon = Image.new('RGBA', (16, 16), color + (255,))
 
         return icon
-    
-    def _build_model_menu_items(self, current_model: str, is_model_loading: bool) -> list:
-        items = []
 
+    def build_menu(self) -> list:
+        voice_commands_enabled = self.config_manager.get_setting('voice_commands', 'enabled')
+        return [
+            Header("Whisper Key", self._status_text, lambda: self.state_manager.is_muted, self._toggle_mute),
+            Section("Recording"),
+            Choice("Recording mode", [Option(mode, label) for mode, label in RECORDING_MODES],
+                   self._current_recording_mode, self._set_recording_mode, style="segmented") if self.recording_mode_changer else None,
+            Toggle("Voice-activated recording", lambda: self.state_manager.auto_trigger_enabled, self._set_auto_trigger) if self.state_manager.is_auto_trigger_available() else None,
+            Action("Voice detection sensitivity...", self._open_vad_sensitivity_window, icon=ICON_SLIDERS) if self.state_manager.is_vad_sensitivity_window_available() else None,
+            Toggle("Audio feedback", self._is_audio_feedback_enabled, self._set_audio_feedback),
+            Section("Output"),
+            Toggle("Auto-paste", self._is_auto_paste_enabled, self._set_transcription_mode),
+            Toggle("Copy to clipboard", self._is_copy_enabled, self._set_copy_to_clipboard, enabled=self._is_auto_paste_enabled),
+            Section("Setup"),
+            Submenu("Model", self._build_model_page, icon=ICON_MODEL, detail=self._model_detail),
+            Submenu("Microphone", self._build_microphone_page, icon=ICON_MICROPHONE, detail=self._microphone_detail),
+            Submenu("Floating button", self._build_floating_widget_page, icon=ICON_FLOATING_WIDGET, detail=self._floating_widget_detail) if self.state_manager.floating_widget_available else None,
+            Action("Shortcuts...", self._open_shortcut_manager_window, icon=ICON_KEYBOARD) if self.shortcut_manager_window else None,
+            Action("Voice commands...", self._open_voice_command_manager_window, icon=ICON_VOICE_COMMANDS) if self.voice_command_manager_window and voice_commands_enabled else None,
+            Toggle("Start with Windows", self._is_autostart_enabled, self._set_autostart) if autostart.is_supported() else None,
+            Submenu("Files and logs", self._build_files_page, icon=ICON_FOLDER),
+            Footer([
+                Action("Show console", self._show_console, icon=ICON_CONSOLE, default=True) if console.owns_console() else None,
+                Action("Exit", self._quit_application_from_tray, icon=ICON_EXIT),
+            ]),
+        ]
+
+    def _status_text(self) -> str:
+        app_state = self.state_manager.get_application_state()
+        if app_state.get('model_loading', False):
+            status = "Loading model"
+        elif self.state_manager.is_muted:
+            status = STATUS_TEXTS["muted"]
+        elif self.current_state == "idle" and self.state_manager.auto_trigger_enabled:
+            status = "Listening for speech"
+        else:
+            status = STATUS_TEXTS.get(self.current_state, "Ready")
+        return f"{status} · {self._model_detail()}"
+
+    def _model_label(self, model_key: str) -> str:
+        model = self.model_registry.get_model(model_key) if self.model_registry else None
+        return model.label if model else model_key.title()
+
+    def _model_detail(self) -> str:
+        return self._model_label(self.config_manager.get_setting('whisper', 'model'))
+
+    def _build_model_page(self) -> list:
+        app_state = self.state_manager.get_application_state()
+        is_model_loading = app_state.get('model_loading', False)
+        is_busy = is_model_loading or app_state.get('processing', False)
+        return [
+            Choice("Model", self._model_options(is_model_loading),
+                   lambda: self.config_manager.get_setting('whisper', 'model'), self._select_model),
+            *self._build_runtime_items(is_busy),
+        ]
+
+    def _model_options(self, is_model_loading: bool) -> list:
+        options = []
         if not self.model_registry:
-            return items
-
-        def make_model_selector(model_key):
-            return lambda icon, item: self._select_model(model_key)
-
-        def make_is_current(model_key):
-            return lambda item: model_key == current_model
-
-        def model_selection_enabled(item):
-            return not is_model_loading
-
-        first_group = True
+            return options
         for group in self.model_registry.get_groups_ordered():
             models = self.model_registry.get_models_by_group(group)
-            if not models:
-                continue
-
-            if not first_group:
-                items.append(pystray.Menu.SEPARATOR)
-            first_group = False
-
-            for model in models:
+            for index, model in enumerate(models):
                 download_state = self.state_manager.get_model_download_state(model.key)
-                items.append(pystray.MenuItem(
+                options.append(Option(
+                    model.key,
                     f"{model.label} (download)" if download_state == "download" else model.label,
-                    make_model_selector(model.key),
-                    radio=True,
-                    checked=make_is_current(model.key),
-                    enabled=False if download_state == "unavailable" else model_selection_enabled
+                    enabled=download_state != "unavailable" and not is_model_loading,
+                    starts_group=index == 0,
                 ))
+        return options
 
-        return items
+    def _build_runtime_items(self, is_busy: bool) -> list:
+        current_runtime = self.state_manager.get_current_runtime()
+        runtime_choice = Choice(
+            "Runtime",
+            [Option(runtime.key, runtime.menu_label, enabled=runtime.selectable and not is_busy)
+             for runtime in self.state_manager.get_menu_runtimes()],
+            lambda: getattr(self.state_manager.get_current_runtime(), 'key', None),
+            self.state_manager.request_runtime_change,
+        )
+        if current_runtime and current_runtime.compute_types:
+            precision_item = Choice(
+                "Precision",
+                [Option(compute_type, compute_type, enabled=not is_busy)
+                 for compute_type in COMPUTE_TYPES if compute_type in current_runtime.compute_types],
+                self.state_manager.get_current_compute_type,
+                self.state_manager.request_compute_type_change,
+            )
+            return [runtime_choice, precision_item]
+        return [runtime_choice, Section("Precision"), Action("Set by the model file", lambda: None, enabled=False)]
 
-    def _build_floating_widget_menu_items(self) -> list:
-        if not self.state_manager.floating_widget_available:
-            return []
+    def _microphone_detail(self) -> str:
+        current_device = self.state_manager.get_current_audio_device_id()
+        if current_device not in self.audio_device_names:
+            self._audio_device_options()
+        return self.audio_device_names.get(current_device) or self.state_manager.get_current_audio_host() or ""
 
-        enabled = self.config_manager.get_setting('floating_widget', 'enabled')
-        save_position = self.config_manager.get_setting('floating_widget', 'save_position')
-        current_size = self.config_manager.get_setting('floating_widget', 'size')
+    def _build_microphone_page(self) -> list:
+        host_options = self._audio_host_options()
+        return [
+            Choice("Input device", self._audio_device_options, self.state_manager.get_current_audio_device_id,
+                   lambda device_id: self._select_audio_device(device_id, self.audio_device_names.get(device_id, ""))),
+        ] + ([Choice("Audio host", host_options, self.state_manager.get_current_audio_host, self._select_audio_host)]
+             if host_options else [])
 
-        def make_size_selector(size):
-            return lambda icon, item: self._set_floating_widget_size(size)
+    def _audio_device_options(self) -> list:
+        devices = self.state_manager.get_available_audio_devices(self.state_manager.get_current_audio_host()) or []
+        self.audio_device_names = {device['id']: device['name'] for device in devices}
+        return [Option(device['id'], device['name']) for device in devices]
 
-        def make_is_current_size(size):
-            return lambda item: size == current_size
+    def _audio_host_options(self) -> list:
+        return [Option(host['name'], host['name']) for host in self.state_manager.get_available_audio_hosts() or []]
 
+    def _floating_widget_setting(self, key: str):
+        return self.config_manager.get_setting('floating_widget', key)
+
+    def _floating_widget_detail(self) -> str:
+        if not self._floating_widget_setting('enabled'):
+            return "Hidden"
+        style = self._floating_widget_setting('style')
+        if style == 'orb':
+            skin_class = ORB_SKINS.get(self._floating_widget_setting('orb_skin'))
+            return f"Orb · {skin_class.LABEL}" if skin_class else "Orb"
+        return dict(FLOATING_WIDGET_STYLES).get(style, style)
+
+    def _build_floating_widget_page(self) -> list:
+        setting = self._floating_widget_setting
         items = [
-            pystray.MenuItem("Show", lambda icon, item: self._set_floating_widget_enabled(not self.config_manager.get_setting('floating_widget', 'enabled')), checked=lambda item: enabled),
-            pystray.MenuItem("Remember position", lambda icon, item: self._set_floating_widget_save_position(not self.config_manager.get_setting('floating_widget', 'save_position')), checked=lambda item: save_position),
-            pystray.Menu.SEPARATOR,
+            Toggle("Show", lambda: setting('enabled'), self._set_floating_widget_enabled),
+            Choice("Style", [Option(style, label) for style, label in FLOATING_WIDGET_STYLES],
+                   lambda: setting('style'), self._set_floating_widget_style, style="segmented"),
+            Choice("Size", [Option(size, label) for size, label in FLOATING_WIDGET_SIZES],
+                   lambda: setting('size'), self._set_floating_widget_size, style="segmented"),
         ]
-        for size in ("small", "medium", "big"):
-            items.append(pystray.MenuItem(size.title(), make_size_selector(size), radio=True, checked=make_is_current_size(size)))
-
-        items.append(pystray.Menu.SEPARATOR)
-        items += self._build_floating_widget_style_menu_items()
+        if setting('style') == 'orb':
+            items += [
+                Submenu("Orb skin", self._build_orb_skin_page,
+                        detail=lambda: ORB_SKINS[setting('orb_skin')].LABEL if setting('orb_skin') in ORB_SKINS else ""),
+                Section("Position and behavior"),
+                Toggle("Remember position", lambda: setting('save_position'), self._set_floating_widget_save_position),
+                Toggle("Lock position", lambda: setting('locked'), self._set_orb_locked),
+                Toggle("Show lock button", lambda: setting('orb_lock_button'),
+                       lambda enabled: self._set_orb_buttons(enabled, setting('orb_mute_button'))),
+                Toggle("Show mute button", lambda: setting('orb_mute_button'),
+                       lambda enabled: self._set_orb_buttons(setting('orb_lock_button'), enabled)),
+                Toggle("Hide in fullscreen apps", lambda: setting('orb_hide_on_fullscreen'), self._set_orb_hide_on_fullscreen),
+            ]
+        else:
+            items += [
+                Section("Position"),
+                Toggle("Remember position", lambda: setting('save_position'), self._set_floating_widget_save_position),
+            ]
         return items
 
-    def _build_floating_widget_style_menu_items(self) -> list:
-        current_style = self.config_manager.get_setting('floating_widget', 'style')
-        current_skin = self.config_manager.get_setting('floating_widget', 'orb_skin')
+    def _build_orb_skin_page(self) -> list:
+        return [Choice("Orb skin", [Option(skin, skin_class.LABEL) for skin, skin_class in ORB_SKINS.items()],
+                       lambda: self._floating_widget_setting('orb_skin'), self._set_orb_skin,
+                       preview=render_skin_preview)]
 
-        def make_style_selector(style):
-            return lambda icon, item: self._set_floating_widget_style(style)
-
-        def make_is_current_style(style):
-            return lambda item: style == current_style
-
-        def make_skin_selector(skin):
-            return lambda icon, item: self._set_orb_skin(skin)
-
-        def make_is_current_skin(skin):
-            return lambda item: skin == current_skin
-
-        items = [pystray.MenuItem(label, make_style_selector(style), radio=True, checked=make_is_current_style(style))
-                 for style, label in FLOATING_WIDGET_STYLES]
-        if current_style != 'orb':
-            return items
-
-        orb_locked = self.config_manager.get_setting('floating_widget', 'locked')
-        orb_hide_on_fullscreen = self.config_manager.get_setting('floating_widget', 'orb_hide_on_fullscreen')
-        orb_lock_button = self.config_manager.get_setting('floating_widget', 'orb_lock_button')
-        orb_mute_button = self.config_manager.get_setting('floating_widget', 'orb_mute_button')
-        skin_items = [pystray.MenuItem(skin_class.LABEL, make_skin_selector(skin), radio=True, checked=make_is_current_skin(skin))
-                      for skin, skin_class in ORB_SKINS.items()]
-        return items + [
-            pystray.MenuItem("Orb look", pystray.Menu(*skin_items)),
-            pystray.MenuItem("Lock position", lambda icon, item: self._set_orb_locked(not orb_locked), checked=lambda item: orb_locked),
-            pystray.MenuItem("Show lock button", lambda icon, item: self._set_orb_buttons(not orb_lock_button, orb_mute_button), checked=lambda item: orb_lock_button),
-            pystray.MenuItem("Show mute button", lambda icon, item: self._set_orb_buttons(orb_lock_button, not orb_mute_button), checked=lambda item: orb_mute_button),
-            pystray.MenuItem("Hide in fullscreen apps", lambda icon, item: self._set_orb_hide_on_fullscreen(not orb_hide_on_fullscreen), checked=lambda item: orb_hide_on_fullscreen),
+    def _build_files_page(self) -> list:
+        voice_commands_enabled = self.config_manager.get_setting('voice_commands', 'enabled')
+        return [
+            Action("Settings file", self._open_config_file, icon=ICON_DOCUMENT),
+            Action("Commands file", self._open_commands_file, icon=ICON_DOCUMENT) if voice_commands_enabled else None,
+            Action("Config folder", self._open_config_folder, icon=ICON_FOLDER),
+            Action("Log file", self._open_log_file, icon=ICON_DOCUMENT),
+            Action("Model cache", self._open_model_cache, icon=ICON_FOLDER),
         ]
 
     def _set_floating_widget_style(self, style: str):
@@ -206,180 +293,14 @@ class SystemTray:
         self.state_manager.update_orb_hide_on_fullscreen(hide_on_fullscreen)
         self.refresh_menu()
 
-    def _create_menu(self):
-        try:
-            app_state = self.state_manager.get_application_state()
-            is_model_loading = app_state.get('model_loading', False)
-
-            current_model = self.config_manager.get_setting('whisper', 'model')
-
-            available_hosts = self.state_manager.get_available_audio_hosts()
-            current_host = self.state_manager.get_current_audio_host()
-
-            def is_current_host(host_name):
-                return lambda item: current_host == host_name
-
-            def switch_host(host_name):
-                return lambda icon, item: self._select_audio_host(host_name)
-
-            audio_host_items = []
-            if available_hosts:
-                for host in available_hosts:
-                    host_name = host['name']
-                    audio_host_items.append(
-                        pystray.MenuItem(
-                            host_name,
-                            switch_host(host_name),
-                            radio=True,
-                            checked=is_current_host(host_name)
-                        )
-                    )
-
-            available_devices = self.state_manager.get_available_audio_devices(current_host)
-            current_device = self.state_manager.get_current_audio_device_id()
-
-            def is_current_device(dev_id):
-                return lambda item: current_device == dev_id
-
-            def switch_device(dev_id, dev_name):
-                return lambda icon, item: self._select_audio_device(dev_id, dev_name)
-
-            audio_device_items = []
-
-            if available_devices:
-                for device in available_devices:
-                    device_id = device['id']
-                    device_name = device['name']
-
-                    audio_device_items.append(
-                        pystray.MenuItem(
-                            device_name,
-                            switch_device(device_id, device['name']),
-                            radio=True,
-                            checked=is_current_device(device_id)
-                        )
-                    )
-
-            model_sub_menu_items = self._build_model_menu_items(current_model, is_model_loading)
-            floating_widget_menu_items = self._build_floating_widget_menu_items()
-
-            voice_commands_enabled = self.config_manager.get_setting('voice_commands', 'enabled')
-            auto_trigger_available = self.state_manager.is_auto_trigger_available()
-            vad_sensitivity_window_available = self.state_manager.is_vad_sensitivity_window_available()
-
-            menu_items = []
-
-            if console.owns_console():
-                menu_items.append(pystray.MenuItem("Show Console", self._show_console, default=True))
-                menu_items.append(pystray.Menu.SEPARATOR)
-
-            menu_items += [
-                pystray.MenuItem("Mute microphone", self._toggle_mute, checked=lambda item: self.state_manager.is_muted),
-                pystray.Menu.SEPARATOR,
-                pystray.MenuItem("Open log file...", self._open_log_file),
-                pystray.MenuItem("Open model cache...", self._open_model_cache),
-                pystray.Menu.SEPARATOR,
-                pystray.MenuItem("Open config folder...", self._open_config_folder),
-                pystray.MenuItem("Open settings file...", self._open_config_file),
-                pystray.MenuItem("Open commands file...", self._open_commands_file) if voice_commands_enabled else None,
-                pystray.MenuItem("Shortcuts...", self._open_shortcut_manager_window) if self.shortcut_manager_window else None,
-                pystray.MenuItem("Voice commands...", self._open_voice_command_manager_window) if self.voice_command_manager_window and voice_commands_enabled else None,
-                pystray.Menu.SEPARATOR,
-                pystray.MenuItem(
-                    "Audio Host",
-                    pystray.Menu(*audio_host_items)
-                ) if audio_host_items else None,
-                pystray.MenuItem(
-                    f"Audio Source",
-                    pystray.Menu(*audio_device_items)
-                ),
-                pystray.MenuItem("Start with Windows", self._toggle_autostart, checked=lambda item: self._is_autostart_enabled()) if autostart.is_supported() else None,
-                pystray.MenuItem("Audio feedback", lambda icon, item: self._set_audio_feedback(not self._is_audio_feedback_enabled()), checked=lambda item: self._is_audio_feedback_enabled()),
-                pystray.Menu.SEPARATOR,
-                pystray.MenuItem("Auto-paste", lambda icon, item: self._set_transcription_mode(not self._is_auto_paste_enabled()), checked=lambda item: self._is_auto_paste_enabled()),
-                pystray.MenuItem("Copy to clipboard", lambda icon, item: self._set_copy_to_clipboard(not self._is_copy_enabled()), checked=lambda item: self._is_copy_enabled(), enabled=lambda item: self._is_auto_paste_enabled()),
-                pystray.Menu.SEPARATOR,
-                pystray.MenuItem("Recording mode", pystray.Menu(*self._build_recording_mode_menu_items())) if self.recording_mode_changer else None,
-                pystray.MenuItem("Floating button", pystray.Menu(*floating_widget_menu_items)) if floating_widget_menu_items else None,
-                pystray.MenuItem(f"Model: {current_model.title()}", pystray.Menu(*model_sub_menu_items)),
-                pystray.Menu.SEPARATOR if auto_trigger_available else None,
-                pystray.MenuItem("Voice-activated recording", lambda icon, item: self._set_auto_trigger(not self.state_manager.auto_trigger_enabled), checked=lambda item: self.state_manager.auto_trigger_enabled) if auto_trigger_available else None,
-                pystray.MenuItem("Voice detection sensitivity...", self._open_vad_sensitivity_window) if vad_sensitivity_window_available else None,
-            ]
-
-            menu_items += self._build_runtime_menu_items(is_model_loading or app_state.get('processing', False))
-
-            menu_items.extend([
-                pystray.Menu.SEPARATOR,
-                pystray.MenuItem("Exit", self._quit_application_from_tray)
-            ])
-
-            menu = pystray.Menu(*[item for item in menu_items if item is not None])
-
-            return menu 
-                
-        except Exception as e:
-            self.logger.error(f"Error in _create_menu: {e}")
-            raise
-
-    def _build_runtime_menu_items(self, is_busy: bool) -> list:
-        current_runtime = self.state_manager.get_current_runtime()
-        current_compute_type = self.state_manager.get_current_compute_type()
-
-        def make_runtime_selector(runtime_key):
-            return lambda icon, item: self.state_manager.request_runtime_change(runtime_key)
-
-        def make_compute_type_selector(compute_type):
-            return lambda icon, item: self.state_manager.request_compute_type_change(compute_type)
-
-        def make_is_current_runtime(runtime_key):
-            return lambda item: current_runtime is not None and runtime_key == current_runtime.key
-
-        def make_is_current_compute_type(compute_type):
-            return lambda item: compute_type == current_compute_type
-
-        runtime_items = [
-            pystray.MenuItem(
-                runtime.menu_label,
-                make_runtime_selector(runtime.key),
-                radio=True,
-                checked=make_is_current_runtime(runtime.key),
-                enabled=runtime.selectable and not is_busy
-            )
-            for runtime in self.state_manager.get_menu_runtimes()
-        ]
-
-        if current_runtime and current_runtime.compute_types:
-            precision_items = [
-                pystray.MenuItem(
-                    compute_type,
-                    make_compute_type_selector(compute_type),
-                    radio=True,
-                    checked=make_is_current_compute_type(compute_type),
-                    enabled=not is_busy
-                )
-                for compute_type in COMPUTE_TYPES if compute_type in current_runtime.compute_types
-            ]
-            precision_label = f"Precision: {current_compute_type}"
-        else:
-            precision_items = [pystray.MenuItem("Set by the model file", None, enabled=False)]
-            precision_label = "Precision: model file"
-
-        runtime_label = f"Runtime: {current_runtime.label}" if current_runtime else "Runtime"
-        return [
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem(runtime_label, pystray.Menu(*runtime_items)),
-            pystray.MenuItem(precision_label, pystray.Menu(*precision_items)),
-        ]
-
-    def _open_config_folder(self, icon=None, item=None):
+    def _open_config_folder(self):
         try:
             config_dir = os.path.dirname(self.config_manager.user_settings_path)
             open_file(config_dir)
         except Exception as e:
             self.logger.error(f"Failed to open config folder: {e}")
 
-    def _open_config_file(self, icon=None, item=None):
+    def _open_config_file(self):
         try:
             open_file(self.config_manager.user_settings_path)
         except Exception as e:
@@ -388,20 +309,20 @@ class SystemTray:
     def get_commands_file_path(self) -> str:
         return os.path.join(os.path.dirname(self.config_manager.user_settings_path), "commands.yaml")
 
-    def _open_commands_file(self, icon=None, item=None):
+    def _open_commands_file(self):
         try:
             open_file(self.get_commands_file_path())
         except Exception as e:
             self.logger.error(f"Failed to open commands file: {e}")
 
-    def _open_log_file(self, icon=None, item=None):
+    def _open_log_file(self):
         try:
             log_path = self.config_manager.get_log_file_path()
             open_file(log_path)
         except Exception as e:
             self.logger.error(f"Failed to open log file: {e}")
 
-    def _open_model_cache(self, icon=None, item=None):
+    def _open_model_cache(self):
         try:
             cache_path = self.model_registry.get_hf_cache_path()
             os.makedirs(cache_path, exist_ok=True)
@@ -420,7 +341,7 @@ class SystemTray:
             self.state_manager.update_transcription_mode(auto_paste)
         except Exception as e:
             self.logger.error(f"Error setting auto-paste to {auto_paste}: {e}")
-        self.icon.menu = self._create_menu()
+        self.refresh_menu()
 
     def _is_audio_feedback_enabled(self):
         return bool(self.config_manager.get_setting('audio_feedback', 'enabled'))
@@ -430,7 +351,7 @@ class SystemTray:
             self.state_manager.update_audio_feedback(enabled)
         except Exception as e:
             self.logger.error(f"Error setting audio feedback to {enabled}: {e}")
-        self.icon.menu = self._create_menu()
+        self.refresh_menu()
 
     def _is_auto_paste_enabled(self):
         return bool(self.config_manager.get_setting('clipboard', 'auto_paste'))
@@ -443,14 +364,14 @@ class SystemTray:
             self.state_manager.update_copy_to_clipboard(enabled)
         except Exception as e:
             self.logger.error(f"Error setting copy to clipboard to {enabled}: {e}")
-        self.icon.menu = self._create_menu()
+        self.refresh_menu()
 
     def _select_model(self, model_key: str):
         try:
             success = self.state_manager.request_model_change(model_key)
 
             if success:
-                self.icon.menu = self._create_menu()
+                self.refresh_menu()
             else:
                 self.logger.warning(f"Request to change model to {model_key} was not accepted")
 
@@ -470,7 +391,7 @@ class SystemTray:
         try:
             success = self.state_manager.set_audio_host(host_name)
             if success:
-                self.icon.menu = self._create_menu()
+                self.refresh_menu()
             else:
                 self.logger.warning(f"Request to change audio host to {host_name} was not accepted")
         except Exception as e:
@@ -480,17 +401,17 @@ class SystemTray:
         self.shortcut_manager_window = shortcut_manager_window
         self.refresh_menu()
 
-    def _open_shortcut_manager_window(self, icon=None, item=None):
+    def _open_shortcut_manager_window(self):
         self.shortcut_manager_window.open()
 
     def attach_voice_command_manager_window(self, voice_command_manager_window):
         self.voice_command_manager_window = voice_command_manager_window
         self.refresh_menu()
 
-    def _open_voice_command_manager_window(self, icon=None, item=None):
+    def _open_voice_command_manager_window(self):
         self.voice_command_manager_window.open()
 
-    def _open_vad_sensitivity_window(self, icon=None, item=None):
+    def _open_vad_sensitivity_window(self):
         self.state_manager.open_vad_sensitivity_window()
 
     def _select_audio_device(self, device_id: int, device_name: str):
@@ -498,23 +419,13 @@ class SystemTray:
 
         if success:
             self.config_manager.update_user_setting('audio', 'input_device', device_id)
-            self.icon.menu = self._create_menu()
+            self.refresh_menu()
         else:
             self.logger.warning(f"Request to change audio device to {device_id} was not accepted")
 
     def attach_recording_mode_changer(self, recording_mode_changer):
         self.recording_mode_changer = recording_mode_changer
         self.refresh_menu()
-
-    def _build_recording_mode_menu_items(self) -> list:
-        def make_mode_selector(mode):
-            return lambda icon, item: self._set_recording_mode(mode)
-
-        def make_is_current_mode(mode):
-            return lambda item: self._current_recording_mode() == mode
-
-        return [pystray.MenuItem(label, make_mode_selector(mode), radio=True, checked=make_is_current_mode(mode))
-                for mode, label in RECORDING_MODES]
 
     def _current_recording_mode(self):
         return self.config_manager.get_setting('hotkey', 'recording_mode')
@@ -534,34 +445,34 @@ class SystemTray:
             self.logger.error(f"Could not read autostart setting: {e}")
             return False
 
-    def _toggle_autostart(self, icon=None, item=None):
+    def _set_autostart(self, enabled: bool):
         try:
-            if autostart.is_enabled():
-                autostart.disable()
-                self.logger.info("Autostart disabled")
-            else:
+            if enabled:
                 autostart.enable()
                 self.logger.info("Autostart enabled")
+            else:
+                autostart.disable()
+                self.logger.info("Autostart disabled")
         except Exception as e:
             self.logger.error(f"Error changing autostart: {e}")
         self.refresh_menu()
 
     def _set_floating_widget_enabled(self, enabled: bool):
         self.state_manager.update_floating_widget_enabled(enabled)
-        self.icon.menu = self._create_menu()
+        self.refresh_menu()
 
     def _set_floating_widget_save_position(self, save_position: bool):
         self.state_manager.update_floating_widget_save_position(save_position)
-        self.icon.menu = self._create_menu()
+        self.refresh_menu()
 
     def _set_floating_widget_size(self, size: str):
         self.state_manager.update_floating_widget_size(size)
-        self.icon.menu = self._create_menu()
+        self.refresh_menu()
 
-    def _toggle_mute(self, icon=None, item=None):
+    def _toggle_mute(self):
         self.state_manager.toggle_mute()
 
-    def _show_console(self, icon=None, item=None):
+    def _show_console(self):
         console.show()
 
     def apply_console_settings(self):
@@ -571,22 +482,20 @@ class SystemTray:
             console.hide()
         console.start_minimize_monitor(console.hide)
 
-    def _quit_application_from_tray(self, icon=None, item=None):
+    def _quit_application_from_tray(self):
         signal.raise_signal(signal.SIGINT)
-    
+
     def update_state(self, new_state: str):
         if not TRAY_AVAILABLE or not self.is_running:
             return
-        
+
         self.current_state = new_state
-        
+
         try:
             self.icon.icon = self.icons[new_state]
-            self.icon.title = "Whisper Key (muted)" if new_state == "muted" else "Whisper Key"
-            self.icon.menu = self._create_menu()
-            self.icon.title = self._get_title()
         except Exception as e:
             self.logger.error(f"Failed to update tray icon: {e}")
+        self.refresh_menu()
 
     def set_status_text(self, text: Optional[str]):
         if not self.icon:
@@ -607,16 +516,25 @@ class SystemTray:
             return
 
         try:
-            self.icon.menu = self._create_menu()
             self.icon.title = self._get_title()
+            if self._uses_flyout():
+                self.flyout.refresh()
+            else:
+                self.icon.menu = self._build_native_menu()
         except Exception as e:
             self.logger.error(f"Failed to refresh tray menu: {e}")
+
+    def _build_native_menu(self):
+        return to_pystray(self.build_menu(), pystray)
+
+    def _uses_flyout(self) -> bool:
+        return self.flyout is not None and not self.flyout.failed
 
     def _get_title(self) -> str:
         if self.state_manager.auto_trigger_enabled:
             return "Whisper Key - listening for speech"
         return "Whisper Key"
-    
+
     def start(self):
         if not self.available:
             return False
@@ -627,14 +545,15 @@ class SystemTray:
 
         try:
             idle_icon = self.icons.get("idle")
-            menu = self._create_menu()
 
             self.icon = pystray.Icon(
                 name="whisper-key",
                 icon=idle_icon,
                 title=self._get_title(),
-                menu=menu
+                menu=self._build_native_menu()
             )
+            if IS_WINDOWS:
+                self._attach_flyout()
 
             self.icon.run_detached()
 
@@ -646,12 +565,38 @@ class SystemTray:
         except Exception as e:
             self.logger.error(f"Failed to start system tray: {e}")
             return False
-    
+
+    def _attach_flyout(self):
+        try:
+            from pystray._util import win32 as pystray_win32
+            from .tray_flyout import TrayFlyout
+        except Exception as e:
+            self.logger.error(f"Tray menu unavailable, using the native menu: {e}")
+            return
+
+        message_handlers = getattr(self.icon, '_message_handlers', None)
+        if message_handlers is None or pystray_win32.WM_NOTIFY not in message_handlers:
+            return
+        native_notify_handler = message_handlers[pystray_win32.WM_NOTIFY]
+        self.flyout = TrayFlyout(self.build_menu)
+
+        def on_notify(wparam, lparam):
+            if lparam not in (pystray_win32.WM_LBUTTONUP, pystray_win32.WM_RBUTTONUP):
+                return native_notify_handler(wparam, lparam)
+            if self.flyout.toggle(self.icon._hwnd):
+                return None
+            self.icon.menu = self._build_native_menu()
+            return native_notify_handler(wparam, pystray_win32.WM_RBUTTONUP)
+
+        message_handlers[pystray_win32.WM_NOTIFY] = on_notify
+
     def stop(self):
         if self.shortcut_manager_window:
             self.shortcut_manager_window.stop()
         if self.voice_command_manager_window:
             self.voice_command_manager_window.stop()
+        if self.flyout:
+            self.flyout.stop()
 
         if not self.is_running:
             return

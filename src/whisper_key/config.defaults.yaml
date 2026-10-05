@@ -18,12 +18,12 @@ whisper: # Whisper AI Model Settings
     # See "models" below for more information
     model: tiny
 
-    # Transcription runtime (choose from the tray "Runtime" menu)
+    # Transcription runtime (choose from the tray "Model > Runtime" page)
     # Options: cpu, cuda (NVIDIA), rocm (AMD), vulkan (whisper.cpp)
     # GPU runtimes are installed on demand into %LOCALAPPDATA%\whisperkey\runtimes
     runtime: cpu
 
-    # Runtime for ONNX models (Parakeet, Qwen3-ASR), chosen from the tray "Runtime" menu while one is selected
+    # Runtime for ONNX models (Parakeet, Qwen3-ASR), chosen from the tray "Model > Runtime" page while one is selected
     # Options: onnx-cpu, onnx-directml (any DirectX 12 GPU), onnx-cuda (NVIDIA)
     onnx_runtime: onnx-cpu
 
@@ -34,7 +34,7 @@ whisper: # Whisper AI Model Settings
 
     # Compute Precision (only for faster_whisper engine)
     # Options: int8, int8_float32, int8_float16, int8_bfloat16, int16, float16, bfloat16, float32
-    # Supported values depend on the device; the tray "Precision" menu only enables those
+    # Supported values depend on the device; the tray "Model > Precision" options only enables those
     compute_type: int8
 
     # whisper.cpp engine settings
@@ -132,7 +132,7 @@ whisper: # Whisper AI Model Settings
             group: custom
             enabled: true
 
-        # ONNX models — run on CPU, DirectML (any DirectX 12 GPU) or NVIDIA CUDA, see the tray "Runtime" menu
+        # ONNX models — run on CPU, DirectML (any DirectX 12 GPU) or NVIDIA CUDA, see the tray "Model > Runtime" page
         # Only the selected variant is downloaded, into %LOCALAPPDATA%\whisperkey\models
         parakeet-tdt-0.6b-v3: # NVIDIA Parakeet, 25 European languages, automatic language detection
             source: istupakov/parakeet-tdt-0.6b-v3-onnx
@@ -414,7 +414,7 @@ floating_widget: # Floating Recording Button (Windows only)
     # that reacts to your voice; scroll on it to resize, lock it from the tray)
     style: button
 
-    # Orb look: gold, silver, chrome, glass, aurora, blackhole, nebula
+    # Orb skin (tray Floating button > Orb skin): gold, silver, chrome, glass, aurora, blackhole, nebula
     # (nebula also shows a muted look and a short success/error state)
     orb_skin: gold
 

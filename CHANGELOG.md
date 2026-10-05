@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ## [Unreleased]
 
 ### Added
+- **Modern tray menu** - left or right click on the tray icon opens a Windows 11 style flyout (rounded corners, light/dark theme, accent colour, switches and segmented buttons) grouped into Recording, Output and Setup, with drill-in pages for Model, Microphone, Floating button and Files and logs. Status line and mute button at the top, keyboard navigation, scrolls when taller than the screen. Toggles and options apply without closing the menu (Windows; macOS keeps the native menu with the same structure)
+- **Orb skin picker** - **Floating button > Orb skin** shows a live preview of every skin; clicking one switches the orb immediately and the menu stays open to try the next (Windows)
 - **Large-V3-Turbo German model** - `large-v3-turbo-german` in the model menu: a CTranslate2 conversion of primeline/whisper-large-v3-turbo-german, fine-tuned for German transcription
 - **`supports_prompt: false` per model** - skips `initial_prompt` and `hotwords` for models that repeat or derail with them, such as TheStageAI's TheWhisper (faster-whisper and whisper.cpp)
 - **Recording mode in the tray** - switch between toggle and push-to-talk from the tray **Recording mode** menu; the hotkeys are re-registered right away
