@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **`python -m whisper_key`** starts the app
 - **Voice orb** - new `floating_widget.style: orb`: an animated, always-on-top orb that reacts to your voice level, with six looks (gold, silver, chrome, glass, aurora, black hole). Click to record, drag to move, scroll to resize, lock it and hide it in fullscreen apps from the tray. Switch between button and orb at runtime (Windows)
 - **Voice commands window** - tray **Voice commands...** lists, adds, edits, reorders and deletes voice commands; records hotkey actions by pressing the keys, test-runs a command, shows which command a phrase would trigger, and saves `commands.yaml` with its comments intact, applied without a restart. New optional `enabled: false` field switches a command off (Windows)
+- **Nebula orb skin** - an energy-vortex orb with its own look for idle, recording (live waveform), processing (spiral), muted (glass sphere) and new short success ✓ / error ! states shown after a transcription or voice command; other skins flash white on success and red on error (Windows)
 - **Hotkey voice commands accept F13-F24 and `page_up` / `page_down`**
 - **Shortcuts window** - tray **Shortcuts...** lists every hotkey; record a primary and a secondary binding per action by pressing the keys, unset or reset them, and apply them without a restart. Duplicate bindings are blocked (Windows)
 

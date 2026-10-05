@@ -59,6 +59,11 @@ class SwitchableFloatingWidget:
         if isinstance(widget, VoiceOrb):
             widget.set_level(level)
 
+    def show_outcome(self, outcome: str):
+        widget = self._widget
+        if isinstance(widget, VoiceOrb):
+            widget.show_outcome(outcome)
+
     def set_orb_skin(self, skin: str):
         with self._switch_lock:
             if isinstance(self._widget, VoiceOrb):

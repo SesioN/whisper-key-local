@@ -206,24 +206,27 @@ class VoiceCommandManager:
         matches = find_matching_commands(self.commands, text)
         return matches[0] if matches else None
 
-    def execute_command(self, command: dict, use_auto_enter: bool = False):
+    def execute_command(self, command: dict, use_auto_enter: bool = False) -> bool:
         trigger = command.get('trigger', '')
 
         if 'run' in command:
-            self._execute_shell(command['run'], trigger)
-        elif 'hotkey' in command:
-            self._send_hotkey(command['hotkey'], trigger)
-        elif 'type' in command:
-            self._deliver_text(command['type'], trigger, use_auto_enter)
+            return self._execute_shell(command['run'], trigger)
+        if 'hotkey' in command:
+            return self._send_hotkey(command['hotkey'], trigger)
+        if 'type' in command:
+            return self._deliver_text(command['type'], trigger, use_auto_enter)
+        return False
 
     def _execute_shell(self, run_str: str, trigger: str):
         try:
             subprocess.Popen(run_str, shell=True)
             self.logger.info(f"Executed command '{trigger}': {run_str}")
             print(f"   Executed: {trigger}")
+            return True
         except Exception as e:
             self.logger.error(f"Failed to execute command '{trigger}': {e}")
             print(f"   Failed to execute command: {e}")
+            return False
 
     def _send_hotkey(self, hotkey_str: str, trigger: str):
         keys = [k.strip() for k in hotkey_str.lower().split('+')]
@@ -233,27 +236,33 @@ class VoiceCommandManager:
             print(f"   ⚠ {message}")
             if self.clipboard_manager and self.clipboard_manager.on_delivery_blocked:
                 self.clipboard_manager.on_delivery_blocked(message)
-            return
+            return False
         try:
             keyboard.send_hotkey(*keys)
             self.logger.info(f"Sent hotkey '{trigger}': {hotkey_str}")
             print(f"   ✓ Sent hotkey: {trigger} [{hotkey_str}]")
+            return True
         except Exception as e:
             self.logger.error(f"Failed to send hotkey '{trigger}': {e}")
             print(f"   Failed to send hotkey: {e}")
+            return False
 
     def _deliver_text(self, text: str, trigger: str, use_auto_enter: bool = False):
         try:
             if self.clipboard_manager:
-                self.clipboard_manager.deliver_transcription(text, use_auto_enter)
+                delivered = self.clipboard_manager.deliver_transcription(text, use_auto_enter)
+                if not delivered:
+                    return False
                 if self.log_transcriptions:
                     self.logger.info(f"Delivered text '{trigger}': {text}")
                 else:
                     self.logger.info(f"Delivered text for '{trigger}'")
                 print(f"   ✓ Typed: {text}")
-            else:
-                self.logger.error("No clipboard manager available for type command")
-                print(f"   Failed: clipboard manager not available")
+                return True
+            self.logger.error("No clipboard manager available for type command")
+            print(f"   Failed: clipboard manager not available")
+            return False
         except Exception as e:
             self.logger.error(f"Failed to deliver text '{trigger}': {e}")
             print(f"   Failed to deliver text: {e}")
+            return False
