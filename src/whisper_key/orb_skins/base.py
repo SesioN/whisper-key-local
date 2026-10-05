@@ -55,25 +55,29 @@ class OrbSkin:
         n = self.canvas
         return a.reshape((n, s, n, s) + a.shape[2:]).mean(axis=(1, 3))
 
-    def render(self, state: str, level: float, t: float, opacity: float, flash: float = 0.0):
+    def render_into(self, pixels, state: str, level: float, t: float, opacity: float, flash: float = 0.0):
         rgb, alpha = self.shade(state, level, t)
 
         if flash > 0.0:
-            rgb = rgb * (1.0 + 0.85 * flash)
+            rgb = rgb * np.float32(1.0 + 0.85 * flash)
 
         alpha = np.clip(alpha, 0.0, 1.0)
-        premul = np.clip(rgb, 0.0, 255.0) * alpha[..., None]
+        premul = np.clip(rgb, 0.0, 255.0)
+        premul *= alpha[..., None]
 
-        alpha = self._downsample(alpha) * opacity
-        premul = self._downsample(premul) * opacity
+        alpha = self._downsample(alpha) * np.float32(opacity * 255.0)
+        premul = self._downsample(premul) * np.float32(opacity)
 
-        below = alpha < ALPHA_FLOOR
-        alpha = np.where(below, 0.0, alpha)
-        premul = np.where(below[..., None], 0.0, premul)
+        visible = alpha >= ALPHA_FLOOR * 255.0
+        alpha *= visible
+        premul *= visible[..., None]
 
         out = self.buffer
-        out[..., 0] = premul[..., 2]
-        out[..., 1] = premul[..., 1]
-        out[..., 2] = premul[..., 0]
-        out[..., 3] = alpha * 255.0
-        return out.astype(np.uint8)
+        out[..., :3] = premul[..., ::-1]
+        out[..., 3] = alpha
+        np.copyto(pixels, out, casting="unsafe")
+
+    def render(self, state: str, level: float, t: float, opacity: float, flash: float = 0.0):
+        pixels = np.empty((self.canvas, self.canvas, 4), dtype=np.uint8)
+        self.render_into(pixels, state, level, t, opacity, flash)
+        return pixels

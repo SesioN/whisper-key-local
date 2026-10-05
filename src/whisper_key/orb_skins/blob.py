@@ -26,12 +26,20 @@ class BlobSkin(OrbSkin):
         self.core = np.array(self.COLOR_CORE, dtype=np.float32)
         self.mid = np.array(self.COLOR_MID, dtype=np.float32)
         self.edge = np.array(self.COLOR_EDGE, dtype=np.float32)
+        self.harmonic_basis = [(np.sin(k * self.th), np.cos(k * self.th)) for k in self.HARMONICS]
+        self.th2_basis = (np.sin(2.0 * self.th), np.cos(2.0 * self.th))
+        self.lighting = (0.80 + 0.30 * self.light)[..., None].astype(np.float32)
 
     def _radius_field(self, t: float, deform: float, scale: float):
         r = np.zeros_like(self.th)
-        for k, speed, weight in zip(self.HARMONICS, self.HARMONIC_SPEED, self.HARMONIC_WEIGHT):
-            r += weight * np.sin(k * self.th + speed * t * 2.0 * math.pi)
-        return self.r0 * scale * (1.0 + deform * r)
+        for (sin_k, cos_k), speed, weight in zip(self.harmonic_basis, self.HARMONIC_SPEED, self.HARMONIC_WEIGHT):
+            phase = speed * t * 2.0 * math.pi
+            r += sin_k * np.float32(weight * math.cos(phase))
+            r += cos_k * np.float32(weight * math.sin(phase))
+        r *= np.float32(deform)
+        r += np.float32(1.0)
+        r *= np.float32(self.r0 * scale)
+        return r
 
     def _state_params(self, state: str, level: float, t: float):
         if state == "recording":
@@ -58,15 +66,15 @@ class BlobSkin(OrbSkin):
         glow = np.exp(-outside * outside) * glow_strength * (1.0 - body)
 
         u = np.clip(self.rr / np.maximum(radius, 1e-6), 0.0, 1.0)
-        flow = 0.5 + 0.5 * np.sin(self.th * 2.0 + t * 1.1) * np.sin(u * 3.4 - t * 0.8)
+        flow = 0.5 + 0.5 * (self.th2_basis[0] * np.float32(math.cos(t * 1.1))
+                            + self.th2_basis[1] * np.float32(math.sin(t * 1.1))) * np.sin(u * 3.4 - t * 0.8)
         u = np.clip(u * (0.86 + 0.20 * flow), 0.0, 1.0)
 
         w = u[..., None]
         inner = self.core + (self.mid - self.core) * np.clip(w / 0.55, 0.0, 1.0)
         outer = self.mid + (self.edge - self.mid) * np.clip((w - 0.55) / 0.45, 0.0, 1.0)
         rgb = np.where(w < 0.55, inner, outer)
-
-        rgb = rgb * (0.80 + 0.30 * self.light[..., None])
+        rgb *= self.lighting
 
         if state == "processing":
             shimmer = np.clip(np.cos(self.th - t * 2.6), 0.0, 1.0) ** self.SHIMMER_SHARPNESS

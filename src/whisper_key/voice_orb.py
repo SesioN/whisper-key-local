@@ -27,6 +27,7 @@ SW_SHOWNOACTIVATE = 4
 HWND_TOPMOST = -1
 SWP_NOSIZE = 0x0001
 SWP_NOMOVE = 0x0002
+SWP_NOZORDER = 0x0004
 SWP_NOACTIVATE = 0x0010
 ULW_ALPHA = 0x02
 AC_SRC_OVER = 0x00
@@ -34,12 +35,15 @@ AC_SRC_ALPHA = 0x01
 BI_RGB = 0
 DIB_RGB_COLORS = 0
 PM_REMOVE = 0x0001
+QS_ALLINPUT = 0x04FF
+MWMO_INPUTAVAILABLE = 0x0004
 MONITOR_DEFAULTTONULL = 0
 MONITOR_DEFAULTTOPRIMARY = 1
 MONITOR_DEFAULTTONEAREST = 2
 IDC_HAND = 32649
 ERROR_CLASS_ALREADY_EXISTS = 1410
 
+WM_NULL = 0x0000
 WM_DESTROY = 0x0002
 WM_CLOSE = 0x0010
 WM_MOUSEMOVE = 0x0200
@@ -139,6 +143,10 @@ def _bind():
                                     wintypes.UINT, wintypes.UINT, wintypes.UINT]
     user32.TranslateMessage.argtypes = [ctypes.POINTER(wintypes.MSG)]
     user32.DispatchMessageW.argtypes = [ctypes.POINTER(wintypes.MSG)]
+    user32.MsgWaitForMultipleObjectsEx.restype = wintypes.DWORD
+    user32.MsgWaitForMultipleObjectsEx.argtypes = [wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD,
+                                                   wintypes.DWORD, wintypes.DWORD]
+    user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, WPARAM, LPARAM]
     user32.GetDpiForWindow.restype = wintypes.UINT
     user32.GetDpiForWindow.argtypes = [wintypes.HWND]
     user32.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
@@ -173,6 +181,7 @@ FPS_IDLE = 8
 FPS_ACTIVE = 30
 HIDDEN_POLL_SECONDS = 0.25
 CPU_BUDGET = 0.15
+MAX_BUDGET_WAIT_SECONDS = 0.25
 TOPMOST_REFRESH_SECONDS = 2.0
 FULLSCREEN_CHECK_SECONDS = 1.0
 STOP_TIMEOUT_SECONDS = 3.0
@@ -233,6 +242,7 @@ class VoiceOrb:
         self._drag_origin = (0, 0)
         self._window_origin = (0, 0)
         self._drag_distance = 0
+        self._drag_target = None
         self._last_topmost = 0.0
         self._last_fullscreen_check = 0.0
 
@@ -289,6 +299,9 @@ class VoiceOrb:
         self._stop_event.set()
         if not thread:
             return
+        hwnd = self._hwnd
+        if hwnd:
+            user32.PostMessageW(hwnd, WM_NULL, 0, 0)
         thread.join(timeout=STOP_TIMEOUT_SECONDS)
         if thread.is_alive():
             self.logger.warning("Voice orb did not close within timeout")
@@ -419,7 +432,15 @@ class VoiceOrb:
     def _move_to(self, x, y):
         self._pos = (x, y)
         canvas = self._surface["canvas"]
-        user32.SetWindowPos(self._hwnd, wintypes.HWND(HWND_TOPMOST), x, y, canvas, canvas, SWP_NOACTIVATE)
+        user32.SetWindowPos(self._hwnd, None, x, y, canvas, canvas, SWP_NOZORDER | SWP_NOACTIVATE)
+
+    def _apply_drag_target(self):
+        target, self._drag_target = self._drag_target, None
+        if target is None or target == self._pos:
+            return
+        self._pos = target
+        user32.UpdateLayeredWindow(self._hwnd, None, ctypes.byref(POINT(*target)), None,
+                                   None, None, 0, None, 0)
 
     def _snap(self, x, y):
         canvas = self._surface["canvas"]
@@ -475,11 +496,12 @@ class VoiceOrb:
             dx, dy = pt.x - self._drag_origin[0], pt.y - self._drag_origin[1]
             self._drag_distance = max(self._drag_distance, abs(dx) + abs(dy))
             if not self.locked and self._drag_distance > CLICK_SLOP:
-                self._move_to(self._window_origin[0] + dx, self._window_origin[1] + dy)
+                self._drag_target = (self._window_origin[0] + dx, self._window_origin[1] + dy)
             return True
 
         if msg == WM_LBUTTONUP and self._dragging:
             self._dragging = False
+            self._apply_drag_target()
             user32.ReleaseCapture()
             if self._drag_distance <= CLICK_SLOP:
                 self._start_click_thread()
@@ -491,6 +513,7 @@ class VoiceOrb:
 
         if msg == WM_CAPTURECHANGED:
             self._dragging = False
+            self._drag_target = None
             return False
 
         if msg == WM_MOUSEWHEEL:
@@ -532,27 +555,49 @@ class VoiceOrb:
 
 
     def _loop(self):
-        msg = wintypes.MSG()
         start = time.monotonic()
+        next_frame_at = start
         while not self._stop_event.is_set():
-            while user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, PM_REMOVE):
-                user32.TranslateMessage(ctypes.byref(msg))
-                user32.DispatchMessageW(ctypes.byref(msg))
+            self._pump_messages()
 
-            frame_start = time.monotonic()
+            now = time.monotonic()
             if self._rebuild_requested:
                 self._rebuild_requested = False
                 self._rebuild_centered()
-            self._maintain_window(frame_start)
+            self._maintain_window(now)
 
             if not self._shown:
-                self._stop_event.wait(HIDDEN_POLL_SECONDS)
+                self._wait_for_messages(HIDDEN_POLL_SECONDS)
                 continue
 
-            self._draw(frame_start - start)
-            elapsed = time.monotonic() - frame_start
-            fps = FPS_ACTIVE if self.state == "recording" else FPS_IDLE * 2 if self.state == "processing" else FPS_IDLE
-            self._stop_event.wait(max(1.0 / fps - elapsed, elapsed * (1.0 / CPU_BUDGET - 1.0), 0.005))
+            if now >= next_frame_at:
+                self._draw(now - start)
+                elapsed = time.monotonic() - now
+                budget_wait = min(elapsed * (1.0 / CPU_BUDGET - 1.0), MAX_BUDGET_WAIT_SECONDS)
+                if self._dragging:
+                    budget_wait = 0.0
+                next_frame_at = now + max(1.0 / self._target_fps() - elapsed, budget_wait, 0.005) + elapsed
+            self._wait_for_messages(next_frame_at - time.monotonic())
+
+    def _target_fps(self) -> int:
+        if self.state == "recording":
+            return FPS_ACTIVE
+        if self.state == "processing":
+            return FPS_IDLE * 2
+        return FPS_IDLE
+
+    def _pump_messages(self):
+        msg = wintypes.MSG()
+        while user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, PM_REMOVE):
+            user32.TranslateMessage(ctypes.byref(msg))
+            user32.DispatchMessageW(ctypes.byref(msg))
+        self._apply_drag_target()
+
+    def _wait_for_messages(self, seconds: float):
+        if seconds <= 0 or self._stop_event.is_set():
+            return
+        user32.MsgWaitForMultipleObjectsEx(0, None, max(1, int(seconds * 1000)),
+                                           QS_ALLINPUT, MWMO_INPUTAVAILABLE)
 
     def _maintain_window(self, now):
         if self.hide_on_fullscreen and now - self._last_fullscreen_check > FULLSCREEN_CHECK_SECONDS:
@@ -599,8 +644,11 @@ class VoiceOrb:
         flash = max(0.0, (self._flash_until - time.monotonic()) / FLASH_DURATION)
 
         surface = self._surface
-        surface["pixels"][:] = self._renderer.render(state, level, t, opacity, flash)
+        self._renderer.render_into(surface["pixels"], state, level, t, opacity, flash)
         gdi32.GdiFlush()
+        self._pump_messages()
+        if self._surface is not surface:
+            return
 
         blend = BLENDFUNCTION(AC_SRC_OVER, 0, 255, AC_SRC_ALPHA)
         size = SIZE(surface["canvas"], surface["canvas"])
