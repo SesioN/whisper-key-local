@@ -24,8 +24,10 @@ powershell.exe -ExecutionPolicy Bypass -File pyapp-build/build-pyapp.ps1
 `-FromSource` embeds a wheel built from the current commit (version `<version>+g<commit>`) instead of installing
 `whisper-key-local` from PyPI. Use it for builds of unreleased branches; uncommitted changes, untracked files and `export-ignore` paths
 are not included (the source is taken from `git archive HEAD`). Building the wheel needs `git`, `python` and network
-access for the build dependencies. Each commit installs into its own pyapp directory; `whisper-key self update`
-replaces the branch build with the latest PyPI release once a newer one exists.
+access for the build dependencies. Each commit installs into its own pyapp directory.
+
+`whisper-key self update` is patched out: it would install upstream's PyPI package. The app updates itself from
+the fork's GitHub releases (`update_checker.py`).
 
 `-Release` (with `-FromSource`) gives the embedded wheel the plain `pyproject.toml` version instead of
 `<version>+g<commit>`. The GitHub release workflow uses it for tagged builds.

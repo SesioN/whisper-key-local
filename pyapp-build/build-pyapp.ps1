@@ -135,6 +135,17 @@ function Set-PatchedText {
     [System.IO.File]::WriteAllText($Path, $Content)
 }
 
+function Patch-SelfUpdate {
+    param($PyAppSourcePath)
+    Set-PatchedText (Join-Path $PyAppSourcePath "src\commands\self_cmd\update.rs") @'
+    pub fn exec(self) -> Result<()> {
+'@ @'
+    pub fn exec(self) -> Result<()> {
+        println!("Whisper Key installs updates from https://github.com/SesioN/whisper-key-local/releases when it starts");
+        exit(1);
+'@ 'Whisper Key installs updates from'
+}
+
 function Patch-NoTerminalSupport {
     param($PyAppSourcePath)
 
@@ -260,6 +271,9 @@ if (Test-Path $IconPath) {
 
 Write-Host "Patching no-terminal support..." -ForegroundColor Yellow
 Patch-NoTerminalSupport $PyAppSourcePath
+
+Write-Host "Disabling pyapp self update..." -ForegroundColor Yellow
+Patch-SelfUpdate $PyAppSourcePath
 
 Write-Host "Starting pyapp build for $AppName v$AppVersion..." -ForegroundColor Green
 Write-Host "PyApp source: $PyAppSourcePath" -ForegroundColor Gray
