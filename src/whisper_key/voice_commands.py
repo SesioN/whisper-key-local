@@ -227,6 +227,13 @@ class VoiceCommandManager:
 
     def _send_hotkey(self, hotkey_str: str, trigger: str):
         keys = [k.strip() for k in hotkey_str.lower().split('+')]
+        if keyboard.is_foreground_input_blocked():
+            message = f"Target window runs as administrator - hotkey '{trigger}' was not sent."
+            self.logger.warning(message)
+            print(f"   ⚠ {message}")
+            if self.clipboard_manager and self.clipboard_manager.on_delivery_blocked:
+                self.clipboard_manager.on_delivery_blocked(message)
+            return
         try:
             keyboard.send_hotkey(*keys)
             self.logger.info(f"Sent hotkey '{trigger}': {hotkey_str}")

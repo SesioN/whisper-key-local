@@ -486,6 +486,14 @@ class SystemTray:
         tooltip = self.tray_config.get('tooltip', 'Whisper Key')
         self.icon.title = f"{tooltip} - {text}"[:127] if text else tooltip
 
+    def notify(self, message: str):
+        if not self.icon or not self.is_running:
+            return
+        try:
+            self.icon.notify(message, "Whisper Key")
+        except Exception as e:
+            self.logger.error(f"Failed to show tray notification: {e}")
+
     def refresh_menu(self):
         if not self.icon:
             return
