@@ -63,6 +63,7 @@ Open the system tray / menu bar icon to:
 - Select audio host and input device, or mute the microphone
 - Toggle auto-paste, copy to clipboard, audio feedback and voice-activated recording
 - Open the voice detection sensitivity window and floating button options (Windows)
+- Manage shortcuts: record a primary and secondary binding per action, or unset one (Windows, **Shortcuts...**)
 - Open the settings, commands and log files
 
 ## 🗣️ Voice Commands
@@ -131,12 +132,12 @@ Delete this file and restart app to reset to defaults.
 | `post_processing.strip_trailing_period` | `false` | Strip trailing period from output |
 | `post_processing.corrections` | `{}` | Fix recurring misheard words, e.g. `CAPEX: [cap x]` |
 | **Hotkeys** |||
-| `hotkey.recording_hotkey` | `ctrl+win` / `fn+ctrl` | Windows / macOS |
-| `hotkey.stop_key` | `ctrl` / `fn` | Stop recording |
-| `hotkey.auto_send_key` | `alt` / `option` | Stop + paste + Enter |
-| `hotkey.cancel_combination` | `esc` / `shift` | Cancel recording |
+| `hotkey.recording_hotkey` | `[ctrl+win, ""]` / `[fn+ctrl, ""]` | Start recording. Every hotkey takes `[primary, secondary]`; `""` leaves a slot unset, an action with no bindings is disabled. Edit them from the tray **Shortcuts...** window (Windows) |
+| `hotkey.stop_key` | `[ctrl, ""]` / `[fn, ""]` | Stop recording |
+| `hotkey.auto_send_key` | `[alt, ""]` / `[option, ""]` | Stop + paste + Enter |
+| `hotkey.cancel_combination` | `[esc, ""]` / `[shift, ""]` | Cancel recording |
 | `hotkey.recording_mode` | `toggle` | toggle or push_to_talk |
-| `hotkey.command_hotkey` | `alt+win` / `fn+command` | Voice command mode |
+| `hotkey.command_hotkey` | `[alt+win, ""]` / `[fn+command, ""]` | Voice command mode |
 | **Voice Activity Detection** |||
 | `vad.vad_precheck_enabled` | `true` | Prevent hallucinations on silence |
 | `vad.vad_onset_threshold` | `0.7` | Speech detection start (0.0-1.0) |

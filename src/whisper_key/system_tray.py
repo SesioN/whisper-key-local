@@ -36,6 +36,7 @@ class SystemTray:
         self.config_manager = config_manager
         self.model_registry = model_registry
         self.console_config = console_config or {}
+        self.shortcut_manager_window = None
         self.logger = logging.getLogger(__name__)
                
         self.icon = None  # pystray object, holds menu, state, etc.
@@ -218,6 +219,7 @@ class SystemTray:
                 pystray.MenuItem("Open config folder...", self._open_config_folder),
                 pystray.MenuItem("Open settings file...", self._open_config_file),
                 pystray.MenuItem("Open commands file...", self._open_commands_file) if voice_commands_enabled else None,
+                pystray.MenuItem("Shortcuts...", self._open_shortcut_manager_window) if self.shortcut_manager_window else None,
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem(
                     "Audio Host",
@@ -409,6 +411,13 @@ class SystemTray:
         except Exception as e:
             self.logger.error(f"Error selecting audio host {host_name}: {e}")
 
+    def attach_shortcut_manager_window(self, shortcut_manager_window):
+        self.shortcut_manager_window = shortcut_manager_window
+        self.refresh_menu()
+
+    def _open_shortcut_manager_window(self, icon=None, item=None):
+        self.shortcut_manager_window.open()
+
     def _open_vad_sensitivity_window(self, icon=None, item=None):
         self.state_manager.open_vad_sensitivity_window()
 
@@ -515,6 +524,9 @@ class SystemTray:
             return False
     
     def stop(self):
+        if self.shortcut_manager_window:
+            self.shortcut_manager_window.stop()
+
         if not self.is_running:
             return
 

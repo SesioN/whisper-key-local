@@ -6,7 +6,7 @@ from io import StringIO
 
 from ruamel.yaml import YAML
 
-from .utils import resolve_asset_path, beautify_hotkey, get_user_app_data_path, get_version
+from .utils import resolve_asset_path, beautify_hotkey_bindings, get_user_app_data_path, get_version
 from .platform import IS_MACOS
 
 REPO_URL = "https://github.com/SesioN/whisper-key-local"
@@ -22,6 +22,9 @@ def _build_settings_header():
         f"# Defaults reference: {REPO_URL}/blob/{ref}/src/whisper_key/config.defaults.yaml\n"
         "\n"
     )
+
+HOTKEY_ACTIONS = ('recording_hotkey', 'command_hotkey', 'stop_key', 'auto_send_key', 'cancel_combination')
+HOTKEY_BINDING_SLOTS = 2
 
 EXTENSIBLE_PATHS = {'whisper.models', 'streaming.models', 'post_processing.corrections'}
 
@@ -77,7 +80,25 @@ def _resolve_platform_values(config: Dict[str, Any]) -> Dict[str, Any]:
             _resolve_platform_values(value)
         elif isinstance(value, str) and ' | macos:' in value:
             config[key] = _parse_platform_value(value)
+        elif isinstance(value, list):
+            config[key] = [_parse_platform_value(item) if isinstance(item, str) and ' | macos:' in item else item
+                           for item in value]
     return config
+
+
+def normalize_hotkey_bindings(value) -> list:
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        value = []
+    bindings = [item.lower().strip() if isinstance(item, str) else '' for item in value[:HOTKEY_BINDING_SLOTS]]
+    return bindings + [''] * (HOTKEY_BINDING_SLOTS - len(bindings))
+
+
+def _normalize_hotkey_section(config: Dict[str, Any]):
+    hotkey_section = config.get('hotkey') or {}
+    for action in HOTKEY_ACTIONS:
+        hotkey_section[action] = normalize_hotkey_bindings(hotkey_section.get(action))
 
 
 class ConfigManager:   
@@ -256,7 +277,7 @@ class ConfigManager:
         return path
     
     def _get_stop_key_display(self) -> str:
-        return beautify_hotkey(self.config['hotkey']['stop_key'])
+        return beautify_hotkey_bindings(self.config['hotkey']['stop_key'])
 
     def print_stop_instructions_based_on_config(self):
         recording_mode = self.config['hotkey'].get('recording_mode', 'toggle')
@@ -267,7 +288,7 @@ class ConfigManager:
 
         stop_key = self._get_stop_key_display()
         auto_paste_enabled = self.config['clipboard']['auto_paste']
-        auto_send_key = self.config['hotkey'].get('auto_send_key', '')
+        auto_send_key = beautify_hotkey_bindings(self.config['hotkey']['auto_send_key'])
 
         if auto_paste_enabled:
             print(f"   [{stop_key}] to stop and auto-paste")
@@ -275,23 +296,23 @@ class ConfigManager:
             print(f"   [{stop_key}] to stop and copy to clipboard")
 
         if auto_paste_enabled and auto_send_key:
-            print(f"   [{beautify_hotkey(auto_send_key)}] to auto-paste and send with ENTER")
+            print(f"   [{auto_send_key}] to auto-paste and send with ENTER")
 
     def print_startup_hotkey_instructions(self):
-        recording_hotkey = beautify_hotkey(self.config['hotkey']['recording_hotkey'])
+        recording_hotkey = beautify_hotkey_bindings(self.config['hotkey']['recording_hotkey'])
         recording_mode = self.config['hotkey'].get('recording_mode', 'toggle')
         mode_hint = " (hold to record)" if recording_mode == "push_to_talk" else ""
         print(f"   [{recording_hotkey}] for transcription{mode_hint}")
 
         if self.get_voice_commands_config().get('enabled', True):
-            command_hotkey = self.config['hotkey'].get('command_hotkey')
+            command_hotkey = beautify_hotkey_bindings(self.config['hotkey']['command_hotkey'])
             if command_hotkey:
-                print(f"   [{beautify_hotkey(command_hotkey)}] for voice commands")
+                print(f"   [{command_hotkey}] for voice commands")
 
     def print_command_stop_instructions(self):
         stop_key = self._get_stop_key_display()
-        auto_send_key = self.config['hotkey'].get('auto_send_key', '')
-        keys = f"{stop_key}/{beautify_hotkey(auto_send_key)}" if auto_send_key else stop_key
+        auto_send_key = beautify_hotkey_bindings(self.config['hotkey']['auto_send_key'])
+        keys = " / ".join(key for key in (stop_key, auto_send_key) if key)
         print(f"   [{keys}] to stop and execute command")
     
     def get_whisper_config(self) -> Dict[str, Any]:
@@ -302,6 +323,17 @@ class ConfigManager:
     
     def get_hotkey_config(self) -> Dict[str, Any]:
         return self.config['hotkey'].copy()
+
+    def get_hotkey_bindings(self) -> Dict[str, list]:
+        return {action: list(self.config['hotkey'][action]) for action in HOTKEY_ACTIONS}
+
+    def get_default_hotkey_bindings(self) -> Dict[str, list]:
+        return {action: list(self._defaults_baseline['hotkey'][action]) for action in HOTKEY_ACTIONS}
+
+    def update_hotkey_bindings(self, hotkey_bindings: Dict[str, list]):
+        for action in HOTKEY_ACTIONS:
+            self.config['hotkey'][action] = normalize_hotkey_bindings(hotkey_bindings[action])
+        self._save_user_overrides()
     
     def get_audio_config(self) -> Dict[str, Any]:
         return self.config['audio'].copy()
@@ -422,18 +454,30 @@ def _validate_numeric_range(config, default_config, path, logger, min_val=None, 
         _set_to_default(config, default_config, path, current_value, logger)
 
 
-def _resolve_hotkey_conflicts(config, default_config, stop_key, auto_send_key, recording_hotkey, command_hotkey, logger):
-    if stop_key == auto_send_key:
-        logger.warning(f"   ✗ Auto-send key disabled: '{auto_send_key}' conflicts with stop key")
-        _set_config_value_at_path(config, 'hotkey.auto_send_key', '')
+def _resolve_hotkey_conflicts(config, default_config, logger):
+    owners_by_binding = {}
+    for action in HOTKEY_ACTIONS:
+        bindings = _get_config_value_at_path(config, f'hotkey.{action}')
+        had_bindings = any(bindings)
+        _assign_free_bindings(action, bindings, owners_by_binding, logger)
+        if had_bindings and not any(bindings):
+            default_bindings = normalize_hotkey_bindings(
+                _resolve_platform_values({'value': copy.deepcopy(default_config['hotkey'][action])})['value'])
+            logger.warning(f"   ✗ {action} has no free binding left, falling back to its default")
+            _assign_free_bindings(action, default_bindings, owners_by_binding, logger)
+            _set_config_value_at_path(config, f'hotkey.{action}', default_bindings)
 
-    if stop_key == recording_hotkey:
-        logger.warning(f"   ✗ Stop key '{stop_key}' conflicts with recording hotkey, resetting to default")
-        _set_to_default(config, default_config, 'hotkey.stop_key', stop_key, logger)
 
-    if command_hotkey and command_hotkey == recording_hotkey:
-        logger.warning(f"   ✗ Command hotkey disabled: '{command_hotkey}' conflicts with recording hotkey")
-        _set_config_value_at_path(config, 'hotkey.command_hotkey', '')
+def _assign_free_bindings(action, bindings, owners_by_binding, logger):
+    for slot, binding in enumerate(bindings):
+        if not binding:
+            continue
+        owner = owners_by_binding.get(binding)
+        if owner:
+            logger.warning(f"   ✗ {action} binding '{binding}' disabled: already used by {owner}")
+            bindings[slot] = ''
+        else:
+            owners_by_binding[binding] = action
 
 
 def validate_config(config, default_config, logger):
@@ -488,10 +532,7 @@ def validate_config(config, default_config, logger):
     if floating_widget_position is not None and not isinstance(floating_widget_position, str):
         _set_to_default(config, default_config, 'floating_widget.position', floating_widget_position, logger)
 
-    stop_key = _get_config_value_at_path(config, 'hotkey.stop_key')
-    auto_send_key = _get_config_value_at_path(config, 'hotkey.auto_send_key')
-    recording_hotkey = _get_config_value_at_path(config, 'hotkey.recording_hotkey')
-    command_hotkey = _get_config_value_at_path(config, 'hotkey.command_hotkey')
-    _resolve_hotkey_conflicts(config, default_config, stop_key, auto_send_key, recording_hotkey, command_hotkey, logger)
+    _normalize_hotkey_section(config)
+    _resolve_hotkey_conflicts(config, default_config, logger)
 
     return config

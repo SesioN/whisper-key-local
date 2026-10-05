@@ -1,87 +1,70 @@
 import logging
+import threading
 
 from .platform import hotkeys
 from .state_manager import StateManager
 
+HOTKEY_ACTIONS = ('recording_hotkey', 'command_hotkey', 'stop_key', 'auto_send_key', 'cancel_combination')
+
 class HotkeyListener:
-    def __init__(self, state_manager: StateManager, recording_hotkey: str, stop_key: str,
-                 auto_send_key: str = None, cancel_combination: str = None,
-                 command_hotkey: str = None, recording_mode: str = "toggle"):
+    def __init__(self, state_manager: StateManager, hotkey_bindings: dict, recording_mode: str = "toggle"):
         self.state_manager = state_manager
-        self.recording_hotkey = recording_hotkey
-        self.stop_key = stop_key
-        self.auto_send_key = auto_send_key
-        self.cancel_combination = cancel_combination
-        self.command_hotkey = command_hotkey
+        self.hotkey_bindings_by_action = self._clean_bindings(hotkey_bindings)
         self.recording_mode = recording_mode
         self.keys_armed = True
         self.is_listening = False
+        self.is_shut_down = False
+        self._listening_lock = threading.RLock()
         self.logger = logging.getLogger(__name__)
 
         self._setup_hotkeys()
 
         self.start_listening()
 
-    def _setup_hotkeys(self):
-        hotkey_configs = []
+    def _clean_bindings(self, hotkey_bindings: dict) -> dict:
+        return {action: [binding.lower().strip() for binding in hotkey_bindings.get(action) or [] if binding and binding.strip()]
+                for action in HOTKEY_ACTIONS}
 
-        if self.recording_mode == "push_to_talk":
-            hotkey_configs.append({
-                'combination': self.recording_hotkey,
+    def _build_action_configs(self) -> dict:
+        push_to_talk = self.recording_mode == "push_to_talk"
+        return {
+            'recording_hotkey': {
                 'callback': self._standard_hotkey_pressed,
-                'release_callback': self._push_to_talk_released,
-                'name': 'standard (push-to-talk)'
-            })
-        else:
-            hotkey_configs.append({
-                'combination': self.recording_hotkey,
-                'callback': self._standard_hotkey_pressed,
+                'release_callback': self._push_to_talk_released if push_to_talk else self._arm_keys_on_release,
+                'name': 'standard (push-to-talk)' if push_to_talk else 'standard'
+            },
+            'stop_key': {
+                'callback': self._stop_key_pressed,
                 'release_callback': self._arm_keys_on_release,
-                'name': 'standard'
-            })
-
-        hotkey_configs.append({
-            'combination': self.stop_key,
-            'callback': self._stop_key_pressed,
-            'release_callback': self._arm_keys_on_release,
-            'name': 'stop'
-        })
-
-        if self.auto_send_key:
-            hotkey_configs.append({
-                'combination': self.auto_send_key,
+                'name': 'stop'
+            },
+            'auto_send_key': {
                 'callback': self._auto_send_key_pressed,
                 'release_callback': self._arm_keys_on_release,
                 'name': 'auto-send'
-            })
-
-        if self.cancel_combination:
-            hotkey_configs.append({
-                'combination': self.cancel_combination,
+            },
+            'cancel_combination': {
                 'callback': self._cancel_hotkey_pressed,
                 'name': 'cancel'
-            })
+            },
+            'command_hotkey': {
+                'callback': self._command_hotkey_pressed,
+                'release_callback': self._push_to_talk_released if push_to_talk else None,
+                'name': 'command (push-to-talk)' if push_to_talk else 'command'
+            },
+        }
 
-        if self.command_hotkey:
-            if self.recording_mode == "push_to_talk":
-                hotkey_configs.append({
-                    'combination': self.command_hotkey,
-                    'callback': self._command_hotkey_pressed,
-                    'release_callback': self._push_to_talk_released,
-                    'name': 'command (push-to-talk)'
-                })
-            else:
-                hotkey_configs.append({
-                    'combination': self.command_hotkey,
-                    'callback': self._command_hotkey_pressed,
-                    'name': 'command'
-                })
+    def _setup_hotkeys(self):
+        hotkey_configs = []
+        for action, action_config in self._build_action_configs().items():
+            for combination in self.hotkey_bindings_by_action[action]:
+                hotkey_configs.append({**action_config, 'combination': combination})
 
         hotkey_configs.sort(key=self._get_hotkey_combination_specificity, reverse=True)
 
         self.hotkey_bindings = []
         for config in hotkey_configs:
-            hotkey = config['combination'].lower().strip()
+            hotkey = config['combination']
             self.hotkey_bindings.append([
                 hotkey,
                 config['callback'],
@@ -97,7 +80,7 @@ class HotkeyListener:
         return len(combination.split('+'))
 
     def _standard_hotkey_pressed(self):
-        self.logger.info(f"Standard hotkey pressed: {self.recording_hotkey}")
+        self.logger.info("Standard hotkey pressed")
         self.keys_armed = False
         self.state_manager.start_recording()
 
@@ -106,16 +89,16 @@ class HotkeyListener:
         self.state_manager.stop_recording()
 
     def _stop_key_pressed(self):
-        self.logger.debug(f"Stop key pressed: {self.stop_key}, keys_armed={self.keys_armed}")
+        self.logger.debug(f"Stop key pressed, keys_armed={self.keys_armed}")
 
         if self.keys_armed:
-            self.logger.info(f"Stop key activated: {self.stop_key}")
+            self.logger.info("Stop key activated")
             self.state_manager.stop_recording()
         else:
             self.logger.debug("Stop key ignored - waiting for key release first")
 
     def _auto_send_key_pressed(self):
-        self.logger.debug(f"Auto-send key pressed: {self.auto_send_key}, keys_armed={self.keys_armed}")
+        self.logger.debug(f"Auto-send key pressed, keys_armed={self.keys_armed}")
 
         if not self.state_manager.audio_recorder.get_recording_status():
             self.logger.debug("Auto-send key ignored - not currently recording")
@@ -130,11 +113,11 @@ class HotkeyListener:
         self.state_manager.stop_recording(use_auto_enter=True)
 
     def _cancel_hotkey_pressed(self):
-        self.logger.info(f"Cancel hotkey pressed: {self.cancel_combination}")
+        self.logger.info("Cancel hotkey pressed")
         self.state_manager.cancel_recording_hotkey_pressed()
 
     def _command_hotkey_pressed(self):
-        self.logger.info(f"Command hotkey pressed: {self.command_hotkey}")
+        self.logger.info("Command hotkey pressed")
         self.keys_armed = False
         self.state_manager.start_command_recording()
 
@@ -143,47 +126,47 @@ class HotkeyListener:
         self.keys_armed = True
 
     def start_listening(self):
-        if self.is_listening:
-            return
+        with self._listening_lock:
+            if self.is_listening or self.is_shut_down:
+                return
 
-        try:
-            hotkeys.register(self.hotkey_bindings)
-            hotkeys.start()
-            self.is_listening = True
+            try:
+                hotkeys.clear()
+                hotkeys.register(self.hotkey_bindings)
+                hotkeys.start()
+                self.is_listening = True
 
-        except Exception as e:
-            self.logger.error(f"Failed to start hotkey listener: {e}")
-            raise
+            except Exception as e:
+                self.logger.error(f"Failed to start hotkey listener: {e}")
+                raise
 
     def stop_listening(self):
-        if not self.is_listening:
-            return
+        with self._listening_lock:
+            if not self.is_listening:
+                return
 
-        try:
-            hotkeys.stop()
-            self.is_listening = False
-            self.logger.info("Hotkey listener stopped")
+            try:
+                hotkeys.stop()
+                self.is_listening = False
+                self.logger.info("Hotkey listener stopped")
 
-        except Exception as e:
-            self.logger.error(f"Error stopping hotkey listener: {e}")
+            except Exception as e:
+                self.logger.error(f"Error stopping hotkey listener: {e}")
 
-    def change_hotkey_config(self, setting: str, value):
-        valid_settings = ['recording_hotkey', 'stop_key', 'auto_send_key', 'cancel_combination', 'command_hotkey', 'recording_mode']
+    def shutdown(self):
+        with self._listening_lock:
+            self.is_shut_down = True
+            self.stop_listening()
 
-        if setting not in valid_settings:
-            raise ValueError(f"Invalid setting '{setting}'. Valid options: {valid_settings}")
-
-        old_value = getattr(self, setting)
-
-        if old_value == value:
-            return
-
-        setattr(self, setting, value)
-        self.logger.info(f"Changed {setting}: {old_value} -> {value}")
-
-        self.stop_listening()
-        self._setup_hotkeys()
-        self.start_listening()
+    def apply_hotkey_bindings(self, hotkey_bindings: dict):
+        with self._listening_lock:
+            was_listening = self.is_listening
+            self.stop_listening()
+            self.hotkey_bindings_by_action = self._clean_bindings(hotkey_bindings)
+            self.keys_armed = True
+            self._setup_hotkeys()
+            if was_listening:
+                self.start_listening()
 
     def is_active(self) -> bool:
         return self.is_listening
