@@ -5,6 +5,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ## [Unreleased]
 
 ### Added
+- **Large-V3-Turbo German model** - `large-v3-turbo-german` in the model menu: a CTranslate2 conversion of primeline/whisper-large-v3-turbo-german, fine-tuned for German transcription
 - **`supports_prompt: false` per model** - skips `initial_prompt` and `hotwords` for models that repeat or derail with them, such as TheStageAI's TheWhisper (faster-whisper and whisper.cpp)
 - **Recording mode in the tray** - switch between toggle and push-to-talk from the tray **Recording mode** menu; the hotkeys are re-registered right away
 - **Start with Windows** - tray toggle that registers Whisper Key in the per-user Run key; it uses `whisper-key-no-term.exe` when available and shows up in Task Manager's Startup tab (Windows)
