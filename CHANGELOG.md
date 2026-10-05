@@ -4,6 +4,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+- **Shortcuts window** - tray **Shortcuts...** lists every hotkey; record a primary and a secondary binding per action by pressing the keys, unset or reset them, and apply them without a restart. Duplicate bindings are blocked (Windows)
+
+### Changed
+- **Hotkeys take two bindings** - `recording_hotkey`, `command_hotkey`, `stop_key`, `auto_send_key` and `cancel_combination` are now `[primary, secondary]` lists; single-string values from older settings are still read as the primary binding. A binding already used by an earlier action is disabled at startup; an action left with no binding falls back to its default
+
 ## [1.0.0] - 2026-10-05
 
 First release of the independent fork [SesioN/whisper-key-local](https://github.com/SesioN/whisper-key-local),

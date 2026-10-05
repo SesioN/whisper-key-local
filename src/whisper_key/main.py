@@ -338,22 +338,48 @@ def setup_signal_handlers(shutdown_event):
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-def setup_hotkey_listener(hotkey_config, state_manager, voice_commands_enabled=True):
+def get_active_hotkey_bindings(hotkey_bindings, voice_commands_enabled):
+    if voice_commands_enabled:
+        return hotkey_bindings
+    return {**hotkey_bindings, 'command_hotkey': []}
+
+def setup_hotkey_listener(config_manager, state_manager, voice_commands_enabled=True):
     return HotkeyListener(
         state_manager=state_manager,
-        recording_hotkey=hotkey_config['recording_hotkey'],
-        stop_key=hotkey_config['stop_key'],
-        auto_send_key=hotkey_config.get('auto_send_key'),
-        cancel_combination=hotkey_config.get('cancel_combination'),
-        command_hotkey=hotkey_config.get('command_hotkey') if voice_commands_enabled else None,
-        recording_mode=hotkey_config.get('recording_mode', 'toggle')
+        hotkey_bindings=get_active_hotkey_bindings(config_manager.get_hotkey_bindings(), voice_commands_enabled),
+        recording_mode=config_manager.get_hotkey_config()['recording_mode']
+    )
+
+def setup_shortcut_manager_window(config_manager, hotkey_listener, voice_commands_enabled):
+    if not IS_WINDOWS:
+        return None
+    try:
+        from .shortcut_manager_window import ShortcutManagerWindow
+        from .platform import hotkeys
+    except ImportError as e:
+        logging.getLogger(__name__).warning(f"Shortcut manager window not available: {e}")
+        return None
+
+    def save_hotkey_bindings(hotkey_bindings):
+        config_manager.update_hotkey_bindings(hotkey_bindings)
+        hotkey_listener.apply_hotkey_bindings(get_active_hotkey_bindings(config_manager.get_hotkey_bindings(), voice_commands_enabled))
+        print("   ✓ Shortcuts saved")
+        config_manager.print_startup_hotkey_instructions()
+
+    return ShortcutManagerWindow(
+        get_hotkey_bindings=config_manager.get_hotkey_bindings,
+        get_default_hotkey_bindings=config_manager.get_default_hotkey_bindings,
+        on_bindings_saved=save_hotkey_bindings,
+        pause_hotkeys=hotkey_listener.stop_listening,
+        resume_hotkeys=hotkey_listener.start_listening,
+        key_name_for_virtual_key=hotkeys.key_name_for_virtual_key
     )
 
 def shutdown_app(hotkey_listener: HotkeyListener, state_manager: StateManager, logger: logging.Logger):
     try:
-        if hotkey_listener and hotkey_listener.is_active():
+        if hotkey_listener:
             logger.info("Stopping hotkey listener...")
-            hotkey_listener.stop_listening()
+            hotkey_listener.shutdown()
     except Exception as ex:
         logger.error(f"Error stopping hotkey listener: {ex}")
 
@@ -404,7 +430,6 @@ def main():
 
         whisper_config = config_manager.get_whisper_config()
         audio_config = config_manager.get_audio_config()
-        hotkey_config = config_manager.get_hotkey_config()
         clipboard_config = config_manager.get_clipboard_config()
         tray_config = config_manager.get_system_tray_config()
         audio_feedback_config = config_manager.get_audio_feedback_config()
@@ -461,7 +486,9 @@ def main():
         floating_widget = setup_floating_widget(floating_widget_config, state_manager)
         state_manager.attach_components(audio_recorder, system_tray, floating_widget)
         
-        hotkey_listener = setup_hotkey_listener(hotkey_config, state_manager, voice_commands_config['enabled'])
+        hotkey_listener = setup_hotkey_listener(config_manager, state_manager, voice_commands_config['enabled'])
+        system_tray.attach_shortcut_manager_window(
+            setup_shortcut_manager_window(config_manager, hotkey_listener, voice_commands_config['enabled']))
 
         state_manager.get_runtimes()
         system_tray.start()
