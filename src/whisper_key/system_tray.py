@@ -175,11 +175,15 @@ class SystemTray:
 
         orb_locked = self.config_manager.get_setting('floating_widget', 'locked')
         orb_hide_on_fullscreen = self.config_manager.get_setting('floating_widget', 'orb_hide_on_fullscreen')
+        orb_lock_button = self.config_manager.get_setting('floating_widget', 'orb_lock_button')
+        orb_mute_button = self.config_manager.get_setting('floating_widget', 'orb_mute_button')
         skin_items = [pystray.MenuItem(skin_class.LABEL, make_skin_selector(skin), radio=True, checked=make_is_current_skin(skin))
                       for skin, skin_class in ORB_SKINS.items()]
         return items + [
             pystray.MenuItem("Orb look", pystray.Menu(*skin_items)),
             pystray.MenuItem("Lock position", lambda icon, item: self._set_orb_locked(not orb_locked), checked=lambda item: orb_locked),
+            pystray.MenuItem("Show lock button", lambda icon, item: self._set_orb_buttons(not orb_lock_button, orb_mute_button), checked=lambda item: orb_lock_button),
+            pystray.MenuItem("Show mute button", lambda icon, item: self._set_orb_buttons(orb_lock_button, not orb_mute_button), checked=lambda item: orb_mute_button),
             pystray.MenuItem("Hide in fullscreen apps", lambda icon, item: self._set_orb_hide_on_fullscreen(not orb_hide_on_fullscreen), checked=lambda item: orb_hide_on_fullscreen),
         ]
 
@@ -193,6 +197,9 @@ class SystemTray:
 
     def _set_orb_locked(self, locked: bool):
         self.state_manager.update_orb_locked(locked)
+
+    def _set_orb_buttons(self, show_lock_button: bool, show_mute_button: bool):
+        self.state_manager.update_orb_buttons(show_lock_button, show_mute_button)
         self.refresh_menu()
 
     def _set_orb_hide_on_fullscreen(self, hide_on_fullscreen: bool):

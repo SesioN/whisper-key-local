@@ -8,6 +8,7 @@ from ctypes import wintypes
 from typing import Callable, Optional
 
 from .orb_skins import DEFAULT_SKIN, SKINS, get_skin
+from .orb_skins.badges import BadgeRenderer
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
@@ -51,6 +52,8 @@ WM_LBUTTONDOWN = 0x0201
 WM_LBUTTONUP = 0x0202
 WM_MOUSEWHEEL = 0x020A
 WM_CAPTURECHANGED = 0x0215
+WM_MOUSELEAVE = 0x02A3
+TME_LEAVE = 0x00000002
 WM_DPICHANGED = 0x02E0
 
 DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = ctypes.c_void_p(-4)
@@ -87,6 +90,11 @@ class BITMAPINFOHEADER(ctypes.Structure):
 
 class BITMAPINFO(ctypes.Structure):
     _fields_ = [("bmiHeader", BITMAPINFOHEADER), ("bmiColors", wintypes.DWORD * 3)]
+
+
+class TRACKMOUSEEVENT(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("dwFlags", wintypes.DWORD),
+                ("hwndTrack", wintypes.HWND), ("dwHoverTime", wintypes.DWORD)]
 
 
 class MONITORINFO(ctypes.Structure):
@@ -147,6 +155,7 @@ def _bind():
     user32.MsgWaitForMultipleObjectsEx.argtypes = [wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD,
                                                    wintypes.DWORD, wintypes.DWORD]
     user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, WPARAM, LPARAM]
+    user32.TrackMouseEvent.argtypes = [ctypes.POINTER(TRACKMOUSEEVENT)]
     user32.GetDpiForWindow.restype = wintypes.UINT
     user32.GetDpiForWindow.argtypes = [wintypes.HWND]
     user32.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
@@ -188,6 +197,9 @@ MAX_BUDGET_WAIT_SECONDS = 0.25
 TOPMOST_REFRESH_SECONDS = 2.0
 FULLSCREEN_CHECK_SECONDS = 1.0
 STOP_TIMEOUT_SECONDS = 3.0
+BADGE_FADE_IN_SECONDS = 0.15
+BADGE_FADE_OUT_SECONDS = 0.4
+BADGE_LINGER_SECONDS = 0.3
 
 
 class VoiceOrb:
@@ -201,8 +213,16 @@ class VoiceOrb:
                  save_position: bool = False,
                  position: Optional[str] = None,
                  locked: bool = False,
-                 hide_on_fullscreen: bool = True):
+                 hide_on_fullscreen: bool = True,
+                 on_lock_click: Optional[Callable[[bool], None]] = None,
+                 on_mute_click: Optional[Callable[[], None]] = None,
+                 show_lock_button: bool = True,
+                 show_mute_button: bool = True):
         self.on_click = on_click
+        self.on_lock_click = on_lock_click
+        self.on_mute_click = on_mute_click
+        self.show_lock_button = show_lock_button
+        self.show_mute_button = show_mute_button
         self.class_name = f"WhisperKeyVoiceOrb{id(self)}"
         self.on_position_changed = on_position_changed
         self.on_size_changed = on_size_changed
@@ -245,6 +265,13 @@ class VoiceOrb:
         self._shown = False
         self._hidden_by_fullscreen = False
         self._dragging = False
+        self._hovered = False
+        self._hover_left_at = 0.0
+        self._badge_visibility = 0.0
+        self._last_badge_update = None
+        self._redraw_now = False
+        self._pressed_badge = None
+        self._badges = None
         self._drag_origin = (0, 0)
         self._window_origin = (0, 0)
         self._drag_distance = 0
@@ -317,6 +344,10 @@ class VoiceOrb:
 
     def set_hide_on_fullscreen(self, hide_on_fullscreen: bool):
         self.hide_on_fullscreen = hide_on_fullscreen
+
+    def set_buttons(self, show_lock_button: bool, show_mute_button: bool):
+        self.show_lock_button = show_lock_button
+        self.show_mute_button = show_mute_button
 
     def stop(self):
         with self._thread_lock:
@@ -416,6 +447,7 @@ class VoiceOrb:
                          "hbmp": hbmp, "old": old, "pixels": pixels}
         skin = get_skin(self.skin)
         self._renderer = skin(canvas, canvas / (2.0 * skin.CANVAS_FACTOR))
+        self._badges = BadgeRenderer(canvas, canvas / (2.0 * skin.CANVAS_FACTOR), self._dpi)
 
     def _release_surface(self):
         surface, self._surface = self._surface, None
@@ -504,7 +536,60 @@ class VoiceOrb:
             self.logger.exception("Voice orb message handling failed")
         return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
 
+    def _enabled_badges(self):
+        kinds = []
+        if self.show_lock_button and self.on_lock_click:
+            kinds.append("lock")
+        if self.show_mute_button and self.on_mute_click:
+            kinds.append("mute")
+        return kinds
+
+    def _client_point(self, lparam):
+        return ctypes.c_short(lparam & 0xFFFF).value, ctypes.c_short((lparam >> 16) & 0xFFFF).value
+
+    def _badge_at(self, lparam):
+        if not self._badges:
+            return None
+        return self._badges.hit(*self._client_point(lparam), self._enabled_badges())
+
+    def _note_hover(self):
+        if self._hovered:
+            return
+        self._hovered = True
+        self._redraw_now = True
+        track = TRACKMOUSEEVENT(ctypes.sizeof(TRACKMOUSEEVENT), TME_LEAVE, self._hwnd, 0)
+        user32.TrackMouseEvent(ctypes.byref(track))
+
+    def _press_badge(self, badge):
+        if badge == "lock":
+            self.locked = not self.locked
+            locked = self.locked
+            self._start_click_thread(lambda: self.on_lock_click(locked))
+        elif badge == "mute":
+            self._start_click_thread(self.on_mute_click)
+        self._redraw_now = True
+
     def _handle_message(self, msg, wparam, lparam) -> bool:
+        if msg == WM_LBUTTONDOWN and self._badge_at(lparam):
+            self._pressed_badge = self._badge_at(lparam)
+            user32.SetCapture(self._hwnd)
+            return True
+
+        if msg == WM_LBUTTONUP and self._pressed_badge:
+            pressed, self._pressed_badge = self._pressed_badge, None
+            user32.ReleaseCapture()
+            if self._badge_at(lparam) == pressed:
+                self._press_badge(pressed)
+            return True
+
+        if msg == WM_MOUSEMOVE:
+            self._note_hover()
+
+        if msg == WM_MOUSELEAVE:
+            self._hovered = False
+            self._hover_left_at = time.monotonic()
+            return True
+
         if msg == WM_LBUTTONDOWN:
             pt = POINT()
             user32.GetCursorPos(ctypes.byref(pt))
@@ -513,6 +598,9 @@ class VoiceOrb:
             self._window_origin = self._pos
             self._drag_distance = 0
             user32.SetCapture(self._hwnd)
+            return True
+
+        if msg == WM_MOUSEMOVE and not self._dragging:
             return True
 
         if msg == WM_MOUSEMOVE and self._dragging:
@@ -529,7 +617,7 @@ class VoiceOrb:
             self._apply_drag_target()
             user32.ReleaseCapture()
             if self._drag_distance <= CLICK_SLOP:
-                self._start_click_thread()
+                self._start_click_thread(self.on_click)
             elif not self.locked:
                 self._move_to(*self._snap(*self._pos))
                 if self.save_position:
@@ -538,6 +626,7 @@ class VoiceOrb:
 
         if msg == WM_CAPTURECHANGED:
             self._dragging = False
+            self._pressed_badge = None
             self._drag_target = None
             return False
 
@@ -556,15 +645,16 @@ class VoiceOrb:
 
         return False
 
-    def _start_click_thread(self):
+    def _start_click_thread(self, callback: Callable[[], None]):
         if self._click_thread and self._click_thread.is_alive():
             return
-        self._click_thread = threading.Thread(target=self._run_click_callback, daemon=True, name="VoiceOrbClick")
+        self._click_thread = threading.Thread(target=self._run_click_callback, args=(callback,),
+                                              daemon=True, name="VoiceOrbClick")
         self._click_thread.start()
 
-    def _run_click_callback(self):
+    def _run_click_callback(self, callback: Callable[[], None]):
         try:
-            self.on_click()
+            callback()
         except Exception:
             self.logger.exception("Voice orb click handler failed")
 
@@ -595,7 +685,8 @@ class VoiceOrb:
                 self._wait_for_messages(HIDDEN_POLL_SECONDS)
                 continue
 
-            if now >= next_frame_at:
+            if now >= next_frame_at or self._redraw_now:
+                self._redraw_now = False
                 self._draw(now - start)
                 elapsed = time.monotonic() - now
                 budget_wait = min(elapsed * (1.0 / CPU_BUDGET - 1.0), MAX_BUDGET_WAIT_SECONDS)
@@ -604,8 +695,29 @@ class VoiceOrb:
                 next_frame_at = now + max(1.0 / self._target_fps() - elapsed, budget_wait, 0.005) + elapsed
             self._wait_for_messages(next_frame_at - time.monotonic())
 
+    def _badge_target(self, now) -> float:
+        if self._hovered or self._pressed_badge:
+            return 1.0
+        return 1.0 if now - self._hover_left_at < BADGE_LINGER_SECONDS else 0.0
+
+    def _badges_animating(self) -> bool:
+        if not self._enabled_badges():
+            return False
+        return self._badge_visibility != self._badge_target(time.monotonic())
+
+    def _update_badge_visibility(self):
+        now = time.monotonic()
+        elapsed = 0.0 if self._last_badge_update is None else now - self._last_badge_update
+        self._last_badge_update = now
+        target = self._badge_target(now)
+        if target > self._badge_visibility:
+            self._badge_visibility = min(target, self._badge_visibility + elapsed / BADGE_FADE_IN_SECONDS)
+        else:
+            self._badge_visibility = max(target, self._badge_visibility - elapsed / BADGE_FADE_OUT_SECONDS)
+        return self._badge_visibility
+
     def _target_fps(self) -> int:
-        if self.state == "recording" or self._active_outcome():
+        if self.state == "recording" or self._active_outcome() or self._badges_animating():
             return FPS_ACTIVE
         if self.state == "processing":
             return FPS_IDLE * 2
@@ -678,6 +790,13 @@ class VoiceOrb:
 
         surface = self._surface
         self._renderer.render_into(surface["pixels"], state, level, t, opacity, flash, self._flash_color)
+        visibility = self._update_badge_visibility()
+        badges = self._enabled_badges()
+        if badges:
+            colors = self._renderer.badge_colors(state)
+            active = {"lock": self.locked, "mute": self.muted}
+            self._badges.composite(surface["pixels"], visibility * opacity,
+                                   [(kind, active[kind], colors) for kind in badges])
         gdi32.GdiFlush()
         self._pump_messages()
         if self._surface is not surface:

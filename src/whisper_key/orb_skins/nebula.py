@@ -162,6 +162,10 @@ class NebulaSkin(OrbSkin):
         self._last_t = None
         self._phase = {"forward": 0.0, "reverse": 0.0, "haze": 0.0, "spiral": 0.0, "lumps": 0.0, "hue": 0.0}
 
+    def badge_colors(self, state: str):
+        palette = PALETTES.get(state, PALETTES["idle"])
+        return palette["core"], palette["warm"], palette["glyph"]
+
     def _build_waveform_fields(self):
         span = 0.44
         rows = np.abs(self.gy[:, 0]) < 0.36

@@ -411,6 +411,12 @@ floating_widget: # Floating Recording Button (Windows only)
     # (nebula also shows a muted look and a short success/error state)
     orb_skin: gold
 
+    # Show a lock button on the orb while hovering it
+    orb_lock_button: true
+
+    # Show a mute button on the orb while hovering it
+    orb_mute_button: true
+
     # Hide the orb while a fullscreen application is in front
     orb_hide_on_fullscreen: true
 

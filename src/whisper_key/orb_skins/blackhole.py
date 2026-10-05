@@ -18,6 +18,10 @@ class BlackHoleSkin(OrbSkin):
     LABEL = "Black hole"
 
     CANVAS_FACTOR = 2.1
+
+    BADGE_FILL = (14, 8, 6)
+    BADGE_RING = COLOR_DISK_INNER
+    BADGE_GLYPH = COLOR_RING
     SUPERSAMPLE = 2
 
     TILT = 0.52

@@ -17,6 +17,10 @@ class GlassSkin(BlobSkin):
     LABEL = "Glass drop"
 
     CANVAS_FACTOR = 2.0
+
+    BADGE_FILL = (28, 40, 52)
+    BADGE_RING = COLOR_RIM_COOL
+    BADGE_GLYPH = COLOR_BODY
     SUPERSAMPLE = 2
 
     HARMONIC_WEIGHT = (0.042, 0.029, 0.019, 0.012)

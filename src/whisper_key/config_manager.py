@@ -532,7 +532,8 @@ def validate_config(config, default_config, logger):
     if _get_config_value_at_path(config, 'floating_widget.orb_skin') not in ORB_SKIN_NAMES:
         _set_to_default(config, default_config, 'floating_widget.orb_skin', _get_config_value_at_path(config, 'floating_widget.orb_skin'), logger)
 
-    for floating_widget_flag in ('floating_widget.enabled', 'floating_widget.save_position', 'floating_widget.locked', 'floating_widget.orb_hide_on_fullscreen'):
+    for floating_widget_flag in ('floating_widget.enabled', 'floating_widget.save_position', 'floating_widget.locked', 'floating_widget.orb_hide_on_fullscreen',
+                                 'floating_widget.orb_lock_button', 'floating_widget.orb_mute_button'):
         flag_value = _get_config_value_at_path(config, floating_widget_flag)
         if not isinstance(flag_value, bool):
             _set_to_default(config, default_config, floating_widget_flag, flag_value, logger)

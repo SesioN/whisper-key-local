@@ -16,6 +16,10 @@ class AuroraSkin(OrbSkin):
 
     CANVAS_FACTOR = 2.2
 
+    BADGE_FILL = (8, 28, 34)
+    BADGE_RING = COLOR_TEAL
+    BADGE_GLYPH = COLOR_VEIL
+
     def __init__(self, canvas: int, orb_radius: float):
         super().__init__(canvas, orb_radius)
         self.nx = self.dx / self.r0
