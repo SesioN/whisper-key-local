@@ -6,7 +6,7 @@ import threading
 import tkinter as tk
 from typing import Callable, Optional
 
-from PIL import Image, ImageTk
+from PIL import Image, ImageOps, ImageTk
 
 from .platform import icons, window_style
 
@@ -22,6 +22,8 @@ POSITION_PATTERN = re.compile(r"^\+(-?\d+)\+(-?\d+)$")
 DRAG_THRESHOLD_PIXELS = 4
 TRANSPARENT_KEY_COLOR = "#010203"
 OPAQUE_ALPHA_THRESHOLD = 128
+LOADING_GRAY_BASE = 96
+LOADING_GRAY_CONTRAST = 64
 HIT_TARGET_ALPHA = 0.01
 HIT_TARGET_COLOR = "#000000"
 MOVABLE_APPEARANCE = {"text": "Movable", "fg": "#FFD700", "bg": "#222222"}
@@ -281,7 +283,15 @@ class FloatingWidget:
             hard_edged_alpha = resized.getchannel("A").point(lambda alpha: 255 if alpha >= OPAQUE_ALPHA_THRESHOLD else 0)
             resized.putalpha(hard_edged_alpha)
             photos[state] = ImageTk.PhotoImage(resized, master=self._root)
+            if state == "idle":
+                photos["loading"] = ImageTk.PhotoImage(self._faded_gray(resized), master=self._root)
         return photos
+
+    def _faded_gray(self, image):
+        gray = ImageOps.grayscale(image).point(lambda value: LOADING_GRAY_BASE + value * LOADING_GRAY_CONTRAST // 255)
+        faded = Image.merge("RGB", (gray, gray, gray)).convert("RGBA")
+        faded.putalpha(image.getchannel("A"))
+        return faded
 
     def _apply_size(self):
         dimensions = SIZES[self.size]
