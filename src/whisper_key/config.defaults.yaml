@@ -125,6 +125,13 @@ whisper: # Whisper AI Model Settings
             group: custom
             enabled: true
 
+        # Language-specific fine-tunes
+        large-v3-turbo-german: # primeline/whisper-large-v3-turbo-german, fine-tuned for German
+            source: TheTobyB/whisper-large-v3-turbo-german-ct2
+            label: "Large-V3-Turbo German (German, 1.6GB)"
+            group: custom
+            enabled: true
+
         # ONNX models — run on CPU, DirectML (any DirectX 12 GPU) or NVIDIA CUDA, see the tray "Runtime" menu
         # Only the selected variant is downloaded, into %LOCALAPPDATA%\whisperkey\models
         parakeet-tdt-0.6b-v3: # NVIDIA Parakeet, 25 European languages, automatic language detection
