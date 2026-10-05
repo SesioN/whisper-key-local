@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Hotkeys take two bindings** - `recording_hotkey`, `command_hotkey`, `stop_key`, `auto_send_key` and `cancel_combination` are now `[primary, secondary]` lists; single-string values from older settings are still read as the primary binding. A binding already used by an earlier action is disabled at startup; an action left with no binding falls back to its default
 
 ### Fixed
+- **Voice orb dragging is smooth** - the orb now follows the cursor at display rate instead of the animation frame rate (as low as 8 fps when idle) (Windows)
 - **Auto-paste into apps running as administrator** - Windows silently drops the simulated input, so the app reported "Auto-pasted" while nothing arrived. The text now stays on the clipboard and a tray notification asks you to paste with Ctrl+V (Windows)
 
 ## [1.0.0] - 2026-10-05
