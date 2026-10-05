@@ -18,6 +18,7 @@ class BlackHoleSkin(OrbSkin):
     LABEL = "Black hole"
 
     CANVAS_FACTOR = 2.1
+    VISUAL_SCALE = 1.4
     SUPERSAMPLE = 2
 
     TILT = 0.52

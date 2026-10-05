@@ -382,9 +382,11 @@ class VoiceOrb:
         except AttributeError:
             return 96
 
+    def _orb_radius(self) -> float:
+        return SIZES[self.size] * self._dpi / 96.0 / 2.0 * get_skin(self.skin).VISUAL_SCALE
+
     def _canvas_size(self) -> int:
-        factor = get_skin(self.skin).CANVAS_FACTOR
-        return max(48, int(round(SIZES[self.size] * self._dpi / 96.0 * factor)))
+        return max(48, int(round(2.0 * self._orb_radius() * get_skin(self.skin).CANVAS_FACTOR)))
 
     def _build_surface(self):
         import numpy as np
@@ -414,8 +416,7 @@ class VoiceOrb:
         pixels = np.ctypeslib.as_array(ctypes.cast(bits, ctypes.POINTER(ctypes.c_ubyte)), shape=(canvas, canvas, 4))
         self._surface = {"canvas": canvas, "hdc_screen": hdc_screen, "hdc_mem": hdc_mem,
                          "hbmp": hbmp, "old": old, "pixels": pixels}
-        skin = get_skin(self.skin)
-        self._renderer = skin(canvas, canvas / (2.0 * skin.CANVAS_FACTOR))
+        self._renderer = get_skin(self.skin)(canvas, self._orb_radius())
 
     def _release_surface(self):
         surface, self._surface = self._surface, None
