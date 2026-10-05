@@ -64,7 +64,7 @@ function Build-SourceWheel {
         $PyProject = [System.IO.File]::ReadAllText($PyProjectFile, $Utf8NoBom)
         $VersionPattern = [regex]'(?m)^version\s*=\s*"[^"]+"'
         $PatchedPyProject = $VersionPattern.Replace($PyProject, "version = `"$WheelVersion`"", 1)
-        if ($PatchedPyProject -eq $PyProject) {
+        if ($PatchedPyProject -eq $PyProject -and -not $Release) {
             Write-Host "Error: Could not set wheel version in pyproject.toml" -ForegroundColor Red
             exit 1
         }
@@ -80,7 +80,7 @@ function Build-SourceWheel {
         Remove-Item -Recurse -Force $StagingDir -ErrorAction SilentlyContinue
     }
 
-    $Wheel = Get-ChildItem $WheelDir -Filter "*+g$Commit-*.whl" | Select-Object -First 1
+    $Wheel = Get-ChildItem $WheelDir -Filter "whisper_key_local-$WheelVersion-*.whl" | Select-Object -First 1
     if (-not $Wheel) {
         Write-Host "Error: No wheel for $WheelVersion found in $WheelDir" -ForegroundColor Red
         exit 1
