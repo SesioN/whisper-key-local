@@ -34,7 +34,7 @@ from .voice_commands import VoiceCommandManager
 from .hardware_detection import detect_and_print as detect_hardware
 from .onboarding import check_gpu
 from .update_checker import check_for_updates
-from .utils import get_user_app_data_path, get_version, OptionalComponent, prune_stale_pyapp_envs
+from .utils import get_user_app_data_path, get_version, OptionalComponent, prune_stale_pyapp_envs, open_file
 
 def setup_logging(config_manager: ConfigManager):
     log_config = config_manager.get_logging_config()
@@ -350,6 +350,30 @@ def setup_hotkey_listener(config_manager, state_manager, voice_commands_enabled=
         recording_mode=config_manager.get_hotkey_config()['recording_mode']
     )
 
+def setup_voice_command_manager_window(voice_command_manager, hotkey_listener, system_tray):
+    if not IS_WINDOWS or not voice_command_manager.enabled:
+        return None
+    try:
+        from .voice_command_manager_window import VoiceCommandManagerWindow
+        from .platform import hotkeys
+    except ImportError as e:
+        logging.getLogger(__name__).warning(f"Voice command manager window not available: {e}")
+        return None
+
+    def save_command_entries(command_entries):
+        voice_command_manager.save_command_entries(command_entries)
+        print(f"   ✓ Voice commands saved ({len(voice_command_manager.commands)} active)")
+
+    return VoiceCommandManagerWindow(
+        load_command_entries=voice_command_manager.load_command_entries,
+        save_command_entries=save_command_entries,
+        execute_command=voice_command_manager.execute_command,
+        open_commands_file=lambda: open_file(system_tray.get_commands_file_path()),
+        pause_hotkeys=hotkey_listener.stop_listening,
+        resume_hotkeys=hotkey_listener.start_listening,
+        key_name_for_virtual_key=hotkeys.key_name_for_virtual_key
+    )
+
 def setup_shortcut_manager_window(config_manager, hotkey_listener, voice_commands_enabled):
     if not IS_WINDOWS:
         return None
@@ -489,6 +513,8 @@ def main():
         hotkey_listener = setup_hotkey_listener(config_manager, state_manager, voice_commands_config['enabled'])
         system_tray.attach_shortcut_manager_window(
             setup_shortcut_manager_window(config_manager, hotkey_listener, voice_commands_config['enabled']))
+        system_tray.attach_voice_command_manager_window(
+            setup_voice_command_manager_window(voice_command_manager, hotkey_listener, system_tray))
 
         state_manager.get_runtimes()
         system_tray.start()

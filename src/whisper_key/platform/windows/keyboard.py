@@ -77,6 +77,12 @@ for c in "abcdefghijklmnopqrstuvwxyz":
     VK_MAP[c] = ord(c.upper())
 for d in "0123456789":
     VK_MAP[d] = ord(d)
+for function_key_number in range(1, 25):
+    VK_MAP[f"f{function_key_number}"] = 0x6F + function_key_number
+VK_MAP.update({"page_up": 0x21, "page_down": 0x22, "del": 0x2E})
+
+def can_send_key(key: str) -> bool:
+    return key.lower() in VK_MAP
 
 def _make_vk_input(vk, flags=0):
     inp = INPUT()

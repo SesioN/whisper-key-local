@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ## [Unreleased]
 
 ### Added
+- **Voice commands window** - tray **Voice commands...** lists, adds, edits, reorders and deletes voice commands; records hotkey actions by pressing the keys, test-runs a command, shows which command a phrase would trigger, and saves `commands.yaml` with its comments intact, applied without a restart. New optional `enabled: false` field switches a command off (Windows)
+- **Hotkey voice commands accept F13-F24 and `page_up` / `page_down`**
 - **Shortcuts window** - tray **Shortcuts...** lists every hotkey; record a primary and a secondary binding per action by pressing the keys, unset or reset them, and apply them without a restart. Duplicate bindings are blocked (Windows)
 
 ### Changed
