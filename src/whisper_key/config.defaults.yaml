@@ -29,7 +29,7 @@ whisper: # Whisper AI Model Settings
 
     # Transcription device (only for faster_whisper engine, set from runtime)
     # Options: cpu, cuda (for both NVIDIA and AMD)
-    # For GPU setup, see https://github.com/PinW/whisper-key-local/blob/master/docs/gpu-setup.md
+    # For GPU setup, see https://github.com/SesioN/whisper-key-local/blob/master/docs/gpu-setup.md
     device: cpu
 
     # Compute Precision (only for faster_whisper engine)

@@ -12,11 +12,11 @@ Global hotkeys to record speech and transcribe directly to your cursor.
 - **Auto-Send**: Optionally auto-send with ENTER keypress
 - **Local/Offline**: Voice data never leaves your computer
 - **CPU Ready**: Small, efficient models available
-- **GPU Ready**: Support for both NVIDIA & AMD cards
-- **Cross-platform**: Works on Windows and macOS
+- **GPU Ready**: NVIDIA (CUDA), AMD (ROCm) and any Vulkan GPU via whisper.cpp; runtimes install on demand (Windows)
+- **Cross-platform**: Works on Windows and macOS (GPU runtimes, floating button, loading screen and sensitivity window are Windows only)
 - **Voice Commands**: Trigger shortcuts, text snippets, and shell commands by voice — [docs](docs/voice-commands.md)
-- **More engines**: whisper.cpp (Vulkan) and ONNX models (Parakeet-TDT, Qwen3-ASR), switchable from the tray
-- **Hands-free**: Voice-activated recording and an always-on-top record button (Windows)
+- **More engines**: whisper.cpp (Vulkan) and ONNX models (Parakeet-TDT-0.6B-V3, Qwen3-ASR-1.7B), selectable from the tray
+- **Hands-free**: Voice-activated recording, plus an always-on-top record button (Windows)
 - **Configurable**: Customize hotkeys, models, and [much more](#️-configuration)
 
 ## 🚀 Quick Start
@@ -25,11 +25,12 @@ Global hotkeys to record speech and transcribe directly to your cursor.
 
 1. Download `whisper-key.exe` (or `whisper-key-no-term.exe` for no console window) from the
    [latest release](https://github.com/SesioN/whisper-key-local/releases/latest)
-2. Run it. The app updates itself from this repository's releases.
+   `whisper-key-hideable.exe` is the variant for `console.start_hidden`
+2. Run it. On startup the app checks this repository's releases for updates.
 
 ### Python Package
 
-Requires Python 3.11-3.13. This fork is not on PyPI (`pip install whisper-key-local` installs the upstream app).
+Requires Python 3.11 or newer (the Windows app uses Python 3.12). This fork is not on PyPI (`pip install whisper-key-local` installs the upstream app).
 Download the `.whl` from the [latest release](https://github.com/SesioN/whisper-key-local/releases/latest), then:
 
 ```bash
@@ -58,10 +59,11 @@ python whisper-key.py
 | Voice command mode | `Alt+Win` | `Fn+Command` |
 
 Open the system tray / menu bar icon to:
-- Toggle auto-paste and copy to clipboard independently
-- Change transcription model
-- Select audio device
-- Turn audio feedback sounds on or off
+- Change transcription model, runtime (CPU / CUDA / ROCm / Vulkan / ONNX) and precision
+- Select audio host and input device, or mute the microphone
+- Toggle auto-paste, copy to clipboard, audio feedback and voice-activated recording
+- Open the voice detection sensitivity window and floating button options (Windows)
+- Open the settings, commands and log files
 
 ## 🗣️ Voice Commands
 
@@ -86,7 +88,18 @@ See the **[Voice Commands Guide](docs/voice-commands.md)** for full details.
 
 ## ⚡ GPU Acceleration
 
-Whisper Key detects your GPU on first launch and offers one-press install of the required runtime libraries. Supports **NVIDIA** (CUDA) and **AMD** (ROCm).
+On Windows, Whisper Key detects your GPU on first launch and offers to install the matching runtime. Runtimes can be
+installed and switched later from the tray **Runtime** menu; they are stored in `%LOCALAPPDATA%\whisperkey\runtimes`.
+
+| Runtime | Engine | Hardware |
+|---|---|---|
+| CPU | faster-whisper | any |
+| NVIDIA CUDA | faster-whisper | NVIDIA |
+| AMD ROCm | faster-whisper | AMD |
+| Vulkan | whisper.cpp (whisper-server) | GPU with a Vulkan driver |
+| ONNX CPU / DirectML / CUDA | onnx-asr (Parakeet, Qwen3-ASR models) | any / DirectX 12 GPU / NVIDIA |
+
+The **Precision** menu lists the compute types the active device supports.
 
 For manual setup or troubleshooting, see the **[GPU Setup Guide](docs/gpu-setup.md)**.
 
@@ -102,8 +115,13 @@ Delete this file and restart app to reset to defaults.
 |--------|---------|-------|
 | **Whisper** |||
 | `whisper.model` | `tiny` | Any model defined in `whisper.models` |
-| `whisper.device` | `cpu` | cpu or cuda (NVIDIA/AMD GPU) — [setup guide](docs/gpu-setup.md) |
-| `whisper.compute_type` | `int8` | int8/float16/float32 |
+| `whisper.runtime` | `cpu` | cpu, cuda, rocm or vulkan; set from the tray Runtime menu |
+| `whisper.onnx_runtime` | `onnx-cpu` | onnx-cpu, onnx-directml or onnx-cuda; used by ONNX models |
+| `whisper.engine_type` | `faster_whisper` | Derived from `whisper.runtime` (vulkan selects whisper_cpp) |
+| `whisper.device` | `cpu` | cpu or cuda (NVIDIA and AMD); set from the runtime — [setup guide](docs/gpu-setup.md) |
+| `whisper.compute_type` | `int8` | int8, int8_float32, int8_float16, int8_bfloat16, int16, float16, bfloat16, float32 (faster-whisper only) |
+| `whisper.cpp_binary` | `""` | Custom whisper-cli.exe path (auto-detected if empty) |
+| `whisper.cpp_model_dir` | `""` | Custom ggml model directory (auto-detected if empty) |
 | `whisper.language` | `auto` | auto or language code (en, es, fr, etc.) |
 | `whisper.beam_size` | `5` | Higher = more accurate but slower (1-10) |
 | `whisper.initial_prompt` | `""` | Guide transcription style, language variant, or script |
@@ -167,6 +185,10 @@ Delete this file and restart app to reset to defaults.
 | `floating_widget.enabled` | `false` | Always-on-top button to start/stop recording by mouse (Windows only) |
 | `floating_widget.size` | `big` | small, medium or big |
 | `floating_widget.save_position` | `false` | Restore the last dragged position on startup |
+| `floating_widget.locked` | `false` | Keep the button locked in place |
+| **Streaming Preview (experimental)** |||
+| `streaming.streaming_enabled` | `false` | Live speech preview while recording (sherpa-onnx) |
+| `streaming.streaming_model` | `zipformer.tiny.en` | Streaming model |
 | **Terminal Title** |||
 | `terminal_title.idle` | `""` | Tab title prefix when idle: static string or `[prefix, seconds]` animation frames |
 | `terminal_title.recording` | 🔴 blink | Tab title prefix while recording |
@@ -182,9 +204,12 @@ Delete this file and restart app to reset to defaults.
 
 ## 📁 Model Cache
 
-Default path for transcription models (via HuggingFace):
+faster-whisper and ONNX models are downloaded via HuggingFace to:
 - **Windows:** `%USERPROFILE%\.cache\huggingface\hub\`
 - **macOS:** `~/.cache/huggingface/hub/`
+
+whisper.cpp (ggml) models live in `%LOCALAPPDATA%\whisperkey\runtimes\whisper.cpp-vulkan\models` unless
+`whisper.cpp_model_dir` is set.
 
 ## Contributing
 
@@ -198,7 +223,7 @@ periodically.
 ## 📦 Dependencies
 
 **Cross-platform:**
-`faster-whisper` · `numpy` · `sounddevice` · `soxr` · `pyperclip` · `ruamel.yaml` · `pystray` · `Pillow` · `playsound3` · `ten-vad` · `hf-xet`
+`faster-whisper` · `ctranslate2` · `sherpa-onnx` · `onnx-asr` · `onnxruntime` · `numpy` · `sounddevice` · `soxr` · `pyperclip` · `ruamel.yaml` · `pystray` · `Pillow` · `playsound3` · `ten-vad` · `hf-xet`
 
 **Windows:** `global-hotkeys` · `pywin32`
 
