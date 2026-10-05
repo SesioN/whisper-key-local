@@ -25,6 +25,7 @@ class ClipboardManager:
         self.copy_to_clipboard = copy_to_clipboard
         self.type_auto_enter_delay = type_auto_enter_delay
         self.type_auto_enter_delay_per_100_chars = type_auto_enter_delay_per_100_chars
+        self.on_delivery_blocked = None
         keyboard.set_delay(macos_key_simulation_delay)
         if self.delivery_method == "paste":
             self._test_clipboard_access()
@@ -133,7 +134,25 @@ class ClipboardManager:
             self.logger.error(f"Failed to simulate paste keypress: {e}")
             return False
 
+    def _deliver_to_blocked_target(self, text: str) -> bool:
+        self.logger.warning("Foreground window runs at a higher privilege level - auto-paste blocked")
+        copied = self.copy_text(text)
+        hotkey_display = self.paste_hotkey.upper()
+        if copied:
+            message = f"Target window runs as administrator - press {hotkey_display} to paste."
+        else:
+            message = "Target window runs as administrator - auto-paste blocked and copying to the clipboard failed."
+        print(f"   ⚠ {message}")
+        if self.on_delivery_blocked:
+            try:
+                self.on_delivery_blocked(message)
+            except Exception as e:
+                self.logger.error(f"Failed to report blocked delivery: {e}")
+        return False
+
     def execute_delivery(self, text: str) -> bool:
+        if keyboard.is_foreground_input_blocked():
+            return self._deliver_to_blocked_target(text)
         if self.delivery_method == "type":
             return self._type_delivery(text)
         else:

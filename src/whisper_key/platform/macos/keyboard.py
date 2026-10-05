@@ -41,6 +41,10 @@ def validate_delivery_method(method: str) -> str:
     return method
 
 
+def is_foreground_input_blocked() -> bool:
+    return False
+
+
 def set_delay(delay: float):
     global _delay
     _delay = delay

@@ -156,7 +156,7 @@ Delete this file and restart app to reset to defaults.
 | `audio.max_duration` | `900` | Max recording seconds (0 = unlimited) |
 | `audio.input_device` | `default` | Device ID or "default" |
 | **Clipboard** |||
-| `clipboard.auto_paste` | `true` | false = clipboard only |
+| `clipboard.auto_paste` | `true` | false = clipboard only. Windows blocks typing into apps running as administrator; then the text stays on the clipboard and a notification asks you to press Ctrl+V |
 | `clipboard.copy_to_clipboard` | `false` | Keep transcription on clipboard after auto-paste |
 | `clipboard.delivery_method` | `paste` | paste (Ctrl+V) or type (direct injection) |
 | `clipboard.paste_hotkey` | `ctrl+v` / `cmd+v` | Paste key simulation |

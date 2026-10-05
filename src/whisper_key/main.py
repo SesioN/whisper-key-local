@@ -507,6 +507,7 @@ def main():
         audio_recorder = setup_audio_recorder(audio_config, state_manager, vad_manager, streaming_manager)
         state_manager.attach_vad_sensitivity_window(setup_vad_sensitivity_window(vad_config, state_manager))
         system_tray = setup_system_tray(tray_config, config_manager, state_manager, model_registry, console_config)
+        clipboard_manager.on_delivery_blocked = system_tray.notify
         floating_widget = setup_floating_widget(floating_widget_config, state_manager)
         state_manager.attach_components(audio_recorder, system_tray, floating_widget)
         
