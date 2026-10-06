@@ -8,7 +8,7 @@ from .utils import open_file
 from .platform import IS_WINDOWS, permissions, icons, autostart
 from .runtime_options import COMPUTE_TYPES
 from .orb_skins import SKINS as ORB_SKINS
-from .orb_skins.base import appearance_matrix, apply_color_matrix
+from .orb_skins.base import DEFAULT_IDLE_OPACITY, appearance_matrix, apply_color_matrix
 from .orb_skins.preview import render_skin_preview, skin_palette_color
 from .tray_menu_model import Action, Choice, Footer, Header, Option, Section, Slider, Submenu, Toggle, to_pystray
 
@@ -25,8 +25,8 @@ except ImportError:
 RECORDING_MODES = (("toggle", "Toggle"), ("push_to_talk", "Push to talk"))
 FLOATING_WIDGET_STYLES = (("button", "Button"), ("orb", "Voice orb"))
 FLOATING_WIDGET_SIZES = (("small", "Small"), ("medium", "Medium"), ("big", "Big"))
-ORB_APPEARANCE_DEFAULTS = {"opacity": 1.0, "vibrancy": 1.0, "hue": 0}
-MAX_ORB_TRANSPARENCY = 0.8
+ORB_APPEARANCE_DEFAULTS = {"opacity": DEFAULT_IDLE_OPACITY, "vibrancy": 1.0, "hue": 0}
+MIN_ORB_OPACITY = 0.2
 HUE_TRACK_STEP_DEGREES = 15
 STATUS_TEXTS = {"idle": "Ready", "recording": "Recording", "processing": "Transcribing", "muted": "Microphone muted"}
 
@@ -245,15 +245,15 @@ class SystemTray:
                 Submenu("Orb skin", self._build_orb_skin_page,
                         detail=lambda: ORB_SKINS[setting('orb_skin')].LABEL if setting('orb_skin') in ORB_SKINS else ""),
                 Section("Appearance"),
-                Slider("Transparency", 0.0, MAX_ORB_TRANSPARENCY, 0.05,
-                       lambda: round(1.0 - setting('orb_opacity'), 2),
-                       lambda transparency: self._preview_orb_appearance(opacity=round(1.0 - transparency, 2)),
-                       lambda transparency: self._commit_orb_appearance(opacity=round(1.0 - transparency, 2)),
-                       lambda transparency: f"{transparency:.0%}", presets=[0.0, 0.2, 0.4, 0.6, 0.8]),
+                Slider("Opacity", MIN_ORB_OPACITY, 1.0, 0.05, lambda: setting('orb_opacity'),
+                       lambda opacity: self._preview_orb_appearance(opacity=opacity),
+                       lambda opacity: self._commit_orb_appearance(opacity=opacity),
+                       lambda opacity: f"{opacity:.0%}", presets=[0.2, 0.4, DEFAULT_IDLE_OPACITY, 0.85, 1.0],
+                       default_value=DEFAULT_IDLE_OPACITY),
                 Slider("Vibrancy", 0.0, 2.0, 0.05, lambda: setting('orb_vibrancy'),
                        lambda vibrancy: self._preview_orb_appearance(vibrancy=vibrancy),
                        lambda vibrancy: self._commit_orb_appearance(vibrancy=vibrancy),
-                       lambda vibrancy: f"{vibrancy:.0%}", presets=[0.0, 0.5, 1.0, 1.5, 2.0]),
+                       lambda vibrancy: f"{vibrancy:.0%}", presets=[0.0, 0.5, 1.0, 1.5, 2.0], default_value=1.0),
                 Slider("Color", 0, 359, 1, lambda: setting('orb_hue'),
                        lambda hue: self._preview_orb_appearance(hue=int(hue)),
                        lambda hue: self._commit_orb_appearance(hue=int(hue)),

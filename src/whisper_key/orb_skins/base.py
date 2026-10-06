@@ -1,6 +1,7 @@
 import numpy as np
 
 ALPHA_FLOOR = 0.035
+DEFAULT_IDLE_OPACITY = 0.7
 GRAYSCALE_WEIGHTS = (0.299, 0.587, 0.114)
 
 def smoothstep(edge0, edge1, x):

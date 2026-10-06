@@ -73,6 +73,7 @@ class Slider:
     format_value: Callable[[float], str]
     presets: list = field(default_factory=list)
     track_colors: Optional[Callable[[], list]] = None
+    default_value: Optional[float] = None
 
     def snap(self, value: float) -> float:
         steps = round((value - self.minimum) / self.step)

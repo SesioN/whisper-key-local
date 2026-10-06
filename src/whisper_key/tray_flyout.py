@@ -1089,6 +1089,11 @@ class _SliderRow(_Row):
                                     fill=theme.surface_hover if self.highlighted else theme.border)
             self.canvas.create_line(left, middle, thumb_x, middle, width=thickness, capstyle=tk.ROUND,
                                     fill=theme.accent)
+        if slider.default_value is not None:
+            default_x = left + int(round((right - left) * self.fraction(slider.default_value)))
+            mark_reach = view.px(SLIDER_THUMB_SIZE) // 2
+            self.canvas.create_line(default_x, middle - mark_reach, default_x, middle + mark_reach,
+                                    width=max(1, view.px(2)), fill=theme.secondary)
         self.canvas.create_image(thumb_x, middle, image=view.slider_thumb_image())
 
     def draw_hover(self):
