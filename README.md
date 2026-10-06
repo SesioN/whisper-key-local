@@ -64,7 +64,7 @@ Click the system tray icon (Windows: left or right click opens a Windows 11 styl
 - **Output**: toggle auto-paste, copy to clipboard and voice commands in normal recordings
 - **Model**: change the transcription model, runtime (CPU / CUDA / ROCm / Vulkan / ONNX) and precision
 - **Microphone**: select the input device and audio host
-- **Floating button** (Windows): show it, button or animated voice orb style, size, lock, hide in fullscreen apps. **Orb skin** lists every skin with a preview; clicking one applies it right away and keeps the menu open, so you can click through them
+- **Floating button** (Windows): show it, button or animated voice orb style, size, lock, hide in fullscreen apps. **Orb skin** lists every skin with a preview; clicking one applies it right away and keeps the menu open, so you can click through them. **Appearance** has sliders for the orb's transparency, vibrancy and color (shifts the skin's whole palette); the orb follows while you drag, and **Reset appearance** restores the skin's own look
 - Manage shortcuts: record a primary and secondary binding per action, or unset one (Windows, **Shortcuts...**)
 - Manage voice commands: add, edit, test and switch them on or off (Windows, **Voice commands...**)
 - Start Whisper Key with Windows (**Start with Windows**, per-user, no admin rights; the packaged app starts without a console)
@@ -195,6 +195,9 @@ Delete this file and restart app to reset to defaults.
 | `floating_widget.locked` | `false` | Keep the button locked in place |
 | `floating_widget.style` | `orb` | button, or orb: an animated voice orb that reacts to your voice level; click to record, drag to move, scroll to resize |
 | `floating_widget.orb_skin` | `nebula` | gold, silver, chrome, glass, aurora, blackhole or nebula; nebula has its own muted look and shows a ✓ after a delivered transcription or executed voice command and a ! after a failure; glass and blackhole cost the most CPU and may drop frames to stay within the orb's CPU budget |
+| `floating_widget.orb_opacity` | `1.0` | Orb opacity from 0.2 (faint) to 1.0 (solid); multiplies the orb's own idle/muted fading |
+| `floating_widget.orb_vibrancy` | `1.0` | Color saturation from 0.0 (grey) to 2.0 (vivid); 1.0 keeps the skin's colors |
+| `floating_widget.orb_hue` | `0` | Hue shift in degrees (0-359) applied to the skin's whole palette and its buttons; 0 keeps the skin's colors. Near-grey skins (silver, chrome) change little |
 | `floating_widget.orb_hide_on_fullscreen` | `true` | Hide the orb while a fullscreen application is in front |
 | `floating_widget.orb_lock_button` | `true` | Show a lock button at the orb's lower left while hovering it; click to lock or unlock its position |
 | `floating_widget.orb_mute_button` | `true` | Show a mute button at the orb's lower right while hovering it; click to mute or unmute the microphone |

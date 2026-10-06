@@ -12,7 +12,7 @@ from typing import Callable, Optional
 
 from PIL import Image, ImageDraw, ImageTk
 
-from .tray_menu_model import Action, Choice, Footer, Header, Section, Submenu, Toggle, resolve
+from .tray_menu_model import Action, Choice, Footer, Header, Section, Slider, Submenu, Toggle, resolve
 
 TOGGLE = "toggle"
 REFRESH = "refresh"
@@ -33,6 +33,10 @@ LINE_HEIGHT = 9
 HEADER_HEIGHT = 64
 BACK_ROW_HEIGHT = 44
 SEGMENTED_HEIGHT = 68
+SLIDER_HEIGHT = 60
+SLIDER_TRACK_THICKNESS = 4
+SLIDER_GRADIENT_THICKNESS = 8
+SLIDER_THUMB_SIZE = 18
 ROW_INSET = 4
 CONTENT_PADDING = 12
 ICON_COLUMN = 30
@@ -436,9 +440,47 @@ class _FlyoutView:
             self.image_cache[key] = image
         return image
 
+    def slider_thumb_image(self) -> ImageTk.PhotoImage:
+        theme = self.theme
+        key = ("slider_thumb", self.scale)
+        image = self.image_cache.get(key)
+        if image is None:
+            size = self.px(SLIDER_THUMB_SIZE)
+            s = SUPERSAMPLE
+            big = Image.new("RGBA", (size * s, size * s), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(big)
+            draw.ellipse((0, 0, big.width - 1, big.height - 1), fill=_rgb(theme.surface_hover) + (255,),
+                         outline=_rgb(theme.border) + (255,), width=max(1, self.px(1)) * s)
+            inner = big.width * 0.28
+            center = big.width / 2
+            draw.ellipse((center - inner, center - inner, center + inner, center + inner),
+                         fill=_rgb(theme.accent) + (255,))
+            image = ImageTk.PhotoImage(big.resize((size, size), Image.LANCZOS), master=self.root)
+            self.image_cache[key] = image
+        return image
+
+    def gradient_image(self, width: int, height: int, colors: tuple) -> ImageTk.PhotoImage:
+        key = ("gradient", width, height, colors)
+        image = self.image_cache.get(key)
+        if image is None:
+            for stale_key in [cached for cached in self.image_cache if cached[0] == "gradient"]:
+                del self.image_cache[stale_key]
+            strip = Image.new("RGB", (len(colors), 1))
+            strip.putdata([_rgb(color) for color in colors])
+            stretched = strip.resize((width * SUPERSAMPLE, height * SUPERSAMPLE), Image.BILINEAR).convert("RGBA")
+            mask = Image.new("L", stretched.size, 0)
+            ImageDraw.Draw(mask).rounded_rectangle((0, 0, mask.width - 1, mask.height - 1),
+                                                   radius=mask.height // 2, fill=255)
+            stretched.putalpha(mask)
+            image = ImageTk.PhotoImage(stretched.resize((width, height), Image.LANCZOS), master=self.root)
+            self.image_cache[key] = image
+        return image
+
     def preview_image(self, choice: Choice, value) -> Optional[ImageTk.PhotoImage]:
-        key = (choice.label, value)
+        key = (choice.label, value, resolve(choice.preview_key))
         if key not in self.preview_cache:
+            for stale_key in [cached for cached in self.preview_cache if cached[0] == key[0] and cached[2] != key[2]]:
+                del self.preview_cache[stale_key]
             try:
                 picture = choice.preview(value, self.px(PREVIEW_SIZE))
                 self.preview_cache[key] = ImageTk.PhotoImage(picture, master=self.root) if picture else None
@@ -478,6 +520,8 @@ class _FlyoutView:
                 body.append((_ToggleRow, item))
             elif isinstance(item, Submenu):
                 body.append((_NavRow, item))
+            elif isinstance(item, Slider):
+                body.append((_SliderRow, item))
             elif isinstance(item, Choice):
                 options = item.resolved_options()
                 if item.style == "segmented":
@@ -986,6 +1030,113 @@ class _RadioRow(_Row):
         value = self.option.value
         self.view.apply_pending_choice(self.choice, value)
         self.view.flyout.run_callback(lambda: self.choice.on_select(value))
+
+
+class _SliderRow(_Row):
+    height = SLIDER_HEIGHT
+
+    def __init__(self, view: _FlyoutView, parent: tk.Misc, data):
+        super().__init__(view, parent, data)
+        self.canvas.bind("<ButtonPress-1>", self._on_press)
+        self.canvas.bind("<B1-Motion>", self._on_drag)
+
+    def set_data(self, data):
+        self.data = data
+        self.pending_value = None
+        self.dragging = False
+
+    def update(self, data):
+        if self.dragging:
+            self.data = data
+            return
+        super().update(data)
+
+    def current(self) -> float:
+        return self.data.current() if self.pending_value is None else self.pending_value
+
+    def track_span(self):
+        view = self.view
+        left = view.px(ROW_INSET + CONTENT_PADDING) + view.px(SLIDER_THUMB_SIZE) // 2
+        right = view.width - left
+        return left, right, view.px(42)
+
+    def fraction(self, value: float) -> float:
+        slider = self.data
+        span = slider.maximum - slider.minimum
+        return 0.0 if span <= 0 else (value - slider.minimum) / span
+
+    def draw_content(self):
+        view, theme, slider = self.view, self.view.theme, self.data
+        text_left = view.px(ROW_INSET + CONTENT_PADDING)
+        value = self.current()
+        value_text = slider.format_value(value)
+        value_right = view.width - text_left
+        self.canvas.create_text(value_right, view.px(17), anchor="e", text=value_text, font=view.font_small,
+                                fill=theme.secondary)
+        label_width = value_right - text_left - view.font_small.measure(value_text) - view.px(12)
+        self.canvas.create_text(text_left, view.px(17), anchor="w", font=view.font_body, fill=theme.text,
+                                text=view.fit_text(view.font_body, slider.label, label_width))
+        left, right, middle = self.track_span()
+        thumb_x = left + int(round((right - left) * self.fraction(value)))
+        colors = tuple(slider.track_colors()) if slider.track_colors else None
+        if colors:
+            thickness = view.px(SLIDER_GRADIENT_THICKNESS)
+            self.canvas.create_image(left, middle, anchor="w",
+                                     image=view.gradient_image(right - left, thickness, colors))
+        else:
+            thickness = view.px(SLIDER_TRACK_THICKNESS)
+            self.canvas.create_line(left, middle, right, middle, width=thickness, capstyle=tk.ROUND,
+                                    fill=theme.surface_hover if self.highlighted else theme.border)
+            self.canvas.create_line(left, middle, thumb_x, middle, width=thickness, capstyle=tk.ROUND,
+                                    fill=theme.accent)
+        self.canvas.create_image(thumb_x, middle, image=view.slider_thumb_image())
+
+    def draw_hover(self):
+        pass
+
+    def value_at(self, x: int) -> float:
+        left, right, _ = self.track_span()
+        fraction = max(0.0, min(1.0, (x - left) / max(1, right - left)))
+        slider = self.data
+        return slider.snap(slider.minimum + fraction * (slider.maximum - slider.minimum))
+
+    def _on_press(self, event):
+        _, _, middle = self.track_span()
+        if abs(event.y - middle) > self.view.px(SLIDER_THUMB_SIZE):
+            return
+        self.dragging = True
+        self._preview(self.value_at(event.x))
+
+    def _on_drag(self, event):
+        if self.dragging:
+            self._preview(self.value_at(event.x))
+
+    def _on_click(self, event):
+        if not self.dragging:
+            return
+        self.dragging = False
+        self._commit(self.value_at(event.x))
+
+    def _preview(self, value: float):
+        if value == self.pending_value:
+            return
+        self.pending_value = value
+        self.draw()
+        slider = self.data
+        self.view.flyout.run_callback(lambda: slider.on_change(value))
+
+    def _commit(self, value: float):
+        self.pending_value = value
+        self.draw()
+        slider = self.data
+        self.view.flyout.run_callback(lambda: slider.on_commit(value))
+
+    def handle_arrow(self, key: str) -> bool:
+        slider = self.data
+        value = slider.snap(self.current() + (slider.step if key == "Right" else -slider.step))
+        if value != self.current():
+            self._commit(value)
+        return True
 
 
 class _SegmentedRow(_Row):

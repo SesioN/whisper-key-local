@@ -8,8 +8,9 @@ from .utils import open_file
 from .platform import IS_WINDOWS, permissions, icons, autostart
 from .runtime_options import COMPUTE_TYPES
 from .orb_skins import SKINS as ORB_SKINS
-from .orb_skins.preview import render_skin_preview
-from .tray_menu_model import Action, Choice, Footer, Header, Option, Section, Submenu, Toggle, to_pystray
+from .orb_skins.base import appearance_matrix, apply_color_matrix
+from .orb_skins.preview import render_skin_preview, skin_palette_color
+from .tray_menu_model import Action, Choice, Footer, Header, Option, Section, Slider, Submenu, Toggle, to_pystray
 
 try:
     import pystray
@@ -24,6 +25,9 @@ except ImportError:
 RECORDING_MODES = (("toggle", "Toggle"), ("push_to_talk", "Push to talk"))
 FLOATING_WIDGET_STYLES = (("button", "Button"), ("orb", "Voice orb"))
 FLOATING_WIDGET_SIZES = (("small", "Small"), ("medium", "Medium"), ("big", "Big"))
+ORB_APPEARANCE_DEFAULTS = {"opacity": 1.0, "vibrancy": 1.0, "hue": 0}
+MAX_ORB_TRANSPARENCY = 0.8
+HUE_TRACK_STEP_DEGREES = 15
 STATUS_TEXTS = {"idle": "Ready", "recording": "Recording", "processing": "Transcribing", "muted": "Microphone muted"}
 
 ICON_MODEL = ""
@@ -240,6 +244,23 @@ class SystemTray:
             items += [
                 Submenu("Orb skin", self._build_orb_skin_page,
                         detail=lambda: ORB_SKINS[setting('orb_skin')].LABEL if setting('orb_skin') in ORB_SKINS else ""),
+                Section("Appearance"),
+                Slider("Transparency", 0.0, MAX_ORB_TRANSPARENCY, 0.05,
+                       lambda: round(1.0 - setting('orb_opacity'), 2),
+                       lambda transparency: self._preview_orb_appearance(opacity=round(1.0 - transparency, 2)),
+                       lambda transparency: self._commit_orb_appearance(opacity=round(1.0 - transparency, 2)),
+                       lambda transparency: f"{transparency:.0%}", presets=[0.0, 0.2, 0.4, 0.6, 0.8]),
+                Slider("Vibrancy", 0.0, 2.0, 0.05, lambda: setting('orb_vibrancy'),
+                       lambda vibrancy: self._preview_orb_appearance(vibrancy=vibrancy),
+                       lambda vibrancy: self._commit_orb_appearance(vibrancy=vibrancy),
+                       lambda vibrancy: f"{vibrancy:.0%}", presets=[0.0, 0.5, 1.0, 1.5, 2.0]),
+                Slider("Color", 0, 359, 1, lambda: setting('orb_hue'),
+                       lambda hue: self._preview_orb_appearance(hue=int(hue)),
+                       lambda hue: self._commit_orb_appearance(hue=int(hue)),
+                       lambda hue: f"{int(hue)}°", presets=[0, 60, 120, 180, 240, 300],
+                       track_colors=self._orb_hue_track_colors),
+                Action("Reset appearance", lambda: self._commit_orb_appearance(**ORB_APPEARANCE_DEFAULTS),
+                       enabled=lambda: self._orb_appearance() != ORB_APPEARANCE_DEFAULTS),
                 Section("Position and behavior"),
                 Toggle("Remember position", lambda: setting('save_position'), self._set_floating_widget_save_position),
                 Toggle("Lock position", lambda: setting('locked'), self._set_orb_locked),
@@ -259,7 +280,30 @@ class SystemTray:
     def _build_orb_skin_page(self) -> list:
         return [Choice("Orb skin", [Option(skin, skin_class.LABEL) for skin, skin_class in ORB_SKINS.items()],
                        lambda: self._floating_widget_setting('orb_skin'), self._set_orb_skin,
-                       preview=render_skin_preview)]
+                       preview=lambda skin, size: render_skin_preview(skin, size, self._orb_color_matrix()),
+                       preview_key=lambda: (self._floating_widget_setting('orb_vibrancy'),
+                                            self._floating_widget_setting('orb_hue')))]
+
+    def _orb_appearance(self) -> dict:
+        return {key: self._floating_widget_setting(f'orb_{key}') for key in ORB_APPEARANCE_DEFAULTS}
+
+    def _orb_color_matrix(self):
+        return appearance_matrix(self._floating_widget_setting('orb_hue'), self._floating_widget_setting('orb_vibrancy'))
+
+    def _orb_hue_track_colors(self) -> list:
+        skin_color = skin_palette_color(self._floating_widget_setting('orb_skin'))
+        vibrancy = self._floating_widget_setting('orb_vibrancy')
+        return ["#%02x%02x%02x" % apply_color_matrix(skin_color, appearance_matrix(hue, vibrancy))
+                for hue in range(0, 360 + HUE_TRACK_STEP_DEGREES, HUE_TRACK_STEP_DEGREES)]
+
+    def _preview_orb_appearance(self, **changes):
+        appearance = {**self._orb_appearance(), **changes}
+        self.state_manager.preview_orb_appearance(appearance['opacity'], appearance['vibrancy'], appearance['hue'])
+
+    def _commit_orb_appearance(self, **changes):
+        appearance = {**self._orb_appearance(), **changes}
+        self.state_manager.update_orb_appearance(appearance['opacity'], appearance['vibrancy'], appearance['hue'])
+        self.refresh_menu()
 
     def _build_files_page(self) -> list:
         voice_commands_enabled = self.config_manager.get_setting('voice_commands', 'enabled')
