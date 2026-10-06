@@ -4,6 +4,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+- **Smooth floating button size** - the size is a pixel value from 16 (about a tray icon) to 80 instead of small/medium/big. Scrolling on the orb resizes it smoothly, and the tray **Size** slider snaps to Small (44), Medium (60) and Big (80). `floating_widget.size` is now a number (default `80`); old `small`/`medium`/`big` values reset to the default
+
 ### Changed
 - **Orb opacity slider** - the transparency slider is now an **Opacity** slider from 20% to 100% that starts at the skin's own 70% (marked on the track), so the orb can be made more solid as well as more see-through; `floating_widget.orb_opacity` now means the idle opacity (default `0.7`).
 

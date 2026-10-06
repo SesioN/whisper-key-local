@@ -9,6 +9,7 @@ from ruamel.yaml import YAML
 from .utils import resolve_asset_path, beautify_hotkey_bindings, get_user_app_data_path, get_version
 from .platform import IS_MACOS
 from .orb_skins import SKINS as ORB_SKINS
+from .widget_sizes import MAX_SIZE as MAX_WIDGET_SIZE, MIN_SIZE as MIN_WIDGET_SIZE
 
 REPO_URL = "https://github.com/SesioN/whisper-key-local"
 
@@ -519,9 +520,8 @@ def validate_config(config, default_config, logger):
     if recording_mode not in ('toggle', 'push_to_talk'):
         _set_to_default(config, default_config, 'hotkey.recording_mode', recording_mode, logger)
 
-    floating_widget_size = _get_config_value_at_path(config, 'floating_widget.size')
-    if floating_widget_size not in ('small', 'medium', 'big'):
-        _set_to_default(config, default_config, 'floating_widget.size', floating_widget_size, logger)
+    _validate_numeric_range(config, default_config, 'floating_widget.size', logger,
+                            min_val=MIN_WIDGET_SIZE, max_val=MAX_WIDGET_SIZE)
 
     if _get_config_value_at_path(config, 'floating_widget.style') not in FLOATING_WIDGET_STYLES:
         _set_to_default(config, default_config, 'floating_widget.style', _get_config_value_at_path(config, 'floating_widget.style'), logger)

@@ -64,7 +64,7 @@ Click the system tray icon (Windows: left or right click opens a Windows 11 styl
 - **Output**: toggle auto-paste, copy to clipboard and voice commands in normal recordings
 - **Model**: change the transcription model, runtime (CPU / CUDA / ROCm / Vulkan / ONNX) and precision
 - **Microphone**: select the input device and audio host
-- **Floating button** (Windows): show it, button or animated voice orb style, size, lock, hide in fullscreen apps. **Orb skin** lists every skin with a preview; clicking one applies it right away and keeps the menu open, so you can click through them. **Appearance** has sliders for the orb's opacity (20-100%; starts at the skin's own 70%, higher is more solid, lower more see-through), vibrancy and color (shifts the skin's whole palette); the orb follows while you drag, and **Reset appearance** puts all three back to the skin's own look
+- **Floating button** (Windows): show it, button or animated voice orb style, size (smooth slider that snaps to Small, Medium and Big), lock, hide in fullscreen apps. **Orb skin** lists every skin with a preview; clicking one applies it right away and keeps the menu open, so you can click through them. **Appearance** has sliders for the orb's opacity (20-100%; starts at the skin's own 70%, higher is more solid, lower more see-through), vibrancy and color (shifts the skin's whole palette); the orb follows while you drag, and **Reset appearance** puts all three back to the skin's own look
 - Manage shortcuts: record a primary and secondary binding per action, or unset one (Windows, **Shortcuts...**)
 - Manage voice commands: add, edit, test and switch them on or off (Windows, **Voice commands...**)
 - Start Whisper Key with Windows (**Start with Windows**, per-user, no admin rights; the packaged app starts without a console)
@@ -190,7 +190,7 @@ Delete this file and restart app to reset to defaults.
 | `system_tray.tooltip` | `Whisper Key` | Hover text |
 | **Floating Button** |||
 | `floating_widget.enabled` | `true` | Always-on-top button to start/stop recording by mouse (Windows only) |
-| `floating_widget.size` | `big` | small, medium or big |
+| `floating_widget.size` | `80` | Size in pixels at 100% display scale, from 16 (about a tray icon) to 80. Small = 44, medium = 60, big = 80. Scrolling on the orb resizes it smoothly; the tray **Size** slider is smooth too but snaps to small, medium and big |
 | `floating_widget.save_position` | `false` | Restore the last dragged position on startup |
 | `floating_widget.locked` | `false` | Keep the button locked in place |
 | `floating_widget.style` | `orb` | button, or orb: an animated voice orb that reacts to your voice level; click to record, drag to move, scroll to resize |

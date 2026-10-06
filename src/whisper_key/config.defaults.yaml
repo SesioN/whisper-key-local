@@ -399,8 +399,9 @@ floating_widget: # Floating Recording Button (Windows only)
     # Drag the icon to move it, click the label below it to lock it in place
     enabled: true
 
-    # Button size: small, medium, big
-    size: big
+    # Size in pixels at 100% display scale, 16 (tray icon) to 80; small = 44, medium = 60, big = 80
+    # (scroll on the orb or use the tray slider to change it smoothly)
+    size: 80
 
     # Restore the last dragged position on startup
     save_position: false
