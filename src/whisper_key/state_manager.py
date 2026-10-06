@@ -644,7 +644,10 @@ class StateManager:
         else:
             self.floating_widget.hide()
 
-    def update_floating_widget_size(self, size: str):
+    def preview_floating_widget_size(self, size: float):
+        self.floating_widget.set_size(size)
+
+    def update_floating_widget_size(self, size: float):
         self.config_manager.update_user_setting('floating_widget', 'size', size)
         self.floating_widget.set_size(size)
 
@@ -658,7 +661,7 @@ class StateManager:
     def save_floating_widget_locked(self, locked: bool):
         self.config_manager.update_user_setting('floating_widget', 'locked', locked)
 
-    def save_floating_widget_size(self, size: str):
+    def save_floating_widget_size(self, size: float):
         self.config_manager.update_user_setting('floating_widget', 'size', size)
         self.system_tray.refresh_menu()
 

@@ -9,7 +9,8 @@ from typing import Callable, Optional
 
 from .orb_skins import DEFAULT_SKIN, SKINS, get_skin
 from .orb_skins.badges import BadgeRenderer
-from .orb_skins.base import appearance_matrix, apply_color_matrix
+from .widget_sizes import DEFAULT_SIZE, clamp_size
+from .orb_skins.base import DEFAULT_IDLE_OPACITY, appearance_matrix, apply_color_matrix
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
@@ -177,9 +178,9 @@ def _bind():
 
 _bind()
 
-SIZES = {"small": 44, "medium": 60, "big": 80}
-SIZE_ORDER = ("small", "medium", "big")
-DEFAULT_SIZE = "big"
+WHEEL_SIZE_STEP = 4.0
+WHEEL_DELTA = 120
+SIZE_SAVE_DELAY_SECONDS = 0.6
 POSITION_PATTERN = re.compile(r"^\+(-?\d+)\+(-?\d+)$")
 
 CLICK_SLOP = 4
@@ -188,7 +189,6 @@ FLASH_DURATION = 0.45
 OUTCOME_SECONDS = {"success": 1.2, "error": 2.0}
 ERROR_FLASH_COLOR = (255, 60, 50)
 OPACITY_MUTED_SKIN = 0.85
-OPACITY_IDLE = 0.7
 OPACITY_MUTED = 0.3
 OPACITY_LOADING = 0.35
 FPS_IDLE = 8
@@ -209,8 +209,8 @@ class VoiceOrb:
     def __init__(self,
                  on_click: Callable[[], None],
                  on_position_changed: Callable[[str], None],
-                 on_size_changed: Callable[[str], None],
-                 size: str = DEFAULT_SIZE,
+                 on_size_changed: Callable[[float], None],
+                 size: float = DEFAULT_SIZE,
                  skin: str = DEFAULT_SKIN,
                  save_position: bool = False,
                  position: Optional[str] = None,
@@ -220,7 +220,7 @@ class VoiceOrb:
                  on_mute_click: Optional[Callable[[], None]] = None,
                  show_lock_button: bool = True,
                  show_mute_button: bool = True,
-                 opacity: float = 1.0,
+                 opacity: float = DEFAULT_IDLE_OPACITY,
                  vibrancy: float = 1.0,
                  hue: float = 0.0):
         self.on_click = on_click
@@ -233,7 +233,8 @@ class VoiceOrb:
         self.on_size_changed = on_size_changed
         self.logger = logging.getLogger(__name__)
 
-        self.size = size if size in SIZES else DEFAULT_SIZE
+        self.size = clamp_size(size)
+        self._size_save_at = None
         if skin not in SKINS:
             self.logger.warning(f"Unknown orb skin '{skin}', using {DEFAULT_SKIN}")
             skin = DEFAULT_SKIN
@@ -331,8 +332,10 @@ class VoiceOrb:
     def set_muted(self, muted: bool):
         self.muted = muted
 
-    def set_size(self, size: str):
-        if size in SIZES and size != self.size:
+    def set_size(self, size: float):
+        size = clamp_size(size)
+        self._size_save_at = None
+        if size != self.size:
             self.size = size
             self._rebuild_requested = True
 
@@ -373,6 +376,9 @@ class VoiceOrb:
         thread.join(timeout=STOP_TIMEOUT_SECONDS)
         if thread.is_alive():
             self.logger.warning("Voice orb did not close within timeout")
+        if self._size_save_at is not None:
+            self._size_save_at = 0.0
+            self._save_size_when_settled(time.monotonic())
 
 
     def _run(self):
@@ -426,7 +432,7 @@ class VoiceOrb:
             return 96
 
     def _orb_radius(self) -> float:
-        return SIZES[self.size] * self._dpi / 96.0 / 2.0 * get_skin(self.skin).VISUAL_SCALE
+        return self.size * self._dpi / 96.0 / 2.0 * get_skin(self.skin).VISUAL_SCALE
 
     def _canvas_size(self) -> int:
         return max(48, int(round(2.0 * self._orb_radius() * get_skin(self.skin).CANVAS_FACTOR)))
@@ -646,7 +652,7 @@ class VoiceOrb:
 
         if msg == WM_MOUSEWHEEL:
             delta = ctypes.c_short((wparam >> 16) & 0xFFFF).value
-            self._step_size(1 if delta > 0 else -1)
+            self._step_size(delta / WHEEL_DELTA * WHEEL_SIZE_STEP)
             return True
 
         if msg == WM_DPICHANGED:
@@ -672,15 +678,21 @@ class VoiceOrb:
         except Exception:
             self.logger.exception("Voice orb click handler failed")
 
-    def _step_size(self, direction: int):
-        index = SIZE_ORDER.index(self.size) + direction
-        if 0 <= index < len(SIZE_ORDER):
-            self.size = SIZE_ORDER[index]
+    def _step_size(self, change: float):
+        size = clamp_size(self.size + change)
+        if size != self.size:
+            self.size = size
             self._rebuild_centered()
-            try:
-                self.on_size_changed(self.size)
-            except Exception:
-                self.logger.exception("Saving the orb size failed")
+            self._size_save_at = time.monotonic() + SIZE_SAVE_DELAY_SECONDS
+
+    def _save_size_when_settled(self, now):
+        if self._size_save_at is None or now < self._size_save_at:
+            return
+        self._size_save_at = None
+        try:
+            self.on_size_changed(self.size)
+        except Exception:
+            self.logger.exception("Saving the orb size failed")
 
 
     def _loop(self):
@@ -694,6 +706,7 @@ class VoiceOrb:
                 self._rebuild_requested = False
                 self._rebuild_centered()
             self._maintain_window(now)
+            self._save_size_when_settled(now)
 
             if not self._shown:
                 self._wait_for_messages(HIDDEN_POLL_SECONDS)
@@ -801,11 +814,11 @@ class VoiceOrb:
                 state, level, opacity = "idle", 0.0, OPACITY_MUTED
         else:
             state, level = self.state, self._level_smooth
-            opacity = 1.0 if state in ("recording", "processing") else OPACITY_IDLE
+            opacity = 1.0 if state in ("recording", "processing") else DEFAULT_IDLE_OPACITY
         flash_length = FLASH_DURATION * 2 if self._flash_color else FLASH_DURATION
         flash = max(0.0, (self._flash_until - time.monotonic()) / flash_length)
 
-        opacity *= self.appearance_opacity
+        opacity = min(1.0, opacity * self.appearance_opacity / DEFAULT_IDLE_OPACITY)
         color_matrix = self.color_matrix
         surface = self._surface
         self._renderer.render_into(surface["pixels"], state, level, t, opacity, flash, self._flash_color, grayscale,

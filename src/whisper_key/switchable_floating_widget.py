@@ -46,7 +46,7 @@ class SwitchableFloatingWidget:
             self._muted = muted
             self._widget.set_muted(muted)
 
-    def set_size(self, size: str):
+    def set_size(self, size: float):
         with self._switch_lock:
             self._widget.set_size(size)
 

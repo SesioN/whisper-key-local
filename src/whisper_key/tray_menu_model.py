@@ -73,8 +73,17 @@ class Slider:
     format_value: Callable[[float], str]
     presets: list = field(default_factory=list)
     track_colors: Optional[Callable[[], list]] = None
+    default_value: Optional[float] = None
+    snap_points: list = field(default_factory=list)
+    snap_distance: float = 0.0
 
     def snap(self, value: float) -> float:
+        nearest_point = min(self.snap_points, key=lambda point: abs(point - value), default=None)
+        if nearest_point is not None and abs(nearest_point - value) <= self.snap_distance:
+            return nearest_point
+        return self.snap_to_step(value)
+
+    def snap_to_step(self, value: float) -> float:
         steps = round((value - self.minimum) / self.step)
         return round(max(self.minimum, min(self.maximum, self.minimum + steps * self.step)), 6)
 

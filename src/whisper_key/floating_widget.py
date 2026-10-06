@@ -9,13 +9,10 @@ from typing import Callable, Optional
 from PIL import Image, ImageOps, ImageTk
 
 from .platform import icons, window_style
+from .widget_sizes import DEFAULT_SIZE, MAX_SIZE, clamp_size
 
-SIZES = {
-    "small": {"icon": 32, "font": 8, "padding_x": 8, "padding_y": 4, "spacing": 5},
-    "medium": {"icon": 48, "font": 9, "padding_x": 12, "padding_y": 6, "spacing": 8},
-    "big": {"icon": 64, "font": 10, "padding_x": 15, "padding_y": 8, "spacing": 10},
-}
-DEFAULT_SIZE = "big"
+BIG_DIMENSIONS = {"icon": 64, "font": 10, "padding_x": 15, "padding_y": 8, "spacing": 10}
+MIN_FONT_SIZE = 6
 DEFAULT_SCREEN_MARGIN = 150
 DEFAULT_SCREEN_EDGE_GAP = 20
 POSITION_PATTERN = re.compile(r"^\+(-?\d+)\+(-?\d+)$")
@@ -52,7 +49,7 @@ class FloatingWidget:
                  on_position_changed: Callable[[str], None],
                  on_mute_click: Callable[[], None],
                  on_lock_changed: Callable[[bool], None],
-                 size: str = DEFAULT_SIZE,
+                 size: float = DEFAULT_SIZE,
                  save_position: bool = False,
                  position: Optional[str] = None,
                  locked: bool = False):
@@ -60,7 +57,7 @@ class FloatingWidget:
         self.on_position_changed = on_position_changed
         self.on_mute_click = on_mute_click
         self.on_lock_changed = on_lock_changed
-        self.size = size if size in SIZES else DEFAULT_SIZE
+        self.size = clamp_size(size)
         self.save_position = save_position
         self.position = position
         self.state = "idle"
@@ -110,10 +107,8 @@ class FloatingWidget:
     def show_outcome(self, outcome: str):
         pass
 
-    def set_size(self, size: str):
-        if size not in SIZES:
-            return
-        self.size = size
+    def set_size(self, size: float):
+        self.size = clamp_size(size)
         self._send_to_window(RESIZE)
 
     def set_save_position(self, save_position: bool):
@@ -294,7 +289,9 @@ class FloatingWidget:
         return faded
 
     def _apply_size(self):
-        dimensions = SIZES[self.size]
+        scale = self.size / MAX_SIZE
+        dimensions = {key: max(1, int(round(value * scale))) for key, value in BIG_DIMENSIONS.items()}
+        dimensions["font"] = max(MIN_FONT_SIZE, dimensions["font"])
         self._icon_photos = self._load_icon_photos(dimensions["icon"])
         self._icon_label.pack_configure(pady=(0, dimensions["spacing"]))
         for control_label in (self._lock_label, self._mute_label):

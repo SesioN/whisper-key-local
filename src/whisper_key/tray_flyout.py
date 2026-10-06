@@ -1089,6 +1089,12 @@ class _SliderRow(_Row):
                                     fill=theme.surface_hover if self.highlighted else theme.border)
             self.canvas.create_line(left, middle, thumb_x, middle, width=thickness, capstyle=tk.ROUND,
                                     fill=theme.accent)
+        mark_reach = view.px(SLIDER_THUMB_SIZE) // 2
+        marks = list(slider.snap_points) + ([slider.default_value] if slider.default_value is not None else [])
+        for mark_value in marks:
+            mark_x = left + int(round((right - left) * self.fraction(mark_value)))
+            self.canvas.create_line(mark_x, middle - mark_reach, mark_x, middle + mark_reach,
+                                    width=max(1, view.px(2)), fill=theme.secondary)
         self.canvas.create_image(thumb_x, middle, image=view.slider_thumb_image())
 
     def draw_hover(self):
@@ -1133,7 +1139,7 @@ class _SliderRow(_Row):
 
     def handle_arrow(self, key: str) -> bool:
         slider = self.data
-        value = slider.snap(self.current() + (slider.step if key == "Right" else -slider.step))
+        value = slider.snap_to_step(self.current() + (slider.step if key == "Right" else -slider.step))
         if value != self.current():
             self._commit(value)
         return True
