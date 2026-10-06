@@ -419,6 +419,15 @@ floating_widget: # Floating Recording Button (Windows only)
     # (nebula also shows a muted look and a short success/error state)
     orb_skin: nebula
 
+    # Orb transparency: 0.2 (faint) to 1.0 (solid)
+    orb_opacity: 1.0
+
+    # Orb color vibrancy: 0.0 (grey) to 2.0 (vivid), 1.0 = the skin's own colors
+    orb_vibrancy: 1.0
+
+    # Orb color shift in degrees (0-359), 0 = the skin's own colors
+    orb_hue: 0
+
     # Show a lock button on the orb while hovering it
     orb_lock_button: true
 

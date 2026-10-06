@@ -4,6 +4,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+- **Orb appearance sliders** - tray menu **Floating button > Appearance** sets the voice orb's transparency, vibrancy and color (a hue shift of the skin's whole palette, previewed live while dragging); also as `floating_widget.orb_opacity`, `orb_vibrancy` and `orb_hue`
+
 ## [1.4.0] - 2026-10-06
 
 ### Changed

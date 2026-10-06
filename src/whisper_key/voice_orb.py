@@ -9,6 +9,7 @@ from typing import Callable, Optional
 
 from .orb_skins import DEFAULT_SKIN, SKINS, get_skin
 from .orb_skins.badges import BadgeRenderer
+from .orb_skins.base import appearance_matrix, apply_color_matrix
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
@@ -218,7 +219,10 @@ class VoiceOrb:
                  on_lock_click: Optional[Callable[[bool], None]] = None,
                  on_mute_click: Optional[Callable[[], None]] = None,
                  show_lock_button: bool = True,
-                 show_mute_button: bool = True):
+                 show_mute_button: bool = True,
+                 opacity: float = 1.0,
+                 vibrancy: float = 1.0,
+                 hue: float = 0.0):
         self.on_click = on_click
         self.on_lock_click = on_lock_click
         self.on_mute_click = on_mute_click
@@ -238,6 +242,8 @@ class VoiceOrb:
         self.position = position
         self.locked = locked
         self.hide_on_fullscreen = hide_on_fullscreen
+        self.appearance_opacity = opacity
+        self.color_matrix = appearance_matrix(hue, vibrancy)
 
         self.state = "idle"
         self.muted = False
@@ -334,6 +340,11 @@ class VoiceOrb:
         if skin in SKINS and skin != self.skin:
             self.skin = skin
             self._rebuild_requested = True
+
+    def set_appearance(self, opacity: float, vibrancy: float, hue: float):
+        self.appearance_opacity = opacity
+        self.color_matrix = appearance_matrix(hue, vibrancy)
+        self._redraw_now = True
 
     def set_save_position(self, save_position: bool):
         self.save_position = save_position
@@ -794,12 +805,15 @@ class VoiceOrb:
         flash_length = FLASH_DURATION * 2 if self._flash_color else FLASH_DURATION
         flash = max(0.0, (self._flash_until - time.monotonic()) / flash_length)
 
+        opacity *= self.appearance_opacity
+        color_matrix = self.color_matrix
         surface = self._surface
-        self._renderer.render_into(surface["pixels"], state, level, t, opacity, flash, self._flash_color, grayscale)
+        self._renderer.render_into(surface["pixels"], state, level, t, opacity, flash, self._flash_color, grayscale,
+                                   color_matrix)
         visibility = self._update_badge_visibility()
         badges = self._enabled_badges()
         if badges:
-            colors = self._renderer.badge_colors(state)
+            colors = tuple(apply_color_matrix(color, color_matrix) for color in self._renderer.badge_colors(state))
             active = {"lock": self.locked, "mute": self.muted}
             self._badges.composite(surface["pixels"], visibility * opacity,
                                    [(kind, active[kind], colors) for kind in badges])

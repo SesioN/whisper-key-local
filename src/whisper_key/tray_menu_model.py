@@ -55,9 +55,28 @@ class Choice:
     on_select: Callable[[object], None]
     style: str = "list"
     preview: Optional[Callable[[object], object]] = None
+    preview_key: Optional[Callable[[], object]] = None
 
     def resolved_options(self) -> list:
         return resolve(self.options)
+
+
+@dataclass
+class Slider:
+    label: str
+    minimum: float
+    maximum: float
+    step: float
+    current: Callable[[], float]
+    on_change: Callable[[float], None]
+    on_commit: Callable[[float], None]
+    format_value: Callable[[float], str]
+    presets: list = field(default_factory=list)
+    track_colors: Optional[Callable[[], list]] = None
+
+    def snap(self, value: float) -> float:
+        steps = round((value - self.minimum) / self.step)
+        return round(max(self.minimum, min(self.maximum, self.minimum + steps * self.step)), 6)
 
 
 @dataclass
@@ -112,6 +131,9 @@ def _pystray_items(items: list, pystray) -> list:
             if len(items) > 1:
                 out.append(pystray.MenuItem(item.label, None, enabled=False))
             out += radios
+        elif isinstance(item, Slider):
+            out.append(pystray.MenuItem(f"{item.label}: {item.format_value(item.current())}",
+                                        pystray.Menu(*_pystray_slider_presets(item, pystray))))
         elif isinstance(item, Submenu):
             detail = item.detail() if item.detail else None
             label = f"{item.label}: {detail}" if detail else item.label
@@ -132,6 +154,20 @@ def _pystray_choice(choice: Choice, pystray) -> list:
         radios.append(pystray.MenuItem(option.label, _on_click(_select(choice, option.value)), radio=True,
                                        checked=_getter(_is_current(choice, option.value)), enabled=option.enabled))
     return radios
+
+
+def _pystray_slider_presets(slider: Slider, pystray) -> list:
+    return [pystray.MenuItem(slider.format_value(value), _on_click(_commit(slider, value)), radio=True,
+                             checked=_getter(_slider_is_at(slider, value)))
+            for value in slider.presets]
+
+
+def _commit(slider: Slider, value):
+    return lambda: slider.on_commit(value)
+
+
+def _slider_is_at(slider: Slider, value):
+    return lambda: abs(slider.current() - value) < slider.step / 2
 
 
 def _enabled(value):

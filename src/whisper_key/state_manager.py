@@ -687,6 +687,15 @@ class StateManager:
         self.config_manager.update_user_setting('floating_widget', 'orb_hide_on_fullscreen', hide_on_fullscreen)
         self.floating_widget.set_orb_hide_on_fullscreen(hide_on_fullscreen)
 
+    def preview_orb_appearance(self, opacity: float, vibrancy: float, hue: float):
+        self.floating_widget.set_orb_appearance(opacity, vibrancy, hue)
+
+    def update_orb_appearance(self, opacity: float, vibrancy: float, hue: float):
+        self.config_manager.update_user_setting('floating_widget', 'orb_opacity', opacity)
+        self.config_manager.update_user_setting('floating_widget', 'orb_vibrancy', vibrancy)
+        self.config_manager.update_user_setting('floating_widget', 'orb_hue', hue)
+        self.floating_widget.set_orb_appearance(opacity, vibrancy, hue)
+
     def _ggml_model_dir(self) -> Optional[str]:
         return with_whisper_cpp_paths(self.config_manager.get_whisper_config()).get('cpp_model_dir')
 

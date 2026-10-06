@@ -443,7 +443,7 @@ def _set_to_default(config, default_config, path, prev_value, logger):
 def _validate_numeric_range(config, default_config, path, logger, min_val=None, max_val=None):
     current_value = _get_config_value_at_path(config, path)
 
-    if not isinstance(current_value, (int, float)):
+    if isinstance(current_value, bool) or not isinstance(current_value, (int, float)):
         logger.warning(f"{current_value} must be numeric")
         _set_to_default(config, default_config, path, current_value, logger)
     elif min_val is not None and current_value < min_val:
@@ -534,6 +534,11 @@ def validate_config(config, default_config, logger):
         flag_value = _get_config_value_at_path(config, floating_widget_flag)
         if not isinstance(flag_value, bool):
             _set_to_default(config, default_config, floating_widget_flag, flag_value, logger)
+
+    for appearance_path, min_val, max_val in (('floating_widget.orb_opacity', 0.2, 1.0),
+                                              ('floating_widget.orb_vibrancy', 0.0, 2.0),
+                                              ('floating_widget.orb_hue', 0, 359)):
+        _validate_numeric_range(config, default_config, appearance_path, logger, min_val=min_val, max_val=max_val)
 
     for floating_widget_position_path in ('floating_widget.position', 'floating_widget.orb_position'):
         floating_widget_position = _get_config_value_at_path(config, floating_widget_position_path)
