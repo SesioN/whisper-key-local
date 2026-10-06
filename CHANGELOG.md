@@ -4,6 +4,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Changed
+- **Nebula loading screen** - the startup window shows an animated nebula with the Whisper Key logo and a clearly readable status card; the first-install window of `whisper-key-no-term.exe` looks the same and hands over to it seamlessly
+- **New app and tray icons** - in the style of the nebula orb (idle blue, recording with a red dot, processing violet)
+
 ## [1.3.0] - 2026-10-06
 
 ### Added

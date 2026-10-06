@@ -150,6 +150,7 @@ function Patch-NoTerminalSupport {
     param($PyAppSourcePath)
 
     Copy-Item (Join-Path $PSScriptRoot "pyapp-patches\splash.rs") (Join-Path $PyAppSourcePath "src\splash.rs") -Force
+    Copy-Item (Join-Path $ProjectRoot "src\whisper_key\platform\windows\assets\splash_frames.jpg") (Join-Path $PyAppSourcePath "src\splash_frames.jpg") -Force
 
     Set-PatchedText (Join-Path $PyAppSourcePath "Cargo.toml") '[build-dependencies]' @'
 [target.'cfg(windows)'.dependencies]
@@ -158,6 +159,8 @@ windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphic
 [build-dependencies]
 '@ 'windows-sys = { version = "0.59"'
     Set-PatchedText (Join-Path $PyAppSourcePath "Cargo.toml") '"Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging"] }' '"Win32_System_Diagnostics_ToolHelp", "Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging"] }' 'Win32_System_Diagnostics_ToolHelp'
+    Set-PatchedText (Join-Path $PyAppSourcePath "Cargo.toml") 'windows-sys = { version = "0.59", features = [' 'windows-sys = { version = "0.59", features = ["Win32_Graphics_Dwm", ' 'Win32_Graphics_Dwm'
+    Set-PatchedText (Join-Path $PyAppSourcePath "Cargo.toml") "[target.'cfg(windows)'.dependencies]`n" "[target.'cfg(windows)'.dependencies]`njpeg-decoder = { version = `"0.3`", default-features = false }`n" 'jpeg-decoder'
 
     Set-PatchedText (Join-Path $PyAppSourcePath "build.rs") 'fn main() {' @'
 fn main() {
@@ -240,6 +243,16 @@ fn exec_gui(mut command: Command) -> Result<()> {
     let mut child = command.spawn()?;
     crate::splash::hand_over(child.id());
 '@ 'crate::splash::hand_over'
+    Set-PatchedText $ProcessRs @'
+    hide_console_window(&mut command);
+    let mut child = command.spawn()?;
+    crate::splash::hand_over
+'@ @'
+    hide_console_window(&mut command);
+    crate::splash::prepare_child(&mut command);
+    let mut child = command.spawn()?;
+    crate::splash::hand_over
+'@ 'crate::splash::prepare_child'
 }
 
 $AppVersion = Get-ProjectVersion $ProjectRoot
