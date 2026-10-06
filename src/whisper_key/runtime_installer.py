@@ -456,7 +456,7 @@ class RuntimeInstaller:
             destination.parent.mkdir(parents=True, exist_ok=True)
             self._report(f"Downloading {entry['path']} ({index}/{len(files)}, {entry.get('size', 0) / 1e9:.2f} GB)...")
             self._download_file(HF_FILE_URL.format(repo=repo, revision=revision, path=entry["path"]),
-                                destination, expected_sha256)
+                                destination, expected_sha256, entry.get("size"))
         marker.write_text(json.dumps({"source": repo, "revision": revision, "files": [entry["path"] for entry in files]}, indent=2),
                           encoding="utf-8")
         self._report(f"[{model_key}] downloaded")
@@ -608,20 +608,37 @@ class RuntimeInstaller:
         self._download_file(GGML_MODEL_URL.format(revision=GGML_MODEL_REVISION, file_name=file_name), destination, GGML_MODEL_SHA256[file_name])
         return destination
 
-    def _download_file(self, url: str, destination: Path, expected_sha256: Optional[str]):
-        for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+    def _download_file(self, url: str, destination: Path, expected_sha256: Optional[str],
+                       expected_size: Optional[int] = None):
+        partial = destination.with_name(destination.name + ".download")
+        failures_without_progress = 0
+        largest_partial_bytes = partial.stat().st_size if partial.exists() else 0
+        while True:
             try:
-                return self._download_file_once(url, destination, expected_sha256)
+                return self._download_file_once(url, destination, expected_sha256, expected_size)
             except (OSError, http.client.HTTPException) as e:
                 client_error = isinstance(e, urllib.error.HTTPError) and e.code < 500
-                if self._cancelled or client_error or attempt == DOWNLOAD_ATTEMPTS:
-                    destination.with_name(destination.name + ".download").unlink(missing_ok=True)
+                bytes_after_attempt = partial.stat().st_size if partial.exists() else 0
+                if bytes_after_attempt > largest_partial_bytes:
+                    largest_partial_bytes = bytes_after_attempt
+                    failures_without_progress = 0
+                else:
+                    failures_without_progress += 1
+                if self._cancelled or client_error or failures_without_progress >= DOWNLOAD_ATTEMPTS:
+                    partial.unlink(missing_ok=True)
+                    if isinstance(e, http.client.IncompleteRead):
+                        raise RuntimeInstallError(f"The download of {destination.name} keeps stopping early at "
+                                                  f"{bytes_after_attempt} bytes; a proxy or firewall may be cutting it off") from e
                     raise
-                self.logger.warning(f"Download of {destination.name} failed ({e}), retrying")
-                self._report(f"Download interrupted, retrying ({attempt}/{DOWNLOAD_ATTEMPTS - 1})...")
-                time.sleep(attempt * 5)
+                self.logger.warning(f"Download of {destination.name} failed at {bytes_after_attempt} bytes ({e}), retrying")
+                self._report(f"Download interrupted at {bytes_after_attempt / 1e9:.2f} GB, resuming...")
+                time.sleep(max(failures_without_progress, 1) * 5)
+                if self._cancelled:
+                    partial.unlink(missing_ok=True)
+                    raise RuntimeInstallError("Installation cancelled")
 
-    def _download_file_once(self, url: str, destination: Path, expected_sha256: Optional[str]):
+    def _download_file_once(self, url: str, destination: Path, expected_sha256: Optional[str],
+                            expected_size: Optional[int]):
         partial = destination.with_name(destination.name + ".download")
         digest = hashlib.sha256()
         resume_from = partial.stat().st_size if partial.exists() else 0
@@ -632,17 +649,19 @@ class RuntimeInstaller:
             if e.code != 416:
                 raise
             partial.unlink()
-            return self._download_file_once(url, destination, expected_sha256)
+            return self._download_file_once(url, destination, expected_sha256, expected_size)
         with response:
+            if resume_from:
+                self.logger.info(f"Resuming {destination.name} at {resume_from} bytes, server answered HTTP {response.status}")
             if response.status != 206:
                 resume_from = 0
             if resume_from:
                 with open(partial, "rb") as existing:
                     while chunk := existing.read(DOWNLOAD_CHUNK_BYTES):
                         digest.update(chunk)
-            total_bytes = int(response.headers.get("Content-Length") or 0)
-            ensure_free_space(destination.parent, total_bytes)
-            total_bytes += resume_from
+            content_length = int(response.headers.get("Content-Length") or 0)
+            ensure_free_space(destination.parent, content_length)
+            total_bytes = expected_size or (content_length + resume_from if content_length else 0)
             received_bytes = resume_from
             with open(partial, "ab" if resume_from else "wb") as output:
                 last_reported_percent = -1
@@ -657,9 +676,14 @@ class RuntimeInstaller:
                         if percent >= last_reported_percent + 10:
                             last_reported_percent = percent
                             self._report(f"Downloading {destination.name}... {percent}%")
+        if total_bytes and received_bytes < total_bytes:
+            raise http.client.IncompleteRead(b"", total_bytes - received_bytes)
         if expected_sha256 and digest.hexdigest() != expected_sha256:
             partial.unlink(missing_ok=True)
-            raise RuntimeInstallError(f"Checksum mismatch for {destination.name}; the download was discarded")
+            self.logger.error(f"Checksum mismatch for {destination.name}: received {received_bytes} bytes, "
+                              f"expected {total_bytes or 'unknown'} bytes")
+            raise RuntimeInstallError(f"Checksum mismatch for {destination.name}; the download was discarded. "
+                                      f"A proxy or virus scanner may be altering the download")
         partial.replace(destination)
 
     def _verify_whisper_cpp(self, binary: Path, model_path: Path):

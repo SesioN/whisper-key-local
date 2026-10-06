@@ -5,7 +5,7 @@ import threading
 from typing import Optional, TYPE_CHECKING
 
 from .utils import open_file
-from .platform import IS_WINDOWS, permissions, icons, console, autostart
+from .platform import IS_WINDOWS, permissions, icons, autostart
 from .runtime_options import COMPUTE_TYPES
 from .orb_skins import SKINS as ORB_SKINS
 from .orb_skins.preview import render_skin_preview
@@ -33,7 +33,6 @@ ICON_KEYBOARD = ""
 ICON_VOICE_COMMANDS = ""
 ICON_FOLDER = ""
 ICON_DOCUMENT = ""
-ICON_CONSOLE = ""
 ICON_EXIT = ""
 ICON_SLIDERS = ""
 
@@ -46,14 +45,12 @@ class SystemTray:
                  state_manager: 'StateManager',
                  tray_config: dict = None,
                  config_manager: Optional['ConfigManager'] = None,
-                 model_registry = None,
-                 console_config: dict = None):
+                 model_registry = None):
 
         self.state_manager = state_manager
         self.tray_config = tray_config or {}
         self.config_manager = config_manager
         self.model_registry = model_registry
-        self.console_config = console_config or {}
         self.shortcut_manager_window = None
         self.voice_command_manager_window = None
         self.logger = logging.getLogger(__name__)
@@ -127,7 +124,6 @@ class SystemTray:
             Toggle("Start with Windows", self._is_autostart_enabled, self._set_autostart) if autostart.is_supported() else None,
             Submenu("Files and logs", self._build_files_page, icon=ICON_FOLDER),
             Footer([
-                Action("Show console", self._show_console, icon=ICON_CONSOLE, default=True) if console.owns_console() else None,
                 Action("Exit", self._quit_application_from_tray, icon=ICON_EXIT),
             ]),
         ]
@@ -487,16 +483,6 @@ class SystemTray:
 
     def _toggle_mute(self):
         self.state_manager.toggle_mute()
-
-    def _show_console(self):
-        console.show()
-
-    def apply_console_settings(self):
-        if not console.owns_console() or not self.available:
-            return
-        if self.console_config.get('start_hidden', False):
-            console.hide()
-        console.start_minimize_monitor(console.hide)
 
     def _quit_application_from_tray(self):
         signal.raise_signal(signal.SIGINT)
