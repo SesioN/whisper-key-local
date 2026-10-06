@@ -203,13 +203,12 @@ def setup_loading_screen(loading_screen_config):
         return None
     return LoadingScreen(version=get_version())
 
-def setup_system_tray(tray_config, config_manager, state_manager, model_registry, console_config=None):
+def setup_system_tray(tray_config, config_manager, state_manager, model_registry):
     return SystemTray(
         state_manager=state_manager,
         tray_config=tray_config,
         config_manager=config_manager,
-        model_registry=model_registry,
-        console_config=console_config
+        model_registry=model_registry
     )
 
 def setup_floating_widget(config_manager, state_manager):
@@ -512,7 +511,6 @@ def main():
         streaming_config = config_manager.get_streaming_config()
         voice_commands_config = config_manager.get_voice_commands_config()
         post_processing_config = config_manager.get_post_processing_config()
-        console_config = config_manager.get_console_config()
         floating_widget_config = config_manager.get_floating_widget_config()
         log_config = config_manager.get_logging_config()
         log_transcriptions = log_config.get('log_transcriptions', False)
@@ -557,7 +555,7 @@ def main():
         )
         audio_recorder = setup_audio_recorder(audio_config, state_manager, vad_manager, streaming_manager)
         state_manager.attach_vad_sensitivity_window(setup_vad_sensitivity_window(vad_config, state_manager))
-        system_tray = setup_system_tray(tray_config, config_manager, state_manager, model_registry, console_config)
+        system_tray = setup_system_tray(tray_config, config_manager, state_manager, model_registry)
         clipboard_manager.on_delivery_blocked = system_tray.notify
         floating_widget = setup_floating_widget(config_manager, state_manager)
         if floating_widget:
@@ -590,8 +588,6 @@ def main():
         state_manager.play_ready_sound()
         config_manager.print_startup_hotkey_instructions()
         print("   [CTRL+C] to quit", flush=True)
-
-        system_tray.apply_console_settings()
 
         if onboarding_runtime and not state_manager.request_runtime_change(onboarding_runtime):
             print("⚠ The selected GPU runtime is not available on this system. Choose another one in the tray Runtime menu.")

@@ -328,9 +328,8 @@ try {
     }
 
     $Builds = @(
-        @{ Name = "$AppName";          IsGui = $false; NoTerminal = $false; Label = "console";                     ExecCode = $ExecCode },
-        @{ Name = "$AppName-hideable"; IsGui = $true;  NoTerminal = $false; Label = "hideable (GUI subsystem)";    ExecCode = $ExecCode },
-        @{ Name = "$AppName-no-term";  IsGui = $true;  NoTerminal = $true;  Label = "no terminal (GUI subsystem)"; ExecCode = $NoTerminalExecCode }
+        @{ Name = "$AppName";         IsGui = $true;  NoTerminal = $true;  Label = "no terminal (GUI subsystem)"; ExecCode = $NoTerminalExecCode },
+        @{ Name = "$AppName-console"; IsGui = $false; NoTerminal = $false; Label = "console";                     ExecCode = $ExecCode }
     )
 
     Push-Location $PyAppSourcePath

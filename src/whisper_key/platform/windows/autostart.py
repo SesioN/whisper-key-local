@@ -5,7 +5,7 @@ from pathlib import Path
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 VALUE_NAME = "WhisperKey"
-NO_TERMINAL_SUFFIX = "-no-term"
+CONSOLE_SUFFIX = "-console"
 
 
 def is_supported() -> bool:
@@ -13,10 +13,9 @@ def is_supported() -> bool:
 
 
 def _no_terminal_exe(pyapp_exe: Path) -> Path:
-    if pyapp_exe.stem.endswith(NO_TERMINAL_SUFFIX):
+    if not pyapp_exe.stem.endswith(CONSOLE_SUFFIX):
         return pyapp_exe
-    base = pyapp_exe.stem.removesuffix("-hideable")
-    candidate = pyapp_exe.with_name(f"{base}{NO_TERMINAL_SUFFIX}{pyapp_exe.suffix}")
+    candidate = pyapp_exe.with_name(f"{pyapp_exe.stem.removesuffix(CONSOLE_SUFFIX)}{pyapp_exe.suffix}")
     return candidate if candidate.is_file() else pyapp_exe
 
 

@@ -32,4 +32,4 @@ the fork's GitHub releases (`update_checker.py`).
 `-Release` (with `-FromSource`) gives the embedded wheel the plain `pyproject.toml` version instead of
 `<version>+g<commit>`. The GitHub release workflow uses it for tagged builds.
 
-Produces three executables: `whisper-key.exe` (console), `whisper-key-hideable.exe` (GUI subsystem, for start_hidden/minimize-to-tray) and `whisper-key-no-term.exe` (GUI subsystem, never opens a console; only the loading screen, tray and widget are visible).
+Produces two executables: `whisper-key.exe` (GUI subsystem, never opens a console; only the loading screen, tray and widget are visible) and `whisper-key-console.exe` (console, shows the log).

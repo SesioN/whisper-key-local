@@ -397,7 +397,7 @@ system_tray: # System Tray Settings
 floating_widget: # Floating Recording Button (Windows only)
     # Show an always-on-top button that starts/stops recording with a mouse click
     # Drag the icon to move it, click the label below it to lock it in place
-    enabled: false
+    enabled: true
 
     # Button size: small, medium, big
     size: big
@@ -413,11 +413,11 @@ floating_widget: # Floating Recording Button (Windows only)
 
     # Style: button (icon with Movable/Mute labels) or orb (animated voice orb
     # that reacts to your voice; scroll on it to resize, lock it from the tray)
-    style: button
+    style: orb
 
     # Orb skin (tray Floating button > Orb skin): gold, silver, chrome, glass, aurora, blackhole, nebula
     # (nebula also shows a muted look and a short success/error state)
-    orb_skin: gold
+    orb_skin: nebula
 
     # Show a lock button on the orb while hovering it
     orb_lock_button: true
@@ -445,10 +445,6 @@ terminal_title: # Terminal Tab Title Status
         - ["🔴", 1.5]
         - ["⠀⠀", 1.0]
     processing: ""
-
-console: # Console Window Management (whisper-key-hideable.exe only)
-    # Hide console window after startup (requires system tray)
-    start_hidden: false
 
 loading_screen: # Startup Loading Screen (Windows only)
     # Show a small window with startup progress while models load

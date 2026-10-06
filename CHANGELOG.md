@@ -5,7 +5,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ## [Unreleased]
 
 ### Changed
-- **Nebula loading screen** - the startup window shows an animated nebula with the Whisper Key logo and a clearly readable status card; the first-install window of `whisper-key-no-term.exe` looks the same and hands over to it seamlessly
+- **Nebula loading screen** - the startup window shows an animated nebula with the Whisper Key logo and a clearly readable status card; the first-install window of `whisper-key.exe` looks the same and hands over to it seamlessly
+- **`whisper-key.exe` runs without a console window** - it is the former `whisper-key-no-term.exe`; the build with a log console is now `whisper-key-console.exe`. `whisper-key-hideable.exe` and the `console.start_hidden` setting are removed
+- **Voice orb on by default** - new installs show the floating voice orb with the nebula skin (`floating_widget.enabled: true`, `style: orb`, `orb_skin: nebula`)
 - **New app and tray icons** - in the style of the nebula orb (idle blue, recording with a red dot, processing violet)
 
 ## [1.3.0] - 2026-10-06

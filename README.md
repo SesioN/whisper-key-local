@@ -23,9 +23,9 @@ Global hotkeys to record speech and transcribe directly to your cursor.
 
 ### Windows App (Recommended)
 
-1. Download `whisper-key.exe` (or `whisper-key-no-term.exe` for no console window) from the
-   [latest release](https://github.com/SesioN/whisper-key-local/releases/latest)
-   `whisper-key-hideable.exe` is the variant for `console.start_hidden`
+1. Download `whisper-key.exe` from the [latest release](https://github.com/SesioN/whisper-key-local/releases/latest).
+   It runs without a console window (loading screen, tray icon and voice orb only);
+   `whisper-key-console.exe` is the same app with a console that shows the log, for troubleshooting
 2. Run it. On startup the app checks this repository's releases for updates.
 
 ### Python Package
@@ -189,12 +189,12 @@ Delete this file and restart app to reset to defaults.
 | `system_tray.enabled` | `true` | Show tray icon |
 | `system_tray.tooltip` | `Whisper Key` | Hover text |
 | **Floating Button** |||
-| `floating_widget.enabled` | `false` | Always-on-top button to start/stop recording by mouse (Windows only) |
+| `floating_widget.enabled` | `true` | Always-on-top button to start/stop recording by mouse (Windows only) |
 | `floating_widget.size` | `big` | small, medium or big |
 | `floating_widget.save_position` | `false` | Restore the last dragged position on startup |
 | `floating_widget.locked` | `false` | Keep the button locked in place |
-| `floating_widget.style` | `button` | button, or orb: an animated voice orb that reacts to your voice level; click to record, drag to move, scroll to resize |
-| `floating_widget.orb_skin` | `gold` | gold, silver, chrome, glass, aurora, blackhole or nebula; nebula has its own muted look and shows a ✓ after a delivered transcription or executed voice command and a ! after a failure; glass and blackhole cost the most CPU and may drop frames to stay within the orb's CPU budget |
+| `floating_widget.style` | `orb` | button, or orb: an animated voice orb that reacts to your voice level; click to record, drag to move, scroll to resize |
+| `floating_widget.orb_skin` | `nebula` | gold, silver, chrome, glass, aurora, blackhole or nebula; nebula has its own muted look and shows a ✓ after a delivered transcription or executed voice command and a ! after a failure; glass and blackhole cost the most CPU and may drop frames to stay within the orb's CPU budget |
 | `floating_widget.orb_hide_on_fullscreen` | `true` | Hide the orb while a fullscreen application is in front |
 | `floating_widget.orb_lock_button` | `true` | Show a lock button at the orb's lower left while hovering it; click to lock or unlock its position |
 | `floating_widget.orb_mute_button` | `true` | Show a mute button at the orb's lower right while hovering it; click to mute or unmute the microphone |
@@ -206,8 +206,6 @@ Delete this file and restart app to reset to defaults.
 | `terminal_title.idle` | `""` | Tab title prefix when idle: static string or `[prefix, seconds]` animation frames |
 | `terminal_title.recording` | 🔴 blink | Tab title prefix while recording |
 | `terminal_title.processing` | `""` | Tab title prefix while transcribing |
-| **Console** |||
-| `console.start_hidden` | `false` | Hide console after startup (whisper-key-hideable.exe only) |
 | **Loading Screen** |||
 | `loading_screen.enabled` | `true` | Show a startup progress window while models load (Windows only) |
 | **Update** |||
