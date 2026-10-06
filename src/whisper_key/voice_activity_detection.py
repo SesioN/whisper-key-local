@@ -64,6 +64,7 @@ class VadManager:
 
         self.logger = logging.getLogger(__name__)
 
+        self.precheck_lock = threading.Lock()
         self.ten_vad = self._check_and_init_ten_vad()
 
     def _check_and_init_ten_vad(self):
@@ -86,15 +87,16 @@ class VadManager:
             chunk_size = VAD_CHUNK_SIZE
 
             probabilities = []
-            for i in range(0, len(audio_int16), chunk_size):
-                chunk = audio_int16[i:i + chunk_size]
+            with self.precheck_lock:
+                for i in range(0, len(audio_int16), chunk_size):
+                    chunk = audio_int16[i:i + chunk_size]
 
-                # Make sure chunk meets TEN VAD 256-sample requirement
-                if len(chunk) < chunk_size:
-                    chunk = np.pad(chunk, (0, chunk_size - len(chunk)), mode='constant', constant_values=0)
+                    # Make sure chunk meets TEN VAD 256-sample requirement
+                    if len(chunk) < chunk_size:
+                        chunk = np.pad(chunk, (0, chunk_size - len(chunk)), mode='constant', constant_values=0)
 
-                out_probability, _ = self.ten_vad.process(chunk)
-                probabilities.append(out_probability)
+                    out_probability, _ = self.ten_vad.process(chunk)
+                    probabilities.append(out_probability)
 
             # Capture processing time for performance monitoring
             vad_time = (time.time() - vad_start_time) * 1000
@@ -126,7 +128,7 @@ class VadManager:
             return None
 
         return ContinuousVoiceDetector(
-            ten_vad=self.ten_vad,
+            ten_vad=TenVad(),
             vad_onset_threshold=self.vad_onset_threshold,
             vad_offset_threshold=self.vad_offset_threshold,
             vad_silence_timeout_seconds=self.vad_silence_timeout_seconds,

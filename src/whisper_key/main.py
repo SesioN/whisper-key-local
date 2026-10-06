@@ -8,6 +8,7 @@ from .runtime_loader import CUDA, ROCM, VULKAN, activate_selected_runtime, runti
 activate_selected_runtime()
 
 import argparse
+import faulthandler
 import logging
 import os
 import signal
@@ -53,6 +54,8 @@ def setup_logging(config_manager: ConfigManager):
         file_handler.setLevel(getattr(logging, log_config['level']))
         file_handler.setFormatter(formatter)
         root_logger.addHandler(file_handler)
+        crash_log_path = os.path.join(whisperkey_dir, 'crash.log')
+        faulthandler.enable(file=open(crash_log_path, 'a', encoding='utf-8'), all_threads=True)
     
     if log_config['console']['enabled']:
         console_handler = logging.StreamHandler()
