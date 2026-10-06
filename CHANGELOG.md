@@ -4,6 +4,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Changed
+- **Orb opacity slider** - the transparency slider is now an **Opacity** slider from 20% to 100% that starts at the skin's own 70% (marked on the track), so the orb can be made more solid as well as more see-through; `floating_widget.orb_opacity` now means the idle opacity (default `0.7`).
+
 ## [1.5.1] - 2026-10-06
 
 ### Fixed

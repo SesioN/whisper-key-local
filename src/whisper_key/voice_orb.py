@@ -9,7 +9,7 @@ from typing import Callable, Optional
 
 from .orb_skins import DEFAULT_SKIN, SKINS, get_skin
 from .orb_skins.badges import BadgeRenderer
-from .orb_skins.base import appearance_matrix, apply_color_matrix
+from .orb_skins.base import DEFAULT_IDLE_OPACITY, appearance_matrix, apply_color_matrix
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
@@ -188,7 +188,6 @@ FLASH_DURATION = 0.45
 OUTCOME_SECONDS = {"success": 1.2, "error": 2.0}
 ERROR_FLASH_COLOR = (255, 60, 50)
 OPACITY_MUTED_SKIN = 0.85
-OPACITY_IDLE = 0.7
 OPACITY_MUTED = 0.3
 OPACITY_LOADING = 0.35
 FPS_IDLE = 8
@@ -220,7 +219,7 @@ class VoiceOrb:
                  on_mute_click: Optional[Callable[[], None]] = None,
                  show_lock_button: bool = True,
                  show_mute_button: bool = True,
-                 opacity: float = 1.0,
+                 opacity: float = DEFAULT_IDLE_OPACITY,
                  vibrancy: float = 1.0,
                  hue: float = 0.0):
         self.on_click = on_click
@@ -801,11 +800,11 @@ class VoiceOrb:
                 state, level, opacity = "idle", 0.0, OPACITY_MUTED
         else:
             state, level = self.state, self._level_smooth
-            opacity = 1.0 if state in ("recording", "processing") else OPACITY_IDLE
+            opacity = 1.0 if state in ("recording", "processing") else DEFAULT_IDLE_OPACITY
         flash_length = FLASH_DURATION * 2 if self._flash_color else FLASH_DURATION
         flash = max(0.0, (self._flash_until - time.monotonic()) / flash_length)
 
-        opacity *= self.appearance_opacity
+        opacity = min(1.0, opacity * self.appearance_opacity / DEFAULT_IDLE_OPACITY)
         color_matrix = self.color_matrix
         surface = self._surface
         self._renderer.render_into(surface["pixels"], state, level, t, opacity, flash, self._flash_color, grayscale,
