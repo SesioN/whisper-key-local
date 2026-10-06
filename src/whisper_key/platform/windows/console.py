@@ -2,14 +2,10 @@ import ctypes
 import ctypes.wintypes as wintypes
 import os
 import sys
-import threading
-import time
 
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
 
-SW_HIDE = 0
-SW_RESTORE = 9
 STD_OUTPUT_HANDLE = -11
 ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
 ENABLE_PROCESSED_OUTPUT = 0x0001
@@ -20,7 +16,6 @@ FIXED_PITCH = 0x01
 TMPF_TRUETYPE = 0x04
 
 _hwnd = None
-_active = False
 
 
 class COORD(ctypes.Structure):
@@ -95,55 +90,6 @@ def _redirect_missing_streams_to_devnull():
 
 
 def setup():
-    global _hwnd, _active
-    if not os.environ.get("PYAPP") or os.environ.get("WHISPER_KEY_NO_TERMINAL") or not kernel32.AllocConsole():
-        _redirect_missing_streams_to_devnull()
-        return
-    _hwnd = None
-    _get_hwnd()
-    sys.stdout = open("CONOUT$", "w", encoding="utf-8", errors="replace")
-    sys.stderr = open("CONOUT$", "w", encoding="utf-8", errors="replace")
-    sys.stdin = open("CONIN$", "r")
-    _configure_console()
-    _active = True
-
-
-def owns_console():
-    return _active
-
-
-def hide():
-    hwnd = _get_hwnd()
-    if hwnd:
-        user32.ShowWindow(hwnd, SW_HIDE)
-
-
-def show():
-    hwnd = _get_hwnd()
-    if hwnd:
-        user32.ShowWindow(hwnd, SW_HIDE)
-        user32.ShowWindow(hwnd, SW_RESTORE)
-        user32.SetForegroundWindow(hwnd)
-
-
-def is_minimized():
-    hwnd = _get_hwnd()
-    if not hwnd:
-        return False
-    return bool(user32.IsIconic(hwnd))
-
-
-def start_minimize_monitor(on_minimize):
-    def _poll():
-        was_minimized = False
-        while True:
-            if is_minimized():
-                if not was_minimized:
-                    on_minimize()
-                    was_minimized = True
-            else:
-                was_minimized = False
-            time.sleep(0.2)
-
-    thread = threading.Thread(target=_poll, daemon=True)
-    thread.start()
+    _redirect_missing_streams_to_devnull()
+    if os.environ.get("PYAPP") and not os.environ.get("WHISPER_KEY_NO_TERMINAL") and _get_hwnd():
+        _configure_console()

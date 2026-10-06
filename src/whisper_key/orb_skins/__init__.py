@@ -18,7 +18,7 @@ SKINS = {
     "nebula": NebulaSkin,
 }
 
-DEFAULT_SKIN = "gold"
+DEFAULT_SKIN = "nebula"
 
 
 def get_skin(name: str):

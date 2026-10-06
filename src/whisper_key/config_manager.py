@@ -371,9 +371,6 @@ class ConfigManager:
     def get_terminal_title_config(self) -> Dict[str, Any]:
         return self.config.get('terminal_title', {}).copy()
 
-    def get_console_config(self) -> Dict[str, Any]:
-        return self.config.get('console', {}).copy()
-
     def get_loading_screen_config(self) -> Dict[str, Any]:
         return self.config.get('loading_screen', {}).copy()
 
