@@ -4,6 +4,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Fixed
+- **Crash or freeze after a transcription with auto-trigger** - the realtime voice detector and the speech pre-check no longer share one TEN VAD instance across threads, which could crash the app silently or hang it (seen with the CUDA and DirectML ONNX runtimes); native crashes now leave a stack trace in `crash.log` next to `app.log`
+
 ## [1.5.0] - 2026-10-06
 
 ### Added
