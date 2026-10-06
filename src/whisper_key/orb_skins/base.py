@@ -15,6 +15,30 @@ def wrap_angle(a):
     return (a + np.pi) % (2.0 * np.pi) - np.pi
 
 
+RGB_TO_YIQ = np.array([[0.299, 0.587, 0.114],
+                       [0.596, -0.274, -0.322],
+                       [0.211, -0.523, 0.312]], dtype=np.float64)
+YIQ_TO_RGB = np.linalg.inv(RGB_TO_YIQ)
+
+
+def appearance_matrix(hue_degrees: float, vibrancy: float):
+    if hue_degrees % 360 == 0 and vibrancy == 1.0:
+        return None
+    angle = np.radians(hue_degrees)
+    cos_a, sin_a = np.cos(angle), np.sin(angle)
+    yiq_adjust = np.array([[1.0, 0.0, 0.0],
+                           [0.0, vibrancy * cos_a, -vibrancy * sin_a],
+                           [0.0, vibrancy * sin_a, vibrancy * cos_a]])
+    return (YIQ_TO_RGB @ yiq_adjust @ RGB_TO_YIQ).astype(np.float32)
+
+
+def apply_color_matrix(color, color_matrix):
+    adjusted = np.array(color, dtype=np.float32)
+    if color_matrix is not None:
+        adjusted = color_matrix @ adjusted
+    return tuple(int(round(channel)) for channel in np.clip(adjusted, 0.0, 255.0))
+
+
 class OrbSkin:
 
     CANVAS_FACTOR = 2.2
@@ -69,8 +93,11 @@ class OrbSkin:
         return a.reshape((n, s, n, s) + a.shape[2:]).mean(axis=(1, 3))
 
     def render_into(self, pixels, state: str, level: float, t: float, opacity: float, flash: float = 0.0,
-                    flash_color=None, grayscale: bool = False):
+                    flash_color=None, grayscale: bool = False, color_matrix=None):
         rgb, alpha = self.shade(state, level, t)
+
+        if color_matrix is not None:
+            rgb = rgb @ color_matrix.T
 
         if grayscale:
             luminance = rgb @ np.array(GRAYSCALE_WEIGHTS, dtype=np.float32)
@@ -99,7 +126,7 @@ class OrbSkin:
         out[..., 3] = alpha
         np.copyto(pixels, out, casting="unsafe")
 
-    def render(self, state: str, level: float, t: float, opacity: float, flash: float = 0.0):
+    def render(self, state: str, level: float, t: float, opacity: float, flash: float = 0.0, color_matrix=None):
         pixels = np.empty((self.canvas, self.canvas, 4), dtype=np.uint8)
-        self.render_into(pixels, state, level, t, opacity, flash)
+        self.render_into(pixels, state, level, t, opacity, flash, color_matrix=color_matrix)
         return pixels

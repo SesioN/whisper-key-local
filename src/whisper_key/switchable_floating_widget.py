@@ -84,6 +84,11 @@ class SwitchableFloatingWidget:
             if isinstance(self._widget, VoiceOrb):
                 self._widget.set_hide_on_fullscreen(hide_on_fullscreen)
 
+    def set_orb_appearance(self, opacity: float, vibrancy: float, hue: float):
+        with self._switch_lock:
+            if isinstance(self._widget, VoiceOrb):
+                self._widget.set_appearance(opacity, vibrancy, hue)
+
     def stop(self):
         with self._switch_lock:
             self._shown = False

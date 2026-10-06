@@ -250,7 +250,10 @@ def setup_floating_widget(config_manager, state_manager):
             on_lock_click=state_manager.update_orb_locked,
             on_mute_click=state_manager.toggle_mute,
             show_lock_button=floating_widget_config['orb_lock_button'],
-            show_mute_button=floating_widget_config['orb_mute_button']
+            show_mute_button=floating_widget_config['orb_mute_button'],
+            opacity=floating_widget_config['orb_opacity'],
+            vibrancy=floating_widget_config['orb_vibrancy'],
+            hue=floating_widget_config['orb_hue']
         )
 
     return SwitchableFloatingWidget(
