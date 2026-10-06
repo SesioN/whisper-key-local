@@ -61,7 +61,7 @@ python whisper-key.py
 Click the system tray icon (Windows: left or right click opens a Windows 11 style menu that follows the light/dark theme; macOS: menu bar menu) to:
 - See the status and current model, and mute the microphone (microphone button at the top)
 - **Recording**: switch the recording mode between toggle and push-to-talk, toggle voice-activated recording and audio feedback, open the voice detection sensitivity window
-- **Output**: toggle auto-paste and copy to clipboard
+- **Output**: toggle auto-paste, copy to clipboard and voice commands in normal recordings
 - **Model**: change the transcription model, runtime (CPU / CUDA / ROCm / Vulkan / ONNX) and precision
 - **Microphone**: select the input device and audio host
 - **Floating button** (Windows): show it, button or animated voice orb style, size, lock, hide in fullscreen apps. **Orb skin** lists every skin with a preview; clicking one applies it right away and keeps the menu open, so you can click through them
@@ -214,6 +214,7 @@ Delete this file and restart app to reset to defaults.
 | `update.mode` | `prompt` | prompt or auto |
 | **Voice Commands** |||
 | `voice_commands.enabled` | `true` | Enable voice command mode |
+| `voice_commands.match_in_dictation` | `false` | Also check normal recordings: text containing a trigger runs the command instead of being pasted (tray: **Voice commands in normal recordings**) |
 
 ## 📁 Model Cache
 

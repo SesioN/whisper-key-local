@@ -216,6 +216,10 @@ class ModelDefinition:
         if not isinstance(self.supports_prompt, bool):
             logging.getLogger(__name__).warning(f"Model {key}: supports_prompt must be true or false, got {self.supports_prompt!r}; using true")
             self.supports_prompt = True
+        self.max_chunk_seconds = config.get("max_chunk_seconds")
+        if self.max_chunk_seconds is not None and (isinstance(self.max_chunk_seconds, bool) or not isinstance(self.max_chunk_seconds, (int, float)) or self.max_chunk_seconds <= 0):
+            logging.getLogger(__name__).warning(f"Model {key}: max_chunk_seconds must be a positive number, got {self.max_chunk_seconds!r}; using the default")
+            self.max_chunk_seconds = None
         self.is_local_path = self._check_is_local_path()
         self.cache_folder = self._derive_cache_folder()
 

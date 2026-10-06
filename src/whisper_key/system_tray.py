@@ -117,6 +117,7 @@ class SystemTray:
             Section("Output"),
             Toggle("Auto-paste", self._is_auto_paste_enabled, self._set_transcription_mode),
             Toggle("Copy to clipboard", self._is_copy_enabled, self._set_copy_to_clipboard, enabled=self._is_auto_paste_enabled),
+            Toggle("Voice commands in normal recordings", self._is_match_in_dictation_enabled, self._set_match_in_dictation) if self._is_voice_command_manager_enabled() else None,
             Section("Setup"),
             Submenu("Model", self._build_model_page, icon=ICON_MODEL, detail=self._model_detail),
             Submenu("Microphone", self._build_microphone_page, icon=ICON_MICROPHONE, detail=self._microphone_detail),
@@ -351,6 +352,21 @@ class SystemTray:
             self.state_manager.update_audio_feedback(enabled)
         except Exception as e:
             self.logger.error(f"Error setting audio feedback to {enabled}: {e}")
+        self.refresh_menu()
+
+    def _is_voice_command_manager_enabled(self):
+        voice_command_manager = self.state_manager.voice_command_manager
+        return bool(voice_command_manager and voice_command_manager.enabled)
+
+    def _is_match_in_dictation_enabled(self):
+        return self.state_manager.voice_command_manager.match_in_dictation
+
+    def _set_match_in_dictation(self, enabled: bool):
+        try:
+            self.state_manager.voice_command_manager.match_in_dictation = enabled
+            self.config_manager.update_user_setting('voice_commands', 'match_in_dictation', enabled)
+        except Exception as e:
+            self.logger.error(f"Error setting voice commands in normal recordings to {enabled}: {e}")
         self.refresh_menu()
 
     def _is_auto_paste_enabled(self):

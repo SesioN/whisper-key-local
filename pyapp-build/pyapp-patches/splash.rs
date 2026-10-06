@@ -20,7 +20,10 @@ mod imp {
 
     use once_cell::sync::Lazy;
     use windows_sys::Win32::Foundation::{
-        CloseHandle, BOOL, COLORREF, HANDLE, HWND, LPARAM, LRESULT, RECT, WPARAM,
+        CloseHandle, BOOL, COLORREF, HANDLE, HWND, INVALID_HANDLE_VALUE, LPARAM, LRESULT, RECT, WPARAM,
+    };
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
     };
     use windows_sys::Win32::Graphics::Gdi::{
         BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint, FillRect,
@@ -174,7 +177,7 @@ mod imp {
     }
 
     struct WindowSearch {
-        pid: u32,
+        pids: Vec<u32>,
         found: bool,
     }
 
@@ -182,15 +185,50 @@ mod imp {
         let search = &mut *(lparam as *mut WindowSearch);
         let mut pid = 0u32;
         GetWindowThreadProcessId(hwnd, &mut pid);
-        if pid == search.pid && IsWindowVisible(hwnd) != 0 {
+        if search.pids.contains(&pid) && IsWindowVisible(hwnd) != 0 {
             search.found = true;
             return 0;
         }
         1
     }
 
-    fn has_visible_window(pid: u32) -> bool {
-        let mut search = WindowSearch { pid, found: false };
+    fn parent_links() -> Vec<(u32, u32)> {
+        let mut links = Vec::new();
+        unsafe {
+            let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if snapshot == INVALID_HANDLE_VALUE {
+                return links;
+            }
+            let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+            entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+            let mut has_entry = Process32FirstW(snapshot, &mut entry) != 0;
+            while has_entry {
+                links.push((entry.th32ProcessID, entry.th32ParentProcessID));
+                has_entry = Process32NextW(snapshot, &mut entry) != 0;
+            }
+            CloseHandle(snapshot);
+        }
+        links
+    }
+
+    fn process_tree(root_pid: u32) -> Vec<u32> {
+        let links = parent_links();
+        let mut pids = vec![root_pid];
+        let mut index = 0;
+        while index < pids.len() {
+            let parent = pids[index];
+            for &(pid, parent_pid) in &links {
+                if parent_pid == parent && pid != parent && !pids.contains(&pid) {
+                    pids.push(pid);
+                }
+            }
+            index += 1;
+        }
+        pids
+    }
+
+    fn has_visible_window(root_pid: u32) -> bool {
+        let mut search = WindowSearch { pids: process_tree(root_pid), found: false };
         unsafe { EnumWindows(Some(find_window_of_process), &mut search as *mut _ as LPARAM) };
         search.found
     }
