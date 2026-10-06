@@ -153,10 +153,11 @@ function Patch-NoTerminalSupport {
 
     Set-PatchedText (Join-Path $PyAppSourcePath "Cargo.toml") '[build-dependencies]' @'
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_Diagnostics_ToolHelp", "Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging"] }
 
 [build-dependencies]
 '@ 'windows-sys = { version = "0.59"'
+    Set-PatchedText (Join-Path $PyAppSourcePath "Cargo.toml") '"Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging"] }' '"Win32_System_Diagnostics_ToolHelp", "Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging"] }' 'Win32_System_Diagnostics_ToolHelp'
 
     Set-PatchedText (Join-Path $PyAppSourcePath "build.rs") 'fn main() {' @'
 fn main() {
