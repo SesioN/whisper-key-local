@@ -10,6 +10,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Voice orb on by default** - new installs show the floating voice orb with the nebula skin (`floating_widget.enabled: true`, `style: orb`, `orb_skin: nebula`)
 - **New app and tray icons** - in the style of the nebula orb (idle blue, recording with a red dot, processing violet)
 
+### Fixed
+- **Large model downloads survive dropped connections** - when a proxy or firewall (e.g. Zscaler) cuts a download short, Whisper Key now resumes it where it stopped instead of failing with "Checksum mismatch" and starting over; it only gives up after repeated attempts make no progress, with a message that points at the proxy
+
 ## [1.3.0] - 2026-10-06
 
 ### Added
