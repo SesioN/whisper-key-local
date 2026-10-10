@@ -112,3 +112,10 @@ def style_text_widget(widget: tk.Text, theme):
 def apply_window_chrome(root: tk.Misc, theme):
     root.update_idletasks()
     window_style.apply_window_chrome(root.winfo_id(), theme.dark, rgb_color(theme.border))
+
+
+def center_window(root: tk.Misc):
+    root.update_idletasks()
+    window_style.center_window(root.winfo_id())
+    root.update_idletasks()
+    window_style.center_window(root.winfo_id())

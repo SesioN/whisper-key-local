@@ -287,6 +287,11 @@ audio: # Audio Recording Settings
     # Set to 0 for unlimited recording
     max_duration: 900
 
+    # Audio kept from before a recording starts, so the first word is not cut off (seconds)
+    # Keeps the microphone open while Whisper Key runs (Windows shows the microphone in use); paused while muted
+    # 0 to 10; 0 = off: the microphone only opens while recording or listening for voice activation
+    pre_roll_seconds: 1.0
+
     # Audio input device selection
     # "default" = Use system default microphone (default behavior)
     # <device_id> = Specific device ID number (set automatically when changed via system tray)

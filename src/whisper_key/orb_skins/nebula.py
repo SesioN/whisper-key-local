@@ -1,4 +1,6 @@
 import math
+import threading
+from collections import OrderedDict
 
 import numpy as np
 
@@ -10,6 +12,7 @@ TEXTURE_RADIAL = 384
 TEXTURE_ANGULAR = 1024
 FADE_SECONDS = 0.28
 SPIRAL_TWIST = 1.35
+TEXTURE_CACHE_SIZE = 3
 
 PALETTES = {
     "idle": {"warm": (70, 190, 255), "cool": (150, 110, 255), "haze": (40, 80, 180),
@@ -26,7 +29,8 @@ PALETTES = {
               "core": (14, 1, 1), "glyph": (255, 80, 65)},
 }
 
-_TEXTURE_CACHE = {}
+_TEXTURE_CACHE = OrderedDict()
+_TEXTURE_CACHE_LOCK = threading.Lock()
 
 
 def _polar_grid():
@@ -94,20 +98,52 @@ def _lump_profile(seed):
     return profile / np.abs(profile).max()
 
 
+def _build_textures(width):
+    return {
+        "orbit_forward": _orbit_texture(11, 16, width, (0.72, 1.04), (0.55, 0.95)),
+        "orbit_reverse": _orbit_texture(23, 12, width, (0.66, 1.00), (0.60, 0.98)),
+        "rings": (_orbit_texture(37, 14, width, (0.60, 1.02), (0.90, 1.0))
+                  + 0.6 * _orbit_texture(41, 6, width, (0.50, 0.62), (0.97, 1.0))),
+        "spiral": _spiral_texture(53, width * 1.6),
+        "haze": _haze_texture(67),
+        "lumps_a": _lump_profile(71),
+        "lumps_b": _lump_profile(89),
+    }
+
+
+def _line_width(orb_radius):
+    return max(0.011, 1.15 / orb_radius)
+
+
+def _texture_key(width):
+    return round(width, 3)
+
+
+def _has_textures(width):
+    with _TEXTURE_CACHE_LOCK:
+        return _texture_key(width) in _TEXTURE_CACHE
+
+
+def _store_textures(width, textures):
+    with _TEXTURE_CACHE_LOCK:
+        _TEXTURE_CACHE[_texture_key(width)] = textures
+        _TEXTURE_CACHE.move_to_end(_texture_key(width))
+        while len(_TEXTURE_CACHE) > TEXTURE_CACHE_SIZE:
+            _TEXTURE_CACHE.popitem(last=False)
+
+
 def _textures(width):
-    key = round(width, 3)
-    if key not in _TEXTURE_CACHE:
-        _TEXTURE_CACHE[key] = {
-            "orbit_forward": _orbit_texture(11, 16, width, (0.72, 1.04), (0.55, 0.95)),
-            "orbit_reverse": _orbit_texture(23, 12, width, (0.66, 1.00), (0.60, 0.98)),
-            "rings": (_orbit_texture(37, 14, width, (0.60, 1.02), (0.90, 1.0))
-                      + 0.6 * _orbit_texture(41, 6, width, (0.50, 0.62), (0.97, 1.0))),
-            "spiral": _spiral_texture(53, width * 1.6),
-            "haze": _haze_texture(67),
-            "lumps_a": _lump_profile(71),
-            "lumps_b": _lump_profile(89),
-        }
-    return _TEXTURE_CACHE[key]
+    key = _texture_key(width)
+    with _TEXTURE_CACHE_LOCK:
+        if key in _TEXTURE_CACHE:
+            _TEXTURE_CACHE.move_to_end(key)
+            return key, _TEXTURE_CACHE[key]
+        if _TEXTURE_CACHE:
+            nearest_key = min(_TEXTURE_CACHE, key=lambda cached_key: abs(cached_key - key))
+            return nearest_key, _TEXTURE_CACHE[nearest_key]
+    textures = _build_textures(width)
+    _store_textures(width, textures)
+    return width, textures
 
 
 class NebulaSkin(OrbSkin):
@@ -123,6 +159,16 @@ class NebulaSkin(OrbSkin):
 
     WAVE_BARS = 21
 
+    @classmethod
+    def is_prepared(cls, orb_radius: float) -> bool:
+        return _has_textures(_line_width(orb_radius))
+
+    @classmethod
+    def prepare(cls, orb_radius: float):
+        width = _line_width(orb_radius)
+        if not _has_textures(width):
+            _store_textures(width, _build_textures(width))
+
     def __init__(self, canvas: int, orb_radius: float):
         super().__init__(canvas, orb_radius)
         self.u = (self.rr / self.r0).astype(np.float32)
@@ -132,10 +178,11 @@ class NebulaSkin(OrbSkin):
         self.cos_th = np.cos(self.th)
         self.sin_th = np.sin(self.th)
 
-        line_width = max(0.011, 1.15 / self.r0)
-        thickness_gain = np.float32((0.011 / line_width) ** 0.75)
+        line_width = _line_width(self.r0)
+        texture_width, textures = _textures(line_width)
+        thickness_gain = np.float32((0.011 / texture_width) ** 0.75)
         self.textures = {name: (tex.ravel() if tex.ndim == 2 else tex)
-                         for name, tex in _textures(line_width).items()}
+                         for name, tex in textures.items()}
         for name in ("orbit_forward", "orbit_reverse", "rings", "spiral"):
             self.textures[name] = self.textures[name] * thickness_gain
         radial_index = np.clip((self.u / U_MAX * TEXTURE_RADIAL).astype(np.int32), 0, TEXTURE_RADIAL - 1)

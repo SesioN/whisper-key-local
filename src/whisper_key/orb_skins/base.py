@@ -58,6 +58,14 @@ class OrbSkin:
     BADGE_RING = (200, 204, 214)
     BADGE_GLYPH = (236, 238, 244)
 
+    @classmethod
+    def is_prepared(cls, orb_radius: float) -> bool:
+        return True
+
+    @classmethod
+    def prepare(cls, orb_radius: float):
+        pass
+
     def __init__(self, canvas: int, orb_radius: float):
         self.canvas = canvas
 

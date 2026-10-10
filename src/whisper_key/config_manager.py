@@ -483,6 +483,7 @@ def _assign_free_bindings(action, bindings, owners_by_binding, logger):
 
 def validate_config(config, default_config, logger):
     _validate_numeric_range(config, default_config, 'audio.max_duration', logger, min_val=0)
+    _validate_numeric_range(config, default_config, 'audio.pre_roll_seconds', logger, min_val=0, max_val=10)
 
     _validate_numeric_range(config, default_config, 'vad.vad_onset_threshold', logger, min_val=0.0, max_val=1.0)
     _validate_numeric_range(config, default_config, 'vad.vad_offset_threshold', logger, min_val=0.0, max_val=1.0)

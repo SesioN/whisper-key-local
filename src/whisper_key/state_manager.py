@@ -109,7 +109,14 @@ class StateManager:
         self.floating_widget = OptionalComponent(floating_widget)
         self.floating_widget_available = floating_widget is not None
         self._ensure_audio_device_for_host(self._current_audio_host)
+        self._apply_pre_roll_buffering()
         self._apply_auto_trigger()
+
+    def _apply_pre_roll_buffering(self):
+        if self.is_muted:
+            self.audio_recorder.stop_buffering()
+        elif not self.audio_recorder.start_buffering() and self.audio_recorder.pre_roll_seconds > 0:
+            self.logger.warning("Pre-roll buffering could not start")
 
     def _update_ui_state(self, state: str):
         if self.is_engine_unavailable() and state != "recording":
@@ -549,6 +556,7 @@ class StateManager:
             self.audio_recorder.stop_recording()
         self.output_audio_control.release_blocking()
         self.vad_sensitivity_window.stop()
+        self.audio_recorder.stop_buffering()
         self.audio_recorder.stop_monitoring()
 
         installer = self._runtime_installer
@@ -638,6 +646,8 @@ class StateManager:
             with self._state_lock:
                 if self.is_muted == muted:
                     return
+                if not muted:
+                    self.audio_recorder.clear_pre_roll()
                 self.is_muted = muted
             if muted:
                 print("🔇 Microphone muted - recording disabled")
@@ -645,6 +655,7 @@ class StateManager:
                     self.cancel_active_recording()
             else:
                 print("🎤 Microphone unmuted")
+            self._apply_pre_roll_buffering()
             self.floating_widget.set_muted(muted)
             self._update_ui_state(self.get_current_state())
 
@@ -1290,6 +1301,8 @@ class StateManager:
             vad_manager = self.audio_recorder.vad_manager
             streaming_manager = self.audio_recorder.streaming_manager
             on_streaming_result = self.audio_recorder.on_streaming_result
+            pre_roll_seconds = self.audio_recorder.pre_roll_seconds
+            on_audio_level = self.audio_recorder.on_audio_level
 
             new_recorder = AudioRecorder(
                 on_vad_event=self.handle_vad_event,
@@ -1302,11 +1315,14 @@ class StateManager:
                 on_streaming_result=on_streaming_result,
                 on_vad_probability=self.handle_vad_probability,
                 device=device_id if device_id != -1 else None,
-                on_monitoring_failed=self.handle_monitoring_failed
+                on_monitoring_failed=self.handle_monitoring_failed,
+                pre_roll_seconds=pre_roll_seconds
             )
+            new_recorder.on_audio_level = on_audio_level
 
             previous_recorder = self.audio_recorder
             self.audio_recorder = new_recorder
+            previous_recorder.stop_buffering()
             previous_recorder.stop_monitoring()
             previous_recorder.cancel_recording()
 
@@ -1316,6 +1332,7 @@ class StateManager:
             self.logger.error(f"Failed to change audio device: {e}")
             print(f"❌ Failed to switch audio device: {e}")
 
+        self._apply_pre_roll_buffering()
         self._apply_auto_trigger()
 
     def _initialize_audio_host(self):

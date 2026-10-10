@@ -2,6 +2,10 @@ def apply_window_chrome(tk_window_id: int, dark: bool, border_rgb: tuple):
     pass
 
 
+def center_window(tk_window_id: int):
+    pass
+
+
 def prevent_focus_steal(tk_window_id: int):
     pass
 
