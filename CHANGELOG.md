@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ## [Unreleased]
 
 ### Added
+- **Retry last recording** - when a transcription fails (or the recording arrives while the runtime is switching) the audio is kept, and the tray Recording section offers "Retry last recording" until a transcription succeeds
+- **Model suggestion on first run** - a new install that still uses Tiny offers a model that fits the PC: Large-V3-Turbo with a GPU runtime, Small with 4+ CPU cores, Base otherwise (`.en` variants when the language is English)
 - **CPU thread setting** - `whisper.cpu_threads` (default 0 = one thread per physical core, performance cores on Apple Silicon, up to 16) for faster-whisper on CPU and whisper.cpp; faster-whisper used to be limited to 4 threads
 
 ### Changed
