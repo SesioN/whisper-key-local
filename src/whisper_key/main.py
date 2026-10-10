@@ -417,7 +417,7 @@ def setup_voice_command_manager_window(voice_command_manager, hotkey_listener, s
         key_name_for_virtual_key=hotkeys.key_name_for_virtual_key
     )
 
-def setup_shortcut_manager_window(config_manager, hotkey_listener, voice_commands_enabled):
+def setup_shortcut_manager_window(config_manager, hotkey_listener, system_tray, voice_commands_enabled):
     if not IS_WINDOWS:
         return None
     try:
@@ -432,6 +432,7 @@ def setup_shortcut_manager_window(config_manager, hotkey_listener, voice_command
         hotkey_listener.apply_hotkey_bindings(get_active_hotkey_bindings(config_manager.get_hotkey_bindings(), voice_commands_enabled))
         print("   ✓ Shortcuts saved")
         config_manager.print_startup_hotkey_instructions()
+        system_tray.refresh_menu()
 
     return ShortcutManagerWindow(
         get_hotkey_bindings=config_manager.get_hotkey_bindings,
@@ -579,7 +580,7 @@ def main():
         system_tray.attach_recording_mode_changer(
             lambda mode: change_recording_mode(config_manager, hotkey_listener, mode))
         system_tray.attach_shortcut_manager_window(
-            setup_shortcut_manager_window(config_manager, hotkey_listener, voice_commands_config['enabled']))
+            setup_shortcut_manager_window(config_manager, hotkey_listener, system_tray, voice_commands_config['enabled']))
         system_tray.attach_voice_command_manager_window(
             setup_voice_command_manager_window(voice_command_manager, hotkey_listener, system_tray))
 
