@@ -15,14 +15,17 @@ class OutputAudioControl:
         self._muted_by_us = False
         self._paused_media = []
         self._engaged = False
+        self._media = None
         self._tasks = queue.Queue()
         threading.Thread(target=self._worker, daemon=True).start()
 
     def _worker(self):
         try:
             media.init_thread()
+            self._media = media
         except Exception as e:
             self.logger.warning(f"Output audio control unavailable: {e}")
+            return
         while True:
             task = self._tasks.get()
             try:
@@ -38,25 +41,51 @@ class OutputAudioControl:
         self._engaged = False
         self._tasks.put(self._release)
 
+    def set_mute_output_enabled(self, enabled: bool):
+        self.mute_output_enabled = enabled
+
+    def set_pause_media_enabled(self, enabled: bool):
+        self.pause_media_enabled = enabled
+
+    def _run_step(self, step):
+        try:
+            step()
+        except Exception as e:
+            self.logger.warning(f"Output audio control failed: {e}")
+
     def _engage(self):
         threading.Event().wait(self.ENGAGE_DELAY_SECONDS)
         if not self._engaged:
             return
+        self._run_step(self._pause_media)
+        self._run_step(self._mute_output)
+
+    def _pause_media(self):
         if self.pause_media_enabled and not self._paused_media:
-            self._paused_media = media.pause_playing_media()
-        if self.mute_output_enabled and not self._muted_by_us and not media.is_output_muted():
-            media.set_output_muted(True)
+            self._paused_media = self._media.pause_playing_media()
+
+    def _mute_output(self):
+        if self.mute_output_enabled and not self._muted_by_us and not self._media.is_output_muted():
+            self._media.set_output_muted(True)
             self._muted_by_us = True
 
     def _release(self):
+        self._run_step(self._unmute_output)
+        self._run_step(self._resume_media)
+
+    def _unmute_output(self):
         if self._muted_by_us:
+            self._media.set_output_muted(False)
             self._muted_by_us = False
-            media.set_output_muted(False)
+
+    def _resume_media(self):
         if self._paused_media:
-            paused_media, self._paused_media = self._paused_media, []
-            media.resume_media(paused_media)
+            self._media.resume_media(self._paused_media)
+            self._paused_media = []
 
     def release_blocking(self, timeout=3.0):
+        if self._media is None:
+            return
         self.release()
         done = threading.Event()
         self._tasks.put(done.set)

@@ -8,8 +8,15 @@ def init_thread():
 
 
 def _osascript(script: str) -> str:
-    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=5)
+    try:
+        result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=5)
+    except subprocess.TimeoutExpired:
+        return ""
     return result.stdout.strip()
+
+
+def _is_app_running(app_name: str) -> bool:
+    return _osascript(f'application "{app_name}" is running') == "true"
 
 
 def is_output_muted() -> bool:
@@ -21,15 +28,15 @@ def set_output_muted(muted: bool):
 
 
 def _pause_app_if_playing(app_name: str) -> bool:
+    if not _is_app_running(app_name):
+        return False
     script = (
-        f'if application "{app_name}" is running then\n'
-        f'  tell application "{app_name}"\n'
-        f'    if player state is playing then\n'
-        f'      pause\n'
-        f'      return "paused"\n'
-        f'    end if\n'
-        f'  end tell\n'
-        f'end if'
+        f'tell application "{app_name}"\n'
+        f'  if player state is playing then\n'
+        f'    pause\n'
+        f'    return "paused"\n'
+        f'  end if\n'
+        f'end tell'
     )
     return _osascript(script) == "paused"
 

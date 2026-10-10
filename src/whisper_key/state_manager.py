@@ -1151,11 +1151,11 @@ class StateManager:
         self.clipboard_manager.update_auto_paste(value)
 
     def update_mute_output_while_recording(self, enabled: bool):
-        self.output_audio_control.mute_output_enabled = enabled
+        self.output_audio_control.set_mute_output_enabled(enabled)
         self.config_manager.update_user_setting('output_audio', 'mute_while_recording', enabled)
 
     def update_pause_media_while_recording(self, enabled: bool):
-        self.output_audio_control.pause_media_enabled = enabled
+        self.output_audio_control.set_pause_media_enabled(enabled)
         self.config_manager.update_user_setting('output_audio', 'pause_media_while_recording', enabled)
 
     def update_audio_feedback(self, enabled: bool):

@@ -8,3 +8,4 @@ if IS_MACOS:
     from .macos import instance_lock, keyboard, hotkeys, paths, app, permissions, icons, gpu, console, window_style, dialogs, theme, child_processes, autostart, media
 else:
     from .windows import instance_lock, keyboard, hotkeys, paths, app, permissions, icons, gpu, console, window_style, dialogs, theme, child_processes, autostart, media
+

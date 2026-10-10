@@ -1,18 +1,13 @@
 import asyncio
 
-import comtypes
-from pycaw.pycaw import AudioUtilities
-from winrt.windows.media.control import (
-    GlobalSystemMediaTransportControlsSessionManager as SessionManager,
-    GlobalSystemMediaTransportControlsSessionPlaybackStatus as PlaybackStatus,
-)
-
 
 def init_thread():
+    import comtypes
     comtypes.CoInitialize()
 
 
 def _endpoint_volume():
+    from pycaw.pycaw import AudioUtilities
     return AudioUtilities.GetSpeakers().EndpointVolume
 
 
@@ -25,6 +20,10 @@ def set_output_muted(muted: bool):
 
 
 async def _pause_playing_sessions() -> list:
+    from winrt.windows.media.control import (
+        GlobalSystemMediaTransportControlsSessionManager as SessionManager,
+        GlobalSystemMediaTransportControlsSessionPlaybackStatus as PlaybackStatus,
+    )
     manager = await SessionManager.request_async()
     paused_app_ids = []
     for session in manager.get_sessions():
@@ -36,6 +35,7 @@ async def _pause_playing_sessions() -> list:
 
 
 async def _resume_sessions(app_ids: list):
+    from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionManager as SessionManager
     manager = await SessionManager.request_async()
     for session in manager.get_sessions():
         if session.source_app_user_model_id in app_ids:
