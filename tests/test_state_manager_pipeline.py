@@ -38,7 +38,9 @@ def make_state_manager(transcribe=None, precheck_enabled=True, precheck_result=T
 
 
 def wait_for_pipeline(manager):
-    manager._pipeline_executor.submit(lambda: None).result(timeout=5)
+    done = threading.Event()
+    manager._pipeline_jobs.put(done.set)
+    assert done.wait(5)
 
 
 def test_stop_recording_returns_before_transcription_finishes():

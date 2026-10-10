@@ -1,8 +1,8 @@
 import gc
 import logging
+import queue
 import time
 import threading
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import platform
 from typing import Optional, TYPE_CHECKING
@@ -90,7 +90,8 @@ class StateManager:
         self._auto_trigger_paste = config_manager.get_setting('vad', 'auto_trigger_paste')
         self._auto_trigger_lock = threading.Lock()
         self._start_lock = threading.Lock()
-        self._pipeline_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="Transcription")
+        self._pipeline_jobs = queue.SimpleQueue()
+        threading.Thread(target=self._run_pipeline_jobs, daemon=True, name="Transcription").start()
 
         self._runtimes = None
         self._runtime_install_running = False
@@ -170,17 +171,17 @@ class StateManager:
     def _submit_transcription(self, recording: Optional[Recording], use_auto_enter: bool):
         with self._state_lock:
             self.is_processing = True
-        try:
-            future = self._pipeline_executor.submit(self._transcription_pipeline, recording, use_auto_enter)
-        except RuntimeError:
-            with self._state_lock:
-                self.is_processing = False
-            return
-        future.add_done_callback(self._log_pipeline_failure)
+        self._pipeline_jobs.put(lambda: self._transcription_pipeline(recording, use_auto_enter))
 
-    def _log_pipeline_failure(self, future):
-        if not future.cancelled() and future.exception():
-            self.logger.error("Transcription pipeline failed", exc_info=future.exception())
+    def _run_pipeline_jobs(self):
+        while True:
+            job = self._pipeline_jobs.get()
+            if job is None:
+                return
+            try:
+                job()
+            except Exception:
+                self.logger.exception("Transcription pipeline failed")
 
     def handle_vad_event(self, event: VadEvent):
         if event == VadEvent.SILENCE_TIMEOUT:
@@ -642,7 +643,7 @@ class StateManager:
         if installer:
             installer.cancel()
 
-        self._pipeline_executor.shutdown(wait=False, cancel_futures=True)
+        self._pipeline_jobs.put(None)
         self.system_tray.stop()
         self.terminal_title.stop()
         self.floating_widget.stop()
