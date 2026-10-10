@@ -4,10 +4,13 @@ import queue
 import threading
 import time
 import tkinter as tk
-from tkinter import font as tkfont, messagebox, ttk
+from tkinter import font as tkfont, ttk
 from typing import Callable
 
 from .key_capture import KeyCapture
+from .platform import dialogs
+from .themed_widgets import (ACCENT_BUTTON_STYLE, ERROR_STYLE, HINT_STYLE, apply_theme, apply_window_chrome,
+                             style_text_widget)
 from .utils import beautify_hotkey
 from .voice_commands import entry_to_command, find_entry_problems, find_matching_commands
 
@@ -15,8 +18,6 @@ QUEUE_POLL_INTERVAL_MS = 100
 STOP_TIMEOUT_SECONDS = 3.0
 TEST_DELAY_SECONDS = 1.0
 PREVIEW_LENGTH = 40
-ERROR_COLOR = "#C62828"
-HINT_COLOR = "#616161"
 WRAP_LENGTH = 760
 ROW_PADDING = 8
 
@@ -140,8 +141,9 @@ class _VoiceCommandEditor:
         root = self.root
         root.title("Whisper Key - Voice commands")
         root.minsize(820, 480)
+        theme = apply_theme(root)
 
-        frame = ttk.Frame(root, padding=15)
+        frame = ttk.Frame(root, padding=20)
         frame.pack(fill=tk.BOTH, expand=True)
         frame.columnconfigure(0, weight=3)
         frame.columnconfigure(1, weight=2)
@@ -212,11 +214,12 @@ class _VoiceCommandEditor:
 
         self.hotkey_button = ttk.Button(self.value_frame, command=self._toggle_hotkey_capture)
         self.type_text = tk.Text(self.value_frame, height=6, wrap=tk.WORD, undo=True)
+        style_text_widget(self.type_text, theme)
         self.type_text.bind("<<Modified>>", self._on_type_text_modified)
         self.run_variable = tk.StringVar()
         self.run_variable.trace_add("write", lambda *args: self._on_editor_changed())
         self.run_entry = ttk.Entry(self.value_frame, textvariable=self.run_variable)
-        self.run_warning = ttk.Label(self.value_frame, foreground=HINT_COLOR, wraplength=300, justify=tk.LEFT,
+        self.run_warning = ttk.Label(self.value_frame, style=HINT_STYLE, wraplength=300, justify=tk.LEFT,
                                      text="Runs in the shell (cmd.exe) with your user rights.")
 
         self.test_button = ttk.Button(editor_frame, text="Test (minimizes, runs in 1 s)", command=self._test_selected_entry)
@@ -229,22 +232,23 @@ class _VoiceCommandEditor:
         self.phrase_variable = tk.StringVar()
         self.phrase_variable.trace_add("write", lambda *args: self._refresh_match())
         ttk.Entry(tester_frame, textvariable=self.phrase_variable).grid(row=0, column=1, sticky="we")
-        self.match_label = ttk.Label(tester_frame, foreground=HINT_COLOR, wraplength=WRAP_LENGTH, justify=tk.LEFT)
+        self.match_label = ttk.Label(tester_frame, style=HINT_STYLE, wraplength=WRAP_LENGTH, justify=tk.LEFT)
         self.match_label.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
-        self.problem_label = ttk.Label(frame, foreground=ERROR_COLOR, wraplength=WRAP_LENGTH, justify=tk.LEFT)
+        self.problem_label = ttk.Label(frame, style=ERROR_STYLE, wraplength=WRAP_LENGTH, justify=tk.LEFT)
         self.problem_label.grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
         button_row = ttk.Frame(frame)
         button_row.grid(row=3, column=0, columnspan=2, sticky="we", pady=(12, 0))
         ttk.Button(button_row, text="Open file...", command=self._open_commands_file).pack(side=tk.LEFT)
-        self.save_button = ttk.Button(button_row, text="Save", command=self._save)
+        self.save_button = ttk.Button(button_row, text="Save", style=ACCENT_BUTTON_STYLE, command=self._save)
         self.save_button.pack(side=tk.RIGHT)
         ttk.Button(button_row, text="Cancel", command=self._close).pack(side=tk.RIGHT, padx=(0, 8))
 
         self.key_capture = KeyCapture(root, self.window.pause_hotkeys, self.window.resume_hotkeys,
                                       self.window.key_name_for_virtual_key, self._on_capture_changed)
         root.protocol("WM_DELETE_WINDOW", self._close)
+        apply_window_chrome(root, theme)
 
     def _selected_entry(self):
         if self.selected_index is None or self.selected_index >= len(self.entries):
@@ -444,8 +448,8 @@ class _VoiceCommandEditor:
         entry = self._selected_entry()
         if entry is None or not entry['value'].strip():
             return
-        if entry['action'] == 'run' and not messagebox.askyesno(
-                "Run command", f"Run this shell command now?\n\n{entry['value']}", parent=self.root):
+        if entry['action'] == 'run' and not dialogs.confirm(
+                "Run command", f"Run this shell command now?\n\n{entry['value']}"):
             return
         command = entry_to_command(entry)
         self.root.iconify()

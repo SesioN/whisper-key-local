@@ -7,11 +7,6 @@ from typing import Callable
 
 WINDOW_WIDTH = 460
 WINDOW_HEIGHT = 170
-BACKGROUND_COLOR = "#222222"
-TITLE_COLOR = "#FFFFFF"
-STATUS_COLOR = "#DDDDDD"
-HINT_COLOR = "#AAAAAA"
-FONT_FAMILY = "Segoe UI"
 QUEUE_POLL_INTERVAL_MS = 200
 CLOSE_TIMEOUT_SECONDS = 3.0
 CLOSE_REQUEST = object()
@@ -55,28 +50,30 @@ class InstallProgressWindow:
 
     def _run_window(self):
         import tkinter as tk
+        from tkinter import ttk
+
+        from .themed_widgets import HINT_STYLE, TITLE_STYLE, apply_theme, apply_window_chrome
 
         root = tk.Tk()
         try:
             root.title(self.title)
-            root.config(bg=BACKGROUND_COLOR)
             root.resizable(False, False)
+            theme = apply_theme(root)
             x = (root.winfo_screenwidth() - WINDOW_WIDTH) // 2
             y = (root.winfo_screenheight() - WINDOW_HEIGHT) // 2
             root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}+{x}+{y}")
             root.protocol("WM_DELETE_WINDOW", root.iconify)
 
-            tk.Label(root, text=self.title, bg=BACKGROUND_COLOR, fg=TITLE_COLOR,
-                     font=(FONT_FAMILY, 11, "bold")).pack(pady=(14, 6))
-            status_label = tk.Label(root, text=self._status_text, bg=BACKGROUND_COLOR, fg=STATUS_COLOR,
-                                    font=(FONT_FAMILY, 10), wraplength=WINDOW_WIDTH - 30)
+            ttk.Label(root, text=self.title, style=TITLE_STYLE).pack(pady=(14, 6))
+            status_label = ttk.Label(root, text=self._status_text, wraplength=WINDOW_WIDTH - 30, justify="center")
             status_label.pack(pady=4)
-            tk.Label(root, text="This can take a while. Keep Whisper Key running until it finishes.",
-                     bg=BACKGROUND_COLOR, fg=HINT_COLOR, font=(FONT_FAMILY, 8)).pack(pady=4)
-            cancel_button = tk.Button(root, text="Cancel", width=10,
-                                      command=lambda: self._request_cancel(cancel_button))
+            ttk.Label(root, text="This can take a while. Keep Whisper Key running until it finishes.",
+                      style=HINT_STYLE).pack(pady=4)
+            cancel_button = ttk.Button(root, text="Cancel", width=10,
+                                       command=lambda: self._request_cancel(cancel_button))
             cancel_button.pack(pady=8)
 
+            apply_window_chrome(root, theme)
             root.attributes("-topmost", True)
             root.update()
             root.attributes("-topmost", False)
@@ -92,7 +89,7 @@ class InstallProgressWindow:
         if self._cancel_requested:
             return
         self._cancel_requested = True
-        cancel_button.config(state="disabled", text="Cancelling...")
+        cancel_button.configure(state="disabled", text="Cancelling...")
         threading.Thread(target=self.on_cancel, daemon=True).start()
 
     def _process_message_queue(self, root, status_label):

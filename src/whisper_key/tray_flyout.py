@@ -4,14 +4,13 @@ import queue
 import threading
 import time
 import tkinter as tk
-import winreg
 from ctypes import wintypes
-from dataclasses import dataclass
 from tkinter import font as tkfont
 from typing import Callable, Optional
 
 from PIL import Image, ImageDraw, ImageTk
 
+from .ui_theme import load_theme, rgb_color as _rgb
 from .tray_menu_model import Action, Choice, Footer, Header, Section, Slider, Submenu, Toggle, resolve
 
 TOGGLE = "toggle"
@@ -90,58 +89,6 @@ shcore.GetDpiForMonitor.restype = ctypes.c_long
 dwmapi = ctypes.WinDLL("dwmapi")
 dwmapi.DwmSetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
 dwmapi.DwmSetWindowAttribute.restype = ctypes.c_long
-
-
-@dataclass
-class Theme:
-    dark: bool
-    bg: str
-    hover: str
-    surface: str
-    surface_hover: str
-    border: str
-    text: str
-    secondary: str
-    disabled: str
-    accent: str
-    on_accent: str
-    danger: str
-    on_danger: str
-
-
-def _read_user_dword(path: str, name: str, default: int) -> int:
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path) as key:
-            value, _ = winreg.QueryValueEx(key, name)
-            return int(value)
-    except OSError:
-        return default
-
-
-def _hex(rgb) -> str:
-    return "#%02x%02x%02x" % tuple(max(0, min(255, int(round(c)))) for c in rgb)
-
-
-def _rgb(color: str):
-    return tuple(int(color[i:i + 2], 16) for i in (1, 3, 5))
-
-
-def _mix(color_a: str, color_b: str, amount: float) -> str:
-    a, b = _rgb(color_a), _rgb(color_b)
-    return _hex([a[i] + (b[i] - a[i]) * amount for i in range(3)])
-
-
-def load_theme() -> Theme:
-    apps_light = _read_user_dword(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme", 1)
-    accent_abgr = _read_user_dword(r"Software\Microsoft\Windows\DWM", "AccentColor", 0xFFC06700)
-    accent = _hex((accent_abgr & 0xFF, (accent_abgr >> 8) & 0xFF, (accent_abgr >> 16) & 0xFF))
-    if apps_light:
-        return Theme(dark=False, bg="#f9f9f9", hover="#ebebeb", surface="#ededed", surface_hover="#e2e2e2",
-                     border="#d9d9d9", text="#1b1b1b", secondary="#5f5f5f", disabled="#a3a3a3",
-                     accent=_mix(accent, "#000000", 0.1), on_accent="#ffffff", danger="#c42b1c", on_danger="#ffffff")
-    return Theme(dark=True, bg="#2c2c2c", hover="#3a3a3a", surface="#383838", surface_hover="#454545",
-                 border="#454545", text="#ffffff", secondary="#a8a8a8", disabled="#6b6b6b",
-                 accent=_mix(accent, "#ffffff", 0.45), on_accent="#000000", danger="#ff99a4", on_danger="#000000")
 
 
 class TrayFlyout:
