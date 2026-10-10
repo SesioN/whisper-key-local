@@ -2,6 +2,10 @@ import asyncio
 
 
 def init_thread():
+    import sys
+    # comtypes calls CoInitializeEx(sys.coinit_flags) on first import; default is STA,
+    # which makes the explicit MTA call below fail with RPC_E_CHANGED_MODE
+    sys.coinit_flags = 0  # COINIT_MULTITHREADED
     import comtypes
     comtypes.CoInitializeEx(comtypes.COINIT_MULTITHREADED)
 
