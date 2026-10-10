@@ -4,6 +4,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-10-10
+
+### Added
+- **Mute system audio while recording** - tray toggle that mutes all system output while you record and restores it afterwards; also as `output_audio.mute_while_recording`. Output that was already muted stays muted
+- **Pause media while recording** - tray toggle that pauses playing media (Spotify, browsers and other apps in the Windows media overlay; Spotify and Music on macOS) while you record and resumes only what it paused; also as `output_audio.pause_media_while_recording`
+- **Recording shortcut in the tray menu** - the Recording section shows the current shortcut, e.g. `CTRL+WIN, stop CTRL` in toggle mode or `Hold CTRL+WIN` in push-to-talk
+
+### Changed
+- **Themed settings windows and dialogs** - Shortcuts, Voice detection sensitivity, Voice commands and the install progress window use the tray flyout's theme and window chrome, and native message boxes are replaced with themed dialogs
+
 ## [1.6.0] - 2026-10-06
 
 ### Added
