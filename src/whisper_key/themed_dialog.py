@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
 
-from .themed_widgets import ACCENT_BUTTON_STYLE, apply_theme, apply_window_chrome
+from .themed_widgets import ACCENT_BUTTON_STYLE, apply_theme, apply_window_chrome, center_window
 
 DIALOG_WIDTH = 440
 TEXT_WRAP_LENGTH = DIALOG_WIDTH - 48
@@ -52,11 +52,12 @@ def show_dialog(title: str, text: str, buttons: list, dismiss_result, parent: tk
         window.update_idletasks()
         width = max(DIALOG_WIDTH, window.winfo_reqwidth())
         height = window.winfo_reqheight()
-        x = (window.winfo_screenwidth() - width) // 2
-        y = (window.winfo_screenheight() - height) // 3
-        window.geometry(f"{width}x{height}+{x}+{y}")
+        window.geometry(f"{width}x{height}")
         window.attributes("-topmost", True)
+        window.attributes("-alpha", 0.0)
         window.deiconify()
+        center_window(window)
+        window.attributes("-alpha", 1.0)
         window.lift()
         window.focus_force()
         primary_button.focus_set()
