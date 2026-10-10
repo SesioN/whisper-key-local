@@ -4,6 +4,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-10-10
+
 ### Added
 - **Pre-roll for every recording** - hotkey, voice-command and voice-activated recordings now include the last second of audio before the recording started, so the first word is no longer cut off. The microphone stays open while Whisper Key runs (paused while muted); set `audio.pre_roll_seconds` to change the length or `0` to turn it off
 
