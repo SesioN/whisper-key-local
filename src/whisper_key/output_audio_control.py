@@ -44,7 +44,7 @@ class OutputAudioControl:
             except Exception as e:
                 self.logger.warning(f"Output audio control failed: {e}")
 
-    def engage(self):
+    def engage(self, is_recording):
         mute_output, pause_media = self.mute_output_enabled, self.pause_media_enabled
         if not (mute_output or pause_media):
             return
@@ -54,7 +54,7 @@ class OutputAudioControl:
                 return
             self._engaged = True
             self._needs_release = True
-            self._tasks.put(lambda: self._engage(mute_output, pause_media))
+            self._tasks.put(lambda: self._engage(is_recording, mute_output, pause_media))
 
     def release(self):
         with self._state_lock:
@@ -76,15 +76,15 @@ class OutputAudioControl:
         except Exception as e:
             self.logger.warning(f"Output audio control failed: {e}")
 
-    def _engage(self, mute_output: bool, pause_media: bool):
-        if not self._engaged:
+    def _engage(self, is_recording, mute_output: bool, pause_media: bool):
+        if not (self._engaged and is_recording()):
             return
         if pause_media:
             self._run_step(self._pause_media)
         if not mute_output:
             return
         threading.Event().wait(self.MUTE_DELAY_SECONDS)
-        if not self._engaged:
+        if not (self._engaged and is_recording()):
             return
         self._run_step(self._mute_output)
 

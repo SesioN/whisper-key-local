@@ -366,9 +366,7 @@ class StateManager:
             self._update_ui_state("recording")
 
     def _engage_output_audio_control(self):
-        with self._recording_stop_lock:
-            if self.audio_recorder.get_recording_status():
-                self.output_audio_control.engage()
+        self.output_audio_control.engage(lambda: self.audio_recorder.get_recording_status())
 
     def _begin_recording(self, auto_triggered: bool = False):
         # Set before starting so a quick SPEECH_END on another thread already sees it
