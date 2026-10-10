@@ -33,6 +33,10 @@ dependencies = [
     # Windows-only
     "global-hotkeys>=0.1.7; sys_platform=='win32'",
     "pywin32>=306; sys_platform=='win32'",
+    "pycaw>=20240316; sys_platform=='win32'",
+    "winrt-Windows.Media.Control>=3.0; sys_platform=='win32'",
+    "winrt-Windows.Foundation>=3.0; sys_platform=='win32'",
+    "winrt-Windows.Foundation.Collections>=3.0; sys_platform=='win32'",
 
     # macOS-only
     "pyobjc-framework-Quartz; sys_platform=='darwin'",

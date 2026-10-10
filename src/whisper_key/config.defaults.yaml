@@ -385,6 +385,13 @@ audio_feedback: # Audio Feedback Settings
     transcription_complete_sound: assets/sounds/transcription_complete.wav
     ready_sound: assets/sounds/app_ready.wav
 
+output_audio: # System Output While Recording
+    # Mute all system output while recording, restored afterwards
+    mute_while_recording: false
+
+    # Pause playing media (e.g. Spotify) while recording, resumed afterwards
+    pause_media_while_recording: false
+
 system_tray: # System Tray Settings
     # Enable/disable system tray icon
     # true = show icon in system tray with status and menu

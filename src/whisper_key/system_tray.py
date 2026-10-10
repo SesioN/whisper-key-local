@@ -116,6 +116,8 @@ class SystemTray:
             Toggle("Voice-activated recording", lambda: self.state_manager.auto_trigger_enabled, self._set_auto_trigger) if self.state_manager.is_auto_trigger_available() else None,
             Action("Voice detection sensitivity...", self._open_vad_sensitivity_window, icon=ICON_SLIDERS) if self.state_manager.is_vad_sensitivity_window_available() else None,
             Toggle("Audio feedback", self._is_audio_feedback_enabled, self._set_audio_feedback),
+            Toggle("Mute system audio while recording", self._is_mute_output_enabled, self._set_mute_output),
+            Toggle("Pause media while recording", self._is_pause_media_enabled, self._set_pause_media),
             Section("Output"),
             Toggle("Auto-paste", self._is_auto_paste_enabled, self._set_transcription_mode),
             Toggle("Copy to clipboard", self._is_copy_enabled, self._set_copy_to_clipboard, enabled=self._is_auto_paste_enabled),
@@ -395,6 +397,26 @@ class SystemTray:
             self.state_manager.update_audio_feedback(enabled)
         except Exception as e:
             self.logger.error(f"Error setting audio feedback to {enabled}: {e}")
+        self.refresh_menu()
+
+    def _is_mute_output_enabled(self):
+        return bool(self.config_manager.get_setting('output_audio', 'mute_while_recording'))
+
+    def _set_mute_output(self, enabled: bool):
+        try:
+            self.state_manager.update_mute_output_while_recording(enabled)
+        except Exception as e:
+            self.logger.error(f"Error setting mute while recording to {enabled}: {e}")
+        self.refresh_menu()
+
+    def _is_pause_media_enabled(self):
+        return bool(self.config_manager.get_setting('output_audio', 'pause_media_while_recording'))
+
+    def _set_pause_media(self, enabled: bool):
+        try:
+            self.state_manager.update_pause_media_while_recording(enabled)
+        except Exception as e:
+            self.logger.error(f"Error setting pause media while recording to {enabled}: {e}")
         self.refresh_menu()
 
     def _is_voice_command_manager_enabled(self):
