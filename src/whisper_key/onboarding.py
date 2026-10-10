@@ -264,3 +264,43 @@ def get_ct2_wheel_url(gpu_class):
     return CT2_WHEEL_URLS.get(gpu_class)
 
 
+
+
+DEFAULT_MODEL = "tiny"
+GPU_MODEL = "large-v3-turbo"
+MIN_CORES_FOR_SMALL_MODEL = 4
+USE_RECOMMENDED_MODEL = 1
+
+
+def recommend_model(uses_gpu: bool, physical_cores: int, language) -> str:
+    if uses_gpu:
+        return GPU_MODEL
+    model = "small" if physical_cores >= MIN_CORES_FOR_SMALL_MODEL else "base"
+    return f"{model}.en" if language == "en" else model
+
+
+def run_model_onboarding(config_manager, whisper_config: dict, uses_gpu: bool, physical_cores: int) -> dict:
+    if not config_manager.created_user_settings or whisper_config.get('model') != DEFAULT_MODEL:
+        return whisper_config
+
+    recommended = recommend_model(uses_gpu, physical_cores, whisper_config.get('language'))
+    models = whisper_config.get('models') or {}
+    if recommended not in models or not models[recommended].get('enabled', True):
+        return whisper_config
+    recommended_label = models[recommended].get('label', recommended)
+    default_label = models.get(DEFAULT_MODEL, {}).get('label', DEFAULT_MODEL)
+    hardware = "your GPU" if uses_gpu else f"your {physical_cores}-core CPU"
+
+    choice = prompt_choice(
+        "Choose a transcription model",
+        [
+            (f"Use {recommended_label}", f"Recommended for {hardware}: more accurate, downloads once"),
+            (f"Keep {default_label}", "Smallest download, least accurate; change it later in the tray Model menu"),
+        ],
+        subtitle="Whisper Key starts with the smallest model.",
+    )
+    print()
+    if choice != USE_RECOMMENDED_MODEL:
+        return whisper_config
+    config_manager.update_user_setting('whisper', 'model', recommended)
+    return {**whisper_config, 'model': recommended}

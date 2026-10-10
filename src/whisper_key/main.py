@@ -20,7 +20,7 @@ from .config_manager import ConfigManager
 from .audio_recorder import AudioRecorder
 from .hotkey_listener import HotkeyListener
 from .whisper_engine import create_whisper_engine
-from .runtime_options import ONNX_ASR, apply_onnx_runtime_selection, apply_runtime_selection
+from .runtime_options import ONNX_ASR, apply_onnx_runtime_selection, apply_runtime_selection, resolve_cpu_threads
 from .voice_activity_detection import VadManager
 from .clipboard_manager import ClipboardManager
 from .state_manager import StateManager
@@ -34,7 +34,7 @@ from .model_registry import ONNX_FAMILY, ModelRegistry
 from .streaming_manager import StreamingManager
 from .voice_commands import VoiceCommandManager
 from .hardware_detection import detect_and_print as detect_hardware
-from .onboarding import check_gpu
+from .onboarding import check_gpu, run_model_onboarding
 from .update_checker import check_for_updates
 from .utils import get_user_app_data_path, get_version, OptionalComponent, prune_stale_pyapp_envs, open_file
 
@@ -531,6 +531,11 @@ def main():
             print(f"⚠ {activation_warning}")
 
         whisper_config, onboarding_runtime = run_gpu_onboarding(config_manager, whisper_config)
+        whisper_config = run_model_onboarding(
+            config_manager, whisper_config,
+            uses_gpu=bool(onboarding_runtime) or whisper_config.get('runtime') in (CUDA, ROCM, VULKAN),
+            physical_cores=resolve_cpu_threads(0),
+        )
 
         loading_screen = OptionalComponent(setup_loading_screen(config_manager.get_loading_screen_config()))
         loading_screen.show()

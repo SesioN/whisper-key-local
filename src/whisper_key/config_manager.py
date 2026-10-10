@@ -114,7 +114,8 @@ class ConfigManager:
         self.use_user_settings = use_user_settings
         self.config = {}
         self.logger = logging.getLogger(__name__)
-        
+        self.created_user_settings = False
+
         self.config_path = self._determine_config_path(use_user_settings, config_path)
         
         self.config = self._load_config()
@@ -140,6 +141,7 @@ class ConfigManager:
         if not os.path.exists(self.user_settings_path):
             with open(self.user_settings_path, 'w', encoding='utf-8') as f:
                 f.write(_build_settings_header())
+            self.created_user_settings = True
             self.logger.info(f"Created user settings at {self.user_settings_path}")
     
     def _remove_unused_keys_from_user_config(self, user_config: Dict[str, Any], default_config: Dict[str, Any]):
