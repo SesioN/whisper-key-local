@@ -17,6 +17,7 @@ class OutputAudioControl:
         self._engaged = False
         self._tasks = queue.Queue()
         self._worker_lock = threading.Lock()
+        self._state_lock = threading.Lock()
         self._worker_started = False
         self._worker_alive = False
         self._needs_release = False
@@ -46,18 +47,20 @@ class OutputAudioControl:
         if not (self.mute_output_enabled or self.pause_media_enabled):
             return
         self._ensure_worker()
-        if not self._worker_alive:
-            return
-        self._engaged = True
-        self._needs_release = True
-        self._tasks.put(self._engage)
+        with self._state_lock:
+            if not self._worker_alive:
+                return
+            self._engaged = True
+            self._needs_release = True
+            self._tasks.put(self._engage)
 
     def release(self):
-        self._engaged = False
-        if not (self._worker_alive and self._needs_release):
-            return
-        self._needs_release = False
-        self._tasks.put(self._release)
+        with self._state_lock:
+            self._engaged = False
+            if not (self._worker_alive and self._needs_release):
+                return
+            self._needs_release = False
+            self._tasks.put(self._release)
 
     def set_mute_output_enabled(self, enabled: bool):
         self.mute_output_enabled = enabled
