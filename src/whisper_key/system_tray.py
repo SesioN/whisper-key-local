@@ -40,6 +40,7 @@ ICON_FOLDER = ""
 ICON_DOCUMENT = ""
 ICON_EXIT = ""
 ICON_SLIDERS = ""
+ICON_RETRY = ""
 
 if TYPE_CHECKING:
     from .state_manager import StateManager
@@ -112,6 +113,8 @@ class SystemTray:
             Header("Whisper Key", self._status_text, lambda: self.state_manager.is_muted, self._toggle_mute),
             Section("Recording"),
             Info("Shortcut", self._recording_shortcut_text),
+            Action("Retry last recording", self.state_manager.retry_failed_recording, icon=ICON_RETRY,
+                   enabled=self.state_manager.can_start_recording) if self.state_manager.has_failed_recording() else None,
             Choice("Recording mode", [Option(mode, label) for mode, label in RECORDING_MODES],
                    self._current_recording_mode, self._set_recording_mode, style="segmented") if self.recording_mode_changer else None,
             Toggle("Voice-activated recording", lambda: self.state_manager.auto_trigger_enabled, self._set_auto_trigger) if self.state_manager.is_auto_trigger_available() else None,

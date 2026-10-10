@@ -70,6 +70,7 @@ class StateManager:
         self.is_model_loading = False
         self.is_muted = False
         self.last_transcription = None
+        self._failed_recording = None
         self._pending_model_change = None
         self._pending_device_change = None
         self._command_mode = False
@@ -415,6 +416,35 @@ class StateManager:
             self._engage_output_audio_control()
             self._update_ui_state("recording")
     
+    def has_failed_recording(self) -> bool:
+        return self._failed_recording is not None
+
+    def _keep_failed_recording(self, recording: Recording, command_mode: bool, use_auto_enter: bool):
+        self._failed_recording = (recording, command_mode, use_auto_enter)
+        print("   ↻ The recording is kept: use \"Retry last recording\" in the tray menu to transcribe it again")
+        self.system_tray.refresh_menu()
+
+    def _clear_failed_recording(self):
+        if self._failed_recording is not None:
+            self._failed_recording = None
+            self.system_tray.refresh_menu()
+
+    def retry_failed_recording(self) -> bool:
+        with self._start_lock:
+            failed_recording = self._failed_recording
+            if failed_recording is None:
+                return False
+            if not self.can_start_recording():
+                print("⏳ Cannot retry right now, wait until Whisper Key is idle")
+                return False
+            recording, command_mode, use_auto_enter = failed_recording
+            with self._state_lock:
+                self._command_mode = command_mode
+                self._auto_triggered_recording = False
+            print(f"\n↻ Retrying the last failed recording ({recording.duration_seconds:.1f} seconds)...")
+            self._submit_transcription(recording, use_auto_enter)
+            return True
+
     def _prepare_audio(self, recording: Recording):
         audio = trim_trailing_silence(recording.audio, recording.trailing_silence_seconds,
                                       self.TRAILING_SILENCE_KEEP_SECONDS, self.MIN_TRIMMED_RECORDING_SECONDS,
@@ -437,14 +467,19 @@ class StateManager:
         self.output_audio_control.release()
         try:
             with self._state_lock:
-                if self.is_engine_unavailable():
-                    print("⏳ Runtime is switching, recording discarded")
-                    return
-                self.is_processing = True
                 command_mode = self._command_mode
                 self._command_mode = False
+                engine_unavailable = self.is_engine_unavailable()
+                if not engine_unavailable:
+                    self.is_processing = True
                 engine = self.whisper_engine
                 auto_triggered = self._auto_triggered_recording
+
+            if engine_unavailable:
+                print("⏳ Runtime is switching, the recording was not transcribed")
+                if recording is not None:
+                    self._keep_failed_recording(recording, command_mode, use_auto_enter)
+                return
 
             self.audio_feedback.play_stop_sound()
 
@@ -463,6 +498,7 @@ class StateManager:
             try:
                 transcribed_text = engine.transcribe_audio(audio_data)
             except Exception:
+                self._keep_failed_recording(recording, command_mode, use_auto_enter)
                 fallback = self._fallback_runtime
                 if fallback and engine is self.whisper_engine:
                     self._fallback_runtime = None
@@ -471,6 +507,7 @@ class StateManager:
                 raise
             self._fallback_runtime = None
             self._failed_runtime_key = None
+            self._clear_failed_recording()
 
             if not transcribed_text:
                 return

@@ -111,3 +111,33 @@ def test_runtime_menu_does_not_wait_for_detection(monkeypatch):
             break
         deadline.wait(0.02)
     assert manager.runtimes_detected()
+
+
+def test_failed_transcription_can_be_retried():
+    attempts = []
+
+    def transcribe(audio):
+        attempts.append(len(audio))
+        if len(attempts) == 1:
+            raise RuntimeError("CUDA out of memory")
+        return "second try"
+
+    manager, engine, _, clipboard = make_state_manager(transcribe=transcribe)
+    manager.audio_recorder.get_recording_status.return_value = False
+    manager._submit_transcription(Recording(np.ones(16000, dtype=np.float32)), True)
+    wait_for_pipeline(manager)
+    assert manager.has_failed_recording()
+    assert manager.retry_failed_recording()
+    wait_for_pipeline(manager)
+    assert not manager.has_failed_recording()
+    clipboard.deliver_transcription.assert_called_once_with("second try", True)
+
+
+def test_recording_is_kept_when_the_engine_is_switching():
+    manager, engine, _, _ = make_state_manager()
+    manager.is_model_loading = True
+    manager._submit_transcription(Recording(np.ones(16000, dtype=np.float32)), False)
+    wait_for_pipeline(manager)
+    engine.transcribe_audio.assert_not_called()
+    assert manager.has_failed_recording()
+    assert not manager.is_processing
