@@ -1,4 +1,4 @@
-def confirm(title: str, text: str) -> bool:
+def confirm(title: str, text: str, parent=None) -> bool:
     return False
 
 

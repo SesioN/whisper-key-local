@@ -4,14 +4,13 @@ import queue
 import threading
 import time
 import tkinter as tk
-import winreg
 from ctypes import wintypes
-from dataclasses import dataclass
 from tkinter import font as tkfont
 from typing import Callable, Optional
 
 from PIL import Image, ImageDraw, ImageTk
 
+from .ui_theme import load_theme, rgb_color
 from .tray_menu_model import Action, Choice, Footer, Header, Section, Slider, Submenu, Toggle, resolve
 
 TOGGLE = "toggle"
@@ -90,58 +89,6 @@ shcore.GetDpiForMonitor.restype = ctypes.c_long
 dwmapi = ctypes.WinDLL("dwmapi")
 dwmapi.DwmSetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
 dwmapi.DwmSetWindowAttribute.restype = ctypes.c_long
-
-
-@dataclass
-class Theme:
-    dark: bool
-    bg: str
-    hover: str
-    surface: str
-    surface_hover: str
-    border: str
-    text: str
-    secondary: str
-    disabled: str
-    accent: str
-    on_accent: str
-    danger: str
-    on_danger: str
-
-
-def _read_user_dword(path: str, name: str, default: int) -> int:
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path) as key:
-            value, _ = winreg.QueryValueEx(key, name)
-            return int(value)
-    except OSError:
-        return default
-
-
-def _hex(rgb) -> str:
-    return "#%02x%02x%02x" % tuple(max(0, min(255, int(round(c)))) for c in rgb)
-
-
-def _rgb(color: str):
-    return tuple(int(color[i:i + 2], 16) for i in (1, 3, 5))
-
-
-def _mix(color_a: str, color_b: str, amount: float) -> str:
-    a, b = _rgb(color_a), _rgb(color_b)
-    return _hex([a[i] + (b[i] - a[i]) * amount for i in range(3)])
-
-
-def load_theme() -> Theme:
-    apps_light = _read_user_dword(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme", 1)
-    accent_abgr = _read_user_dword(r"Software\Microsoft\Windows\DWM", "AccentColor", 0xFFC06700)
-    accent = _hex((accent_abgr & 0xFF, (accent_abgr >> 8) & 0xFF, (accent_abgr >> 16) & 0xFF))
-    if apps_light:
-        return Theme(dark=False, bg="#f9f9f9", hover="#ebebeb", surface="#ededed", surface_hover="#e2e2e2",
-                     border="#d9d9d9", text="#1b1b1b", secondary="#5f5f5f", disabled="#a3a3a3",
-                     accent=_mix(accent, "#000000", 0.1), on_accent="#ffffff", danger="#c42b1c", on_danger="#ffffff")
-    return Theme(dark=True, bg="#2c2c2c", hover="#3a3a3a", surface="#383838", surface_hover="#454545",
-                 border="#454545", text="#ffffff", secondary="#a8a8a8", disabled="#6b6b6b",
-                 accent=_mix(accent, "#ffffff", 0.45), on_accent="#000000", danger="#ff99a4", on_danger="#000000")
 
 
 class TrayFlyout:
@@ -376,7 +323,7 @@ class _FlyoutView:
         result = dwmapi.DwmSetWindowAttribute(self.hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ctypes.byref(corner), ctypes.sizeof(corner))
         self.dwm_frame = result == 0
         if self.dwm_frame:
-            r, g, b = _rgb(self.theme.border)
+            r, g, b = rgb_color(self.theme.border)
             border = wintypes.DWORD(r | (g << 8) | (b << 16))
             dwmapi.DwmSetWindowAttribute(self.hwnd, DWMWA_BORDER_COLOR, ctypes.byref(border), ctypes.sizeof(border))
 
@@ -403,8 +350,8 @@ class _FlyoutView:
             big = Image.new("RGBA", (width * SUPERSAMPLE, height * SUPERSAMPLE), (0, 0, 0, 0))
             draw = ImageDraw.Draw(big)
             draw.rounded_rectangle((0, 0, big.width - 1, big.height - 1), radius=radius * SUPERSAMPLE,
-                                   fill=_rgb(fill) + (255,),
-                                   outline=_rgb(outline) + (255,) if outline else None,
+                                   fill=rgb_color(fill) + (255,),
+                                   outline=rgb_color(outline) + (255,) if outline else None,
                                    width=outline_width * SUPERSAMPLE)
             image = ImageTk.PhotoImage(big.resize((width, height), Image.LANCZOS), master=self.root)
             self.image_cache[key] = image
@@ -422,20 +369,20 @@ class _FlyoutView:
             box = (0, 0, big.width - 1, big.height - 1)
             if on:
                 track = theme.accent if enabled else theme.disabled
-                draw.rounded_rectangle(box, radius=big.height // 2, fill=_rgb(track) + (255,))
+                draw.rounded_rectangle(box, radius=big.height // 2, fill=rgb_color(track) + (255,))
                 knob_radius = height * s * 0.3
                 knob_x = big.width - big.height / 2
                 knob_color = theme.on_accent
             else:
                 stroke = theme.secondary if enabled else theme.disabled
-                draw.rounded_rectangle(box, radius=big.height // 2, fill=_rgb(theme.bg) + (255,),
-                                       outline=_rgb(stroke) + (255,), width=max(1, self.px(1)) * s)
+                draw.rounded_rectangle(box, radius=big.height // 2, fill=rgb_color(theme.bg) + (255,),
+                                       outline=rgb_color(stroke) + (255,), width=max(1, self.px(1)) * s)
                 knob_radius = height * s * 0.24
                 knob_x = big.height / 2
                 knob_color = stroke
             knob_y = big.height / 2
             draw.ellipse((knob_x - knob_radius, knob_y - knob_radius, knob_x + knob_radius, knob_y + knob_radius),
-                         fill=_rgb(knob_color) + (255,))
+                         fill=rgb_color(knob_color) + (255,))
             image = ImageTk.PhotoImage(big.resize((width, height), Image.LANCZOS), master=self.root)
             self.image_cache[key] = image
         return image
@@ -449,12 +396,12 @@ class _FlyoutView:
             s = SUPERSAMPLE
             big = Image.new("RGBA", (size * s, size * s), (0, 0, 0, 0))
             draw = ImageDraw.Draw(big)
-            draw.ellipse((0, 0, big.width - 1, big.height - 1), fill=_rgb(theme.surface_hover) + (255,),
-                         outline=_rgb(theme.border) + (255,), width=max(1, self.px(1)) * s)
+            draw.ellipse((0, 0, big.width - 1, big.height - 1), fill=rgb_color(theme.surface_hover) + (255,),
+                         outline=rgb_color(theme.border) + (255,), width=max(1, self.px(1)) * s)
             inner = big.width * 0.28
             center = big.width / 2
             draw.ellipse((center - inner, center - inner, center + inner, center + inner),
-                         fill=_rgb(theme.accent) + (255,))
+                         fill=rgb_color(theme.accent) + (255,))
             image = ImageTk.PhotoImage(big.resize((size, size), Image.LANCZOS), master=self.root)
             self.image_cache[key] = image
         return image
@@ -466,7 +413,7 @@ class _FlyoutView:
             for stale_key in [cached for cached in self.image_cache if cached[0] == "gradient"]:
                 del self.image_cache[stale_key]
             strip = Image.new("RGB", (len(colors), 1))
-            strip.putdata([_rgb(color) for color in colors])
+            strip.putdata([rgb_color(color) for color in colors])
             stretched = strip.resize((width * SUPERSAMPLE, height * SUPERSAMPLE), Image.BILINEAR).convert("RGBA")
             mask = Image.new("L", stretched.size, 0)
             ImageDraw.Draw(mask).rounded_rectangle((0, 0, mask.width - 1, mask.height - 1),

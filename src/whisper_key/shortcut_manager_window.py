@@ -7,13 +7,12 @@ from tkinter import ttk
 from typing import Callable
 
 from .key_capture import KeyCapture
+from .themed_widgets import ACCENT_BUTTON_STYLE, ERROR_STYLE, HINT_STYLE, apply_theme, apply_window_chrome
 from .utils import beautify_hotkey
 
 QUEUE_POLL_INTERVAL_MS = 100
 STOP_TIMEOUT_SECONDS = 3.0
 BINDING_BUTTON_WIDTH = 22
-ERROR_COLOR = "#C62828"
-HINT_COLOR = "#616161"
 
 RAISE = "raise"
 CLOSE = "close"
@@ -160,8 +159,9 @@ class _ShortcutEditor:
         root = self.root
         root.title("Whisper Key - Shortcuts")
         root.resizable(False, False)
+        theme = apply_theme(root)
 
-        frame = ttk.Frame(root, padding=20)
+        frame = ttk.Frame(root, padding=24)
         frame.pack(fill=tk.BOTH)
 
         ttk.Label(frame, text="Action").grid(row=0, column=0, sticky="w", padx=(0, 15))
@@ -173,7 +173,7 @@ class _ShortcutEditor:
             for slot in range(len(SLOT_LABELS)):
                 binding_button = ttk.Button(frame, width=BINDING_BUTTON_WIDTH,
                                             command=lambda a=action, s=slot: self._toggle_capture(a, s))
-                binding_button.grid(row=row, column=1 + slot * 2, sticky="we", pady=3)
+                binding_button.grid(row=row, column=1 + slot * 2, sticky="we", pady=4)
                 clear_button = ttk.Button(frame, text="✕", width=3,
                                           command=lambda a=action, s=slot: self._set_binding(a, s, ''))
                 clear_button.grid(row=row, column=2 + slot * 2, padx=(2, 12), pady=3)
@@ -181,21 +181,22 @@ class _ShortcutEditor:
                 self.clear_buttons[(action, slot)] = clear_button
             ttk.Button(frame, text="Default", command=lambda a=action: self._reset_action(a)).grid(row=row, column=5, pady=3)
 
-        self.problem_label = ttk.Label(frame, foreground=ERROR_COLOR, wraplength=560, justify=tk.LEFT)
+        self.problem_label = ttk.Label(frame, style=ERROR_STYLE, wraplength=560, justify=tk.LEFT)
         self.problem_label.grid(row=len(ACTION_LABELS) + 1, column=0, columnspan=6, sticky="w", pady=(10, 0))
-        self.hint_label = ttk.Label(frame, foreground=HINT_COLOR, wraplength=560, justify=tk.LEFT)
+        self.hint_label = ttk.Label(frame, style=HINT_STYLE, wraplength=560, justify=tk.LEFT)
         self.hint_label.grid(row=len(ACTION_LABELS) + 2, column=0, columnspan=6, sticky="w")
 
         button_row = ttk.Frame(frame)
         button_row.grid(row=len(ACTION_LABELS) + 3, column=0, columnspan=6, sticky="we", pady=(15, 0))
         ttk.Button(button_row, text="Restore all defaults", command=self._restore_all_defaults).pack(side=tk.LEFT)
-        self.save_button = ttk.Button(button_row, text="Save", command=self._save)
+        self.save_button = ttk.Button(button_row, text="Save", style=ACCENT_BUTTON_STYLE, command=self._save)
         self.save_button.pack(side=tk.RIGHT)
         ttk.Button(button_row, text="Cancel", command=self._close).pack(side=tk.RIGHT, padx=(0, 8))
 
         self.key_capture = KeyCapture(root, self.window.pause_hotkeys, self.window.resume_hotkeys,
                                       self.window.key_name_for_virtual_key, self._refresh)
         root.protocol("WM_DELETE_WINDOW", self._close)
+        apply_window_chrome(root, theme)
 
     def _refresh(self):
         for (action, slot), binding_button in self.binding_buttons.items():
