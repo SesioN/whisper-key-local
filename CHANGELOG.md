@@ -4,6 +4,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-10-10
+
+### Fixed
+- **Mute system audio / Pause media while recording did nothing on Windows** - the background worker failed to initialize COM ("Cannot change thread mode after it is set") and both toggles were silently skipped
+
 ## [1.7.0] - 2026-10-10
 
 ### Added
