@@ -25,21 +25,24 @@ async def _pause_playing_sessions() -> list:
         GlobalSystemMediaTransportControlsSessionPlaybackStatus as PlaybackStatus,
     )
     manager = await SessionManager.request_async()
-    paused_app_ids = []
+    paused_sessions = []
     for session in manager.get_sessions():
-        if session.get_playback_info().playback_status != PlaybackStatus.PLAYING:
+        try:
+            if session.get_playback_info().playback_status != PlaybackStatus.PLAYING:
+                continue
+            if await session.try_pause_async():
+                paused_sessions.append(session)
+        except OSError:
             continue
-        if await session.try_pause_async():
-            paused_app_ids.append(session.source_app_user_model_id)
-    return paused_app_ids
+    return paused_sessions
 
 
-async def _resume_sessions(app_ids: list):
-    from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionManager as SessionManager
-    manager = await SessionManager.request_async()
-    for session in manager.get_sessions():
-        if session.source_app_user_model_id in app_ids:
+async def _resume_sessions(paused_sessions: list):
+    for session in paused_sessions:
+        try:
             await session.try_play_async()
+        except OSError:
+            continue
 
 
 def pause_playing_media() -> list:

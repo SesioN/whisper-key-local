@@ -517,7 +517,7 @@ class SystemTray:
         if self._current_recording_mode() == "push_to_talk":
             return f"Hold {start}"
         stop = beautify_hotkey_bindings(bindings['stop_key'])
-        return f"{start}, stop {stop}" if stop else start
+        return f"{start}, stop {stop or 'not set'}"
 
     def _current_recording_mode(self):
         return self.config_manager.get_setting('hotkey', 'recording_mode')

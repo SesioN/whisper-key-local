@@ -362,8 +362,11 @@ class StateManager:
             print("\n🎤 Command mode activated! Speak a command...")
             self.config_manager.print_command_stop_instructions()
             self.audio_feedback.play_start_sound()
-            self.output_audio_control.engage()
+            self._engage_output_audio_control()
             self._update_ui_state("recording")
+
+    def _engage_output_audio_control(self):
+        self.output_audio_control.engage(lambda: self.audio_recorder.get_recording_status())
 
     def _begin_recording(self, auto_triggered: bool = False):
         # Set before starting so a quick SPEECH_END on another thread already sees it
@@ -381,7 +384,7 @@ class StateManager:
             if not auto_triggered:
                 self.config_manager.print_stop_instructions_based_on_config()
             self.audio_feedback.play_start_sound()
-            self.output_audio_control.engage()
+            self._engage_output_audio_control()
             self._update_ui_state("recording")
     
     def _transcription_pipeline(self, audio_data, use_auto_enter: bool = False):

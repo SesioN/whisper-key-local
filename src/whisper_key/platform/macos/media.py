@@ -9,7 +9,7 @@ def init_thread():
 
 def _osascript(script: str) -> str:
     try:
-        result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=5)
+        result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=2)
     except subprocess.TimeoutExpired:
         return ""
     return result.stdout.strip()
@@ -47,4 +47,5 @@ def pause_playing_media() -> list:
 
 def resume_media(paused_media: list):
     for app_name in paused_media:
-        _osascript(f'tell application "{app_name}" to play')
+        if _is_app_running(app_name):
+            _osascript(f'tell application "{app_name}" to play')
