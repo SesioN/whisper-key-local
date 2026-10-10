@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Smooth orb resizing** - resizing the Nebula orb with the scroll wheel or the tray slider no longer stutters; each size step used to rebuild its textures on the orb's thread (about 0.3 s), now they are built in the background and the cache is capped at three sizes
 - **Start with Windows ignored a disabled Windows startup entry** - when Whisper Key was turned off in Task Manager or Settings > Apps > Startup, the tray toggle still showed it as on and nothing started at sign-in. The toggle now reflects that state, turning it on opens the Windows Startup apps settings so it can be re-enabled there
 - **Settings windows open centered** - Shortcuts, Voice commands, Voice detection sensitivity, the install progress window and dialogs open centered on the monitor under the mouse (work area, excluding the taskbar) instead of at the default Windows position
+- **App name in Windows** - the exe now carries "Whisper Key" and the app version in its file details, so Windows Startup apps, Task Manager and the file properties show Whisper Key instead of pyapp 0.29.0
 
 ## [1.7.1] - 2026-10-10
 
