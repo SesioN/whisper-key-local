@@ -22,6 +22,7 @@ import numpy as np
 
 from .audio_recorder import AudioRecorder
 from .platform import child_processes
+from .runtime_options import resolve_cpu_threads
 from .utils import get_user_app_data_path
 
 SERVER_HOST = "127.0.0.1"
@@ -135,7 +136,8 @@ class WhisperCppEngine:
                  hotwords: list = None,
                  model_registry=None,
                  binary_path: str = None,
-                 model_dir: str = None):
+                 model_dir: str = None,
+                 cpu_threads: int = 0):
 
         self.model_key = model_key
         self.language = None if language == 'auto' else language
@@ -144,6 +146,7 @@ class WhisperCppEngine:
         self.hotwords = ", ".join(hotwords) if hotwords else None
         self.logger = logging.getLogger(__name__)
         self.registry = model_registry
+        self.cpu_threads = resolve_cpu_threads(cpu_threads)
         self._cli_flags = None
         self._prompt_skip_logged_models = set()
 
@@ -188,7 +191,7 @@ class WhisperCppEngine:
         port = _free_local_port()
         request_path = f"/{secrets.token_urlsafe(16)}"
         command = [server_binary, "-m", model_path, "--host", SERVER_HOST, "--port", str(port),
-                   "--request-path", request_path, "-nt", "-l", self._language(model_key)]
+                   "--request-path", request_path, "-nt", "-l", self._language(model_key), "-t", str(self.cpu_threads)]
         if self.beam_size:
             command.extend(["-bs", str(self.beam_size)])
         print("   Starting whisper.cpp server...", flush=True)
@@ -514,6 +517,7 @@ class WhisperCppEngine:
             "-f", audio_path,
             "-nt",
             "-l", self._language(),
+            "-t", str(self.cpu_threads),
         ]
         if self.beam_size:
             cmd.extend(["-bs", str(self.beam_size)])

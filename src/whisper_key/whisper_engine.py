@@ -8,7 +8,7 @@ import numpy as np
 from faster_whisper import WhisperModel
 
 from .audio_chunking import SAMPLE_RATE, split_at_quiet_points
-from .runtime_options import ONNX_ASR, WHISPER_CPP
+from .runtime_options import ONNX_ASR, WHISPER_CPP, resolve_cpu_threads
 
 WHISPER_WINDOW_SECONDS = 30
 PROMPTED_CHUNK_SECONDS = 28
@@ -25,7 +25,8 @@ class WhisperEngine:
                  beam_size: int = 5,
                  initial_prompt: str = "",
                  hotwords: list = None,
-                 model_registry = None):
+                 model_registry = None,
+                 cpu_threads: int = 0):
 
         self.model_key = model_key
         self.device = device
@@ -34,6 +35,7 @@ class WhisperEngine:
         self.beam_size = beam_size
         self.initial_prompt = initial_prompt or None
         self.hotwords = ", ".join(hotwords) if hotwords else None
+        self.cpu_threads = resolve_cpu_threads(cpu_threads)
         self.model = None
         self.logger = logging.getLogger(__name__)
         self.registry = model_registry
@@ -81,7 +83,7 @@ class WhisperEngine:
                 print("\n")  # Workaround for download status bar misplacement
 
             print(f"   ✓ Whisper model [{self.model_key}] ready!")
-            device_label = "GPU" if self.device == "cuda" else "CPU"
+            device_label = "GPU" if self.device == "cuda" else f"CPU ({self.cpu_threads} threads)"
             print(f"   ✓ Running on {device_label} with {self.compute_type} precision")
 
         except Exception as e:
@@ -92,7 +94,8 @@ class WhisperEngine:
         return WhisperModel(
             self._get_model_source(model_key),
             device=self.device,
-            compute_type=self.compute_type
+            compute_type=self.compute_type,
+            cpu_threads=self.cpu_threads
         )
 
     def unload(self):
@@ -233,7 +236,9 @@ class WhisperEngine:
         texts = []
         first_info = None
         for chunk in chunks:
-            segments, info = self.model.transcribe(chunk, **transcribe_kwargs)
+            # One 30 s window: timestamp tokens only cost decoding time; longer audio needs them to seek between windows
+            without_timestamps = len(chunk) <= WHISPER_WINDOW_SECONDS * SAMPLE_RATE
+            segments, info = self.model.transcribe(chunk, without_timestamps=without_timestamps, **transcribe_kwargs)
             texts.append("".join(segment.text for segment in segments).strip())
             if first_info is None:
                 first_info = info
@@ -275,6 +280,7 @@ def create_whisper_engine(engine_type: str, whisper_config: dict, vad_manager, m
             model_registry=model_registry,
             binary_path=whisper_config.get('cpp_binary'),
             model_dir=whisper_config.get('cpp_model_dir'),
+            cpu_threads=whisper_config.get('cpu_threads', 0),
         )
 
     return WhisperEngine(
@@ -286,4 +292,5 @@ def create_whisper_engine(engine_type: str, whisper_config: dict, vad_manager, m
         initial_prompt=whisper_config.get('initial_prompt', ''),
         hotwords=whisper_config.get('hotwords', []),
         model_registry=model_registry,
+        cpu_threads=whisper_config.get('cpu_threads', 0),
     )

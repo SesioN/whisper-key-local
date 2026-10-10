@@ -49,7 +49,12 @@ whisper: # Whisper AI Model Settings
     language: auto
 
     # Transcription quality settings
-    beam_size: 5 # Higher = more accurate but slower (1-10)
+    # Higher = more accurate but slower (1-10); 1 (greedy) is noticeably faster on CPU with a small accuracy cost
+    beam_size: 5
+
+    # CPU threads for transcription (faster_whisper on CPU and whisper.cpp)
+    # 0 = one per physical core (performance cores on Apple Silicon), up to 16
+    cpu_threads: 0
 
     # Initial prompt to guide transcription style, language variant, or script
     initial_prompt: ""

@@ -130,7 +130,8 @@ Delete this file and restart app to reset to defaults.
 | `whisper.cpp_binary` | `""` | Custom whisper-cli.exe path (auto-detected if empty) |
 | `whisper.cpp_model_dir` | `""` | Custom ggml model directory (auto-detected if empty) |
 | `whisper.language` | `auto` | auto or language code (en, es, fr, etc.) |
-| `whisper.beam_size` | `5` | Higher = more accurate but slower (1-10) |
+| `whisper.beam_size` | `5` | Higher = more accurate but slower (1-10); 1 is noticeably faster on CPU |
+| `whisper.cpu_threads` | `0` | CPU threads for faster-whisper on CPU and whisper.cpp; 0 = one per physical core (performance cores on Apple Silicon), up to 16 |
 | `whisper.initial_prompt` | `""` | Guide transcription style, language variant, or script; applied to the whole recording, also beyond 30 s |
 | `whisper.hotwords` | `[]` | Words the model should favor (names, technical terms); with whisper.cpp they are added to the prompt |
 | `whisper.models` | (see config) | Add custom HuggingFace or local models; `supports_prompt: false` on a model skips `initial_prompt` and `hotwords` for models that repeat or derail with them; `language: <code>` always transcribes a single-language model in that language (set for Distil-Large-V3.5 and the German Turbo); `max_chunk_seconds` splits long recordings for ONNX models at quiet points (default 28 s for Qwen3-ASR, 60 s for Parakeet) |

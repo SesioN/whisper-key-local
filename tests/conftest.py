@@ -3,7 +3,7 @@ import types
 from unittest.mock import MagicMock
 
 PLATFORM_MODULES = ('instance_lock', 'keyboard', 'hotkeys', 'paths', 'app', 'permissions', 'icons', 'gpu', 'console',
-                    'window_style', 'dialogs', 'theme', 'child_processes', 'autostart', 'media', 'clipboard')
+                    'window_style', 'dialogs', 'theme', 'child_processes', 'autostart', 'media', 'clipboard', 'cpu')
 
 
 def _install_platform_stub():
@@ -15,6 +15,8 @@ def _install_platform_stub():
         module_stub = MagicMock(name=f'whisper_key.platform.{module_name}')
         setattr(platform_stub, module_name, module_stub)
         sys.modules[f'whisper_key.platform.{module_name}'] = module_stub
+    platform_stub.cpu.physical_core_count.return_value = 4
+    platform_stub.clipboard.snapshot.return_value = None
     sys.modules['whisper_key.platform'] = platform_stub
 
 

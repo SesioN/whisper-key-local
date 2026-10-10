@@ -498,6 +498,10 @@ def validate_config(config, default_config, logger):
     _validate_numeric_range(config, default_config, 'vad.vad_silence_timeout_seconds', logger, min_val=1.0, max_val=36000.0)
     _validate_numeric_range(config, default_config, 'vad.auto_trigger_silence_seconds', logger, min_val=0.2, max_val=60.0)
 
+    _validate_numeric_range(config, default_config, 'whisper.cpu_threads', logger, min_val=0, max_val=256)
+    if not isinstance(_get_config_value_at_path(config, 'whisper.cpu_threads'), int):
+        _set_to_default(config, default_config, 'whisper.cpu_threads', _get_config_value_at_path(config, 'whisper.cpu_threads'), logger)
+
     runtime = _get_config_value_at_path(config, 'whisper.runtime')
     if runtime not in ('cpu', 'cuda', 'rocm', 'vulkan'):
         _set_to_default(config, default_config, 'whisper.runtime', runtime, logger)

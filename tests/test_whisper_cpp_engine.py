@@ -21,6 +21,7 @@ def make_engine(model_key="base", language=None, initial_prompt=None, hotwords=N
     engine._prompt_skip_logged_models = set()
     engine._binary = "whisper-cli"
     engine._cli_flags = None
+    engine.cpu_threads = 6
     return engine
 
 
@@ -30,6 +31,7 @@ def test_cli_command_uses_forced_language_combined_prompt_and_supported_flags(mo
     engine = make_engine(model_key="german", initial_prompt="Meeting notes.", hotwords="Kubernetes, Helm")
     command = engine._build_command("model.bin", "audio.wav")
     assert command[command.index("-l") + 1] == "de"
+    assert command[command.index("-t") + 1] == "6"
     assert command[command.index("--prompt") + 1] == "Meeting notes. Kubernetes, Helm"
     assert "--suppress-nst" in command and "--carry-initial-prompt" in command
 

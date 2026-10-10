@@ -54,7 +54,7 @@ class StreamingRecognizer:
             decoder=decoder,
             joiner=joiner,
             tokens=tokens,
-            num_threads=4,
+            num_threads=2,
             sample_rate=SHERPA_SAMPLE_RATE,
             feature_dim=80,
             decoding_method="greedy_search",

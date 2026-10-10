@@ -89,7 +89,6 @@ def build_engine(args):
         "language": args.language,
         "onnx_runtime": args.onnx_runtime,
         "cpu_threads": args.cpu_threads,
-        "without_timestamps": args.without_timestamps,
     }
     whisper_config.update({key: value for key, value in overrides.items() if value is not None})
     registry = ModelRegistry(whisper_models_config=whisper_config.get("models", {}))
@@ -137,7 +136,6 @@ def main():
     parser.add_argument("--language")
     parser.add_argument("--onnx-runtime")
     parser.add_argument("--cpu-threads", type=int)
-    parser.add_argument("--without-timestamps", choices=("auto", "always", "never"))
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()

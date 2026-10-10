@@ -12,7 +12,7 @@ class FakeWhisperModel:
     fail_sources = set()
     transcribe_error = None
 
-    def __init__(self, source, device, compute_type):
+    def __init__(self, source, device, compute_type, cpu_threads):
         if source in self.fail_sources:
             raise RuntimeError(f"cannot load {source}")
         self.source = source
@@ -120,3 +120,24 @@ def test_long_audio_without_prompt_is_one_call(fake_model):
     engine.model.calls.clear()
     engine.transcribe_audio(np.ones(16000 * 70, dtype=np.float32))
     assert len(engine.model.calls) == 1
+
+
+def test_cpu_threads_default_to_physical_cores(fake_model):
+    engine = make_engine()
+    assert engine.cpu_threads == 4
+    assert make_engine(cpu_threads=3).cpu_threads == 3
+
+
+def test_timestamps_are_skipped_only_for_single_window_audio(fake_model):
+    engine = make_engine()
+    seen = []
+    original = engine.model.transcribe
+
+    def transcribe(audio, **kwargs):
+        seen.append((len(audio), kwargs["without_timestamps"]))
+        return original(audio, **kwargs)
+
+    engine.model.transcribe = transcribe
+    engine.transcribe_audio(np.ones(16000 * 10, dtype=np.float32))
+    engine.transcribe_audio(np.ones(16000 * 45, dtype=np.float32))
+    assert seen == [(16000 * 10, True), (16000 * 45, False)]
