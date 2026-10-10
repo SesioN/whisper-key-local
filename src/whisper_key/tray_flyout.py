@@ -851,10 +851,10 @@ class _InfoRow(_Row):
         left = view.px(ROW_INSET + CONTENT_PADDING)
         right = view.width - left
         middle = self.middle()
-        label_right = left + view.font_body.measure(self.data.label)
-        self.canvas.create_text(left, middle, anchor="w", font=view.font_body, fill=theme.text,
-                                text=view.fit_text(view.font_body, self.data.label, right - left))
-        value = view.fit_text(view.font_small, self.data.value(), right - label_right - view.px(16))
+        label = view.fit_text(view.font_body, self.data.label, (right - left) // 2)
+        label_right = left + view.font_body.measure(label)
+        self.canvas.create_text(left, middle, anchor="w", font=view.font_body, fill=theme.text, text=label)
+        value = view.fit_text(view.font_small, self.data.value(), max(0, right - label_right - view.px(16)))
         self.canvas.create_text(right, middle, anchor="e", text=value, font=view.font_small, fill=theme.secondary)
 
 

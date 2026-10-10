@@ -77,7 +77,8 @@ class OutputAudioControl:
 
     def _unmute_output(self):
         if self._muted_by_us:
-            self._media.set_output_muted(False)
+            if self._media.is_output_muted():
+                self._media.set_output_muted(False)
             self._muted_by_us = False
 
     def _resume_media(self):
