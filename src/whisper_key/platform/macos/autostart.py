@@ -2,6 +2,14 @@ def is_supported() -> bool:
     return False
 
 
+def is_blocked_by_system() -> bool:
+    return False
+
+
+def open_system_settings():
+    pass
+
+
 def is_enabled() -> bool:
     return False
 

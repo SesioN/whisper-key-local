@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 - **Smooth orb resizing** - resizing the Nebula orb with the scroll wheel or the tray slider no longer stutters; each size step used to rebuild its textures on the orb's thread (about 0.3 s), now they are built in the background and the cache is capped at three sizes
+- **Start with Windows ignored a disabled Windows startup entry** - when Whisper Key was turned off in Task Manager or Settings > Apps > Startup, the tray toggle still showed it as on and nothing started at sign-in. The toggle now reflects that state, turning it on opens the Windows Startup apps settings so it can be re-enabled there
 
 ## [1.7.1] - 2026-10-10
 
