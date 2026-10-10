@@ -7,7 +7,11 @@ from typing import Optional, Callable
 import numpy as np
 from faster_whisper import WhisperModel
 
+from .audio_chunking import SAMPLE_RATE, split_at_quiet_points
 from .runtime_options import ONNX_ASR, WHISPER_CPP
+
+WHISPER_WINDOW_SECONDS = 30
+PROMPTED_CHUNK_SECONDS = 28
 
 
 class WhisperEngine:
@@ -111,14 +115,12 @@ class WhisperEngine:
         self._warmed_model = model
 
     def _warm_up_language(self, model_key: str) -> str:
-        if self._is_english_only(model_key):
-            return "en"
-        return self.language or "en"
+        return self._transcription_language(model_key) or "en"
 
-    def _is_english_only(self, model_key: str) -> bool:
+    def _transcription_language(self, model_key: str) -> Optional[str]:
         if self.registry:
-            return self.registry.is_english_only(model_key)
-        return model_key.endswith(".en")
+            return self.registry.transcription_language(model_key, self.language)
+        return "en" if model_key.endswith(".en") else self.language
 
     def _load_model_async(self,
                           new_model_key: str,
@@ -201,7 +203,7 @@ class WhisperEngine:
 
         transcribe_kwargs = dict(
             beam_size=self.beam_size,
-            language="en" if self._is_english_only(self.model_key) else self.language,
+            language=self._transcription_language(self.model_key),
             condition_on_previous_text=False,
         )
         if self._model_supports_prompt():
@@ -210,8 +212,7 @@ class WhisperEngine:
             if self.hotwords:
                 transcribe_kwargs["hotwords"] = self.hotwords
 
-        segments, info = self.model.transcribe(audio_data, **transcribe_kwargs)
-        transcribed_text = "".join(segment.text for segment in segments).strip()
+        transcribed_text, info = self._transcribe_chunks(self._chunks_for(audio_data, transcribe_kwargs), transcribe_kwargs)
 
         transcription_time = time.time() - start_time
         print(f"   ✓ Transcription completed in {transcription_time:.1f} seconds")
@@ -221,6 +222,23 @@ class WhisperEngine:
             return transcribed_text
         self.logger.info("Transcription was empty")
         return None
+
+    def _chunks_for(self, audio_data: np.ndarray, transcribe_kwargs: dict) -> list:
+        # faster-whisper drops initial_prompt after the first 30 s window when condition_on_previous_text is off
+        if transcribe_kwargs.get("initial_prompt") and len(audio_data) > WHISPER_WINDOW_SECONDS * SAMPLE_RATE:
+            return split_at_quiet_points(audio_data, PROMPTED_CHUNK_SECONDS)
+        return [audio_data]
+
+    def _transcribe_chunks(self, chunks: list, transcribe_kwargs: dict) -> tuple:
+        texts = []
+        first_info = None
+        for chunk in chunks:
+            segments, info = self.model.transcribe(chunk, **transcribe_kwargs)
+            texts.append("".join(segment.text for segment in segments).strip())
+            if first_info is None:
+                first_info = info
+                transcribe_kwargs = {**transcribe_kwargs, "language": transcribe_kwargs["language"] or info.language}
+        return " ".join(text for text in texts if text), first_info
 
     def change_model(self,
                      new_model_key: str,

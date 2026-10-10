@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Faster hand-off after you stop recording** - the speech pre-check stops at the first detected speech instead of scanning the whole recording (it cost about 0.4 s per minute of audio), and is skipped entirely when the real-time VAD already heard speech during the recording
 - **Hotkeys stay responsive while transcribing** - transcription and delivery run on their own worker thread instead of the hotkey thread, so cancel, mute and push-to-talk keys keep working during long transcriptions
 - **Next recording can start 0.5 s sooner** - the clipboard is restored in the background after auto-paste instead of blocking for `clipboard.paste_clipboard_restore_delay`; a second paste within that delay restores the original content, not the first transcription
+- **Single-language models always use their language** - Distil-Large-V3.5 (English) and Large-V3-Turbo German no longer auto-detect the language, which produced garbage when detection picked another language; set `language: <code>` on a custom model in `whisper.models` to do the same
+- **Initial prompt applies to the whole recording** - `whisper.initial_prompt` used to stop after the first 30 s; faster-whisper now transcribes long prompted recordings in chunks split at pauses, whisper.cpp carries the prompt into every window
+- **Hotwords work with whisper.cpp** - `whisper.hotwords` are added to the prompt instead of being ignored
+- **whisper.cpp suppresses non-speech tokens** - `[MUSIC]`/`(laughs)`-style output is avoided during decoding (whisper-cli only when the installed build supports it)
+- **Parakeet handles long recordings** - ONNX models other than Qwen3-ASR are split at pauses into chunks of at most 60 s (`max_chunk_seconds` per model) instead of getting the whole recording at once
+- **Separate pre-check sensitivity** - the speech pre-check uses its own, more permissive thresholds (`vad.vad_precheck_onset_threshold` 0.5 / `vad.vad_precheck_offset_threshold` 0.35, the TEN VAD default) so quiet speech is no longer skipped as silence; the real-time thresholds for silence timeout and voice-activated recording are unchanged
 - **Long silences are no longer transcribed** - trailing silence measured by the real-time VAD is cut down to 1 s before transcription (e.g. the 30 s before a silence-timeout stop), which saves time and avoids hallucinated phrases such as "Thank you."
 
 ### Fixed

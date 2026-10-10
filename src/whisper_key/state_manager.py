@@ -642,9 +642,10 @@ class StateManager:
             return True
 
         language = self.config_manager.get_setting('whisper', 'language')
-        if self.whisper_engine.registry.is_english_only(new_model_key) and language not in (None, 'auto', 'en'):
-            self.logger.warning(f"Model {new_model_key} is English-only, the configured language [{language}] is ignored")
-            print(f"⚠️ [{new_model_key}] only transcribes English, the configured language [{language}] is ignored")
+        forced_language = self.whisper_engine.registry.forced_language(new_model_key)
+        if forced_language and language not in (None, 'auto', forced_language):
+            self.logger.warning(f"Model {new_model_key} only transcribes [{forced_language}], the configured language [{language}] is ignored")
+            print(f"⚠️ [{new_model_key}] only transcribes [{forced_language}], the configured language [{language}] is ignored")
 
         download_state = self.get_model_download_state(new_model_key)
         if download_state == "download":

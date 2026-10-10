@@ -27,3 +27,19 @@ def test_supports_prompt_flag():
     registry = make_registry()
     assert not registry.supports_prompt('custom')
     assert registry.supports_prompt('tiny')
+
+
+def test_forced_language_from_model_or_english_only_name():
+    registry = ModelRegistry({
+        'distil': {'source': 'distil-whisper/distil-large-v3.5-ct2', 'language': 'en'},
+        'german': {'source': 'x/german-ct2', 'language': 'de'},
+        'tiny': {},
+        'small.en': {},
+        'bad': {'language': 'auto'},
+    })
+    assert registry.forced_language('distil') == 'en'
+    assert registry.transcription_language('german', 'fr') == 'de'
+    assert registry.transcription_language('small.en', None) == 'en'
+    assert registry.transcription_language('tiny', 'fr') == 'fr'
+    assert registry.transcription_language('tiny', None) is None
+    assert registry.forced_language('bad') is None

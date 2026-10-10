@@ -97,6 +97,8 @@ def setup_vad(vad_config):
         vad_realtime_enabled=vad_config['vad_realtime_enabled'],
         vad_onset_threshold=vad_config['vad_onset_threshold'],
         vad_offset_threshold=vad_config['vad_offset_threshold'],
+        vad_precheck_onset_threshold=vad_config['vad_precheck_onset_threshold'],
+        vad_precheck_offset_threshold=vad_config['vad_precheck_offset_threshold'],
         vad_min_speech_duration=vad_config['vad_min_speech_duration'],
         vad_silence_timeout_seconds=vad_config['vad_silence_timeout_seconds'],
         auto_trigger_silence_seconds=vad_config['auto_trigger_silence_seconds']

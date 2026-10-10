@@ -91,8 +91,8 @@ def install_counting_vad(monkeypatch, probabilities):
     manager = voice_activity_detection.VadManager.__new__(voice_activity_detection.VadManager)
     manager.vad_precheck_enabled = True
     manager.vad_realtime_enabled = False
-    manager.vad_onset_threshold = 0.7
-    manager.vad_offset_threshold = 0.55
+    manager.vad_precheck_onset_threshold = 0.7
+    manager.vad_precheck_offset_threshold = 0.55
     manager.vad_min_speech_duration = 0.1
     manager.ten_vad = object()
     import logging

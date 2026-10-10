@@ -50,6 +50,8 @@ class VadManager:
                  vad_realtime_enabled: bool = False,
                  vad_onset_threshold: float = 0.7,
                  vad_offset_threshold: float = 0.55,
+                 vad_precheck_onset_threshold: float = 0.5,
+                 vad_precheck_offset_threshold: float = 0.35,
                  vad_min_speech_duration: float = 0.1,
                  vad_silence_timeout_seconds: float = 20.0,
                  auto_trigger_silence_seconds: float = 1.5):
@@ -58,6 +60,8 @@ class VadManager:
         self.vad_realtime_enabled = vad_realtime_enabled
         self.vad_onset_threshold = vad_onset_threshold
         self.vad_offset_threshold = vad_offset_threshold
+        self.vad_precheck_onset_threshold = vad_precheck_onset_threshold
+        self.vad_precheck_offset_threshold = vad_precheck_offset_threshold
         self.vad_min_speech_duration = vad_min_speech_duration
         self.vad_silence_timeout_seconds = vad_silence_timeout_seconds
         self.auto_trigger_silence_seconds = auto_trigger_silence_seconds
@@ -93,8 +97,8 @@ class VadManager:
 
         try:
             audio_int16 = convert_audio_for_ten_vad(audio_data)
-            hysteresis = Hysteresis(high_threshold=self.vad_onset_threshold,
-                                    low_threshold=self.vad_offset_threshold,
+            hysteresis = Hysteresis(high_threshold=self.vad_precheck_onset_threshold,
+                                    low_threshold=self.vad_precheck_offset_threshold,
                                     frame_duration_sec=VAD_HOP_DURATION_SEC)
             speech_detected = hysteresis.detect_speech_in_probabilities(
                 frame_probabilities(TenVad(), audio_int16),

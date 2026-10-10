@@ -87,3 +87,36 @@ def test_transcription_errors_propagate(fake_model):
     fake_model.transcribe_error = RuntimeError("CUDA failed")
     with pytest.raises(RuntimeError):
         engine.transcribe_audio(np.ones(32000, dtype=np.float32))
+
+
+def test_forced_model_language_overrides_auto_detect(fake_model):
+    registry = ModelRegistry({"distil": {"source": "distil", "language": "en"}})
+    registry.get_load_source = lambda key: registry.get_source(key)
+    engine = whisper_engine.WhisperEngine(model_key="distil", language="auto", model_registry=registry)
+    engine.transcribe_audio(np.ones(16000, dtype=np.float32))
+    assert engine.model.calls[-1]["language"] == "en"
+
+
+def test_long_prompted_audio_is_chunked_so_every_chunk_gets_the_prompt(fake_model):
+    engine = make_engine(initial_prompt="Glossary: Kubernetes")
+    languages = iter(["de"] + ["en"] * 10)
+
+    def transcribe(audio, **kwargs):
+        engine.model.calls.append(kwargs)
+        info = types.SimpleNamespace(language=next(languages), language_probability=0.9)
+        return iter([types.SimpleNamespace(text=f" part{len(engine.model.calls)}")]), info
+
+    engine.model.calls.clear()
+    engine.model.transcribe = transcribe
+    text = engine.transcribe_audio(np.ones(16000 * 70, dtype=np.float32))
+    assert len(engine.model.calls) >= 3
+    assert all(call["initial_prompt"] == "Glossary: Kubernetes" for call in engine.model.calls)
+    assert [call["language"] for call in engine.model.calls] == [None] + ["de"] * (len(engine.model.calls) - 1)
+    assert text.startswith("part1 part2 part3")
+
+
+def test_long_audio_without_prompt_is_one_call(fake_model):
+    engine = make_engine()
+    engine.model.calls.clear()
+    engine.transcribe_audio(np.ones(16000 * 70, dtype=np.float32))
+    assert len(engine.model.calls) == 1

@@ -486,8 +486,14 @@ def validate_config(config, default_config, logger):
     _validate_numeric_range(config, default_config, 'audio.channels', logger, min_val=1, max_val=2)
     _validate_numeric_range(config, default_config, 'audio.pre_roll_seconds', logger, min_val=0, max_val=10)
 
-    _validate_numeric_range(config, default_config, 'vad.vad_onset_threshold', logger, min_val=0.0, max_val=1.0)
-    _validate_numeric_range(config, default_config, 'vad.vad_offset_threshold', logger, min_val=0.0, max_val=1.0)
+    for onset_path, offset_path in (('vad.vad_onset_threshold', 'vad.vad_offset_threshold'),
+                                    ('vad.vad_precheck_onset_threshold', 'vad.vad_precheck_offset_threshold')):
+        _validate_numeric_range(config, default_config, onset_path, logger, min_val=0.0, max_val=1.0)
+        _validate_numeric_range(config, default_config, offset_path, logger, min_val=0.0, max_val=1.0)
+        if _get_config_value_at_path(config, offset_path) > _get_config_value_at_path(config, onset_path):
+            logger.warning(f"{offset_path} must not be above {onset_path}")
+            _set_to_default(config, default_config, onset_path, _get_config_value_at_path(config, onset_path), logger)
+            _set_to_default(config, default_config, offset_path, _get_config_value_at_path(config, offset_path), logger)
     _validate_numeric_range(config, default_config, 'vad.vad_min_speech_duration', logger, min_val=0.001, max_val=5.0)
     _validate_numeric_range(config, default_config, 'vad.vad_silence_timeout_seconds', logger, min_val=1.0, max_val=36000.0)
     _validate_numeric_range(config, default_config, 'vad.auto_trigger_silence_seconds', logger, min_val=0.2, max_val=60.0)

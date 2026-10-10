@@ -1,6 +1,6 @@
 import numpy as np
 
-from whisper_key.onnx_asr_engine import SAMPLE_RATE, split_at_quiet_points
+from whisper_key.audio_chunking import SAMPLE_RATE, split_at_quiet_points
 
 
 def test_short_audio_is_one_chunk():

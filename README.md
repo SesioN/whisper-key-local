@@ -131,9 +131,9 @@ Delete this file and restart app to reset to defaults.
 | `whisper.cpp_model_dir` | `""` | Custom ggml model directory (auto-detected if empty) |
 | `whisper.language` | `auto` | auto or language code (en, es, fr, etc.) |
 | `whisper.beam_size` | `5` | Higher = more accurate but slower (1-10) |
-| `whisper.initial_prompt` | `""` | Guide transcription style, language variant, or script |
-| `whisper.hotwords` | `[]` | Words the model should favor (names, technical terms) |
-| `whisper.models` | (see config) | Add custom HuggingFace or local models; `supports_prompt: false` on a model skips `initial_prompt` and `hotwords` for models that repeat or derail with them |
+| `whisper.initial_prompt` | `""` | Guide transcription style, language variant, or script; applied to the whole recording, also beyond 30 s |
+| `whisper.hotwords` | `[]` | Words the model should favor (names, technical terms); with whisper.cpp they are added to the prompt |
+| `whisper.models` | (see config) | Add custom HuggingFace or local models; `supports_prompt: false` on a model skips `initial_prompt` and `hotwords` for models that repeat or derail with them; `language: <code>` always transcribes a single-language model in that language (set for Distil-Large-V3.5 and the German Turbo); `max_chunk_seconds` splits long recordings for ONNX models at quiet points (default 28 s for Qwen3-ASR, 60 s for Parakeet) |
 | **Post-Processing** |||
 | `post_processing.strip_trailing_period` | `false` | Strip trailing period from output |
 | `post_processing.corrections` | `{}` | Fix recurring misheard words, e.g. `CAPEX: [cap x]` |
@@ -146,7 +146,9 @@ Delete this file and restart app to reset to defaults.
 | `hotkey.command_hotkey` | `[alt+win, ""]` / `[fn+command, ""]` | Voice command mode |
 | **Voice Activity Detection** |||
 | `vad.vad_precheck_enabled` | `true` | Prevent hallucinations on silence |
-| `vad.vad_onset_threshold` | `0.7` | Speech detection start (0.0-1.0) |
+| `vad.vad_precheck_onset_threshold` | `0.5` | Pre-check speech start (0.0-1.0); lower lets quiet speech through |
+| `vad.vad_precheck_offset_threshold` | `0.35` | Pre-check speech end (0.0-1.0) |
+| `vad.vad_onset_threshold` | `0.7` | Real-time speech detection start (0.0-1.0), for silence timeout and voice-activated recording |
 | `vad.vad_offset_threshold` | `0.55` | Speech detection end (0.0-1.0) |
 | `vad.vad_min_speech_duration` | `0.1` | Min speech segment (seconds); also how long speech must last to start a voice-activated recording |
 | `vad.vad_realtime_enabled` | `true` | Auto-stop on silence |
