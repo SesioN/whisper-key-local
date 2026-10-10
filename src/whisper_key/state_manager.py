@@ -159,6 +159,9 @@ class StateManager:
     def _show_outcome(self, outcome: str):
         self.floating_widget.show_outcome(outcome)
 
+    def handle_streaming_ready(self):
+        self.audio_recorder.attach_streaming()
+
     def handle_max_recording_duration_reached(self, recording: Optional[Recording]):
         self.logger.info("Max recording duration reached - starting transcription")
         self._submit_transcription(recording, use_auto_enter=False)
@@ -884,6 +887,16 @@ class StateManager:
             self.config_manager.update_user_setting('onboarding', 'onnx_gpu', 'declined')
             self._switch_engine_family(model_key)
 
+    def start_runtime_detection(self):
+        threading.Thread(target=self._detect_runtimes_in_background, daemon=True, name="RuntimeDetection").start()
+
+    def _detect_runtimes_in_background(self):
+        self.get_runtimes()
+        self.system_tray.refresh_menu()
+
+    def runtimes_detected(self) -> bool:
+        return self._runtimes is not None
+
     def get_runtimes(self) -> list:
         with self._runtimes_lock:
             if self._runtimes is None:
@@ -902,7 +915,9 @@ class StateManager:
         with self._runtimes_lock:
             self._runtimes = None
 
-    def get_current_runtime(self) -> Optional[Runtime]:
+    def get_current_runtime(self, wait: bool = True) -> Optional[Runtime]:
+        if not wait and not self.runtimes_detected():
+            return None
         runtimes = self.get_runtimes()
         if self._runtime_key is None:
             engine = self.whisper_engine
@@ -913,6 +928,8 @@ class StateManager:
         return next((runtime for runtime in runtimes if runtime.key == self._runtime_key), None)
 
     def get_menu_runtimes(self) -> list:
+        if not self.runtimes_detected():
+            return []
         return runtimes_for_engine_family(self.get_runtimes(), self._is_onnx_engine())
 
     def get_current_compute_type(self) -> Optional[str]:

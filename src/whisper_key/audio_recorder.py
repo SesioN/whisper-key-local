@@ -120,6 +120,13 @@ class AudioRecorder:
         else:
             return None
 
+    def attach_streaming(self):
+        if self.continuous_streaming is None:
+            self.continuous_streaming = self._setup_continuous_streaming()
+
+    def _streaming_enabled(self) -> bool:
+        return bool(self.streaming_manager and self.streaming_manager.streaming_enabled)
+
     def _handle_streaming_result(self, text: str, is_final: bool):
         if self.on_streaming_result:
             self.on_streaming_result(text, is_final)
@@ -294,7 +301,9 @@ class AudioRecorder:
             self.continuous_streaming.reset()
 
     def _process_streaming_audio(self, audio_16k: np.ndarray):
-        self.continuous_streaming.process_chunk(audio_16k)
+        continuous_streaming = self.continuous_streaming
+        if continuous_streaming:
+            continuous_streaming.process_chunk(audio_16k)
 
     def _stream_is_wanted(self) -> bool:
         return self.is_recording or self.is_monitoring or self.is_buffering
@@ -380,13 +389,13 @@ class AudioRecorder:
             self._wait_for_thread_finish(stream_thread)
     
     def _create_analysis_worker(self, recording_rate: int, block_samples: int) -> Optional[AudioAnalysisWorker]:
-        if not (self.continuous_vad or self.continuous_streaming):
+        if not (self.continuous_vad or self._streaming_enabled()):
             return None
         return AudioAnalysisWorker(
             input_rate=recording_rate,
             block_samples=block_samples,
             process_vad_frame=self.continuous_vad.process_chunk if self.continuous_vad else None,
-            process_streaming_audio=self._process_streaming_audio if self.continuous_streaming else None,
+            process_streaming_audio=self._process_streaming_audio if self._streaming_enabled() else None,
             reset_consumers=self._reset_analysis_consumers,
         )
 

@@ -91,3 +91,23 @@ def test_pipeline_errors_reset_processing_state():
     manager._submit_transcription(Recording(np.ones(16000, dtype=np.float32)), False)
     wait_for_pipeline(manager)
     assert not manager.is_processing
+
+
+def test_runtime_menu_does_not_wait_for_detection(monkeypatch):
+    manager, _, _, _ = make_state_manager()
+    release = threading.Event()
+    from whisper_key import state_manager as state_manager_module
+    monkeypatch.setattr(state_manager_module, "detect_runtimes", lambda binary: release.wait(5) and [])
+    monkeypatch.setattr(state_manager_module, "whisper_cpp_runtime_paths", lambda: (None, None))
+    monkeypatch.setattr("whisper_key.whisper_cpp_engine.find_whisper_cli", lambda: None)
+    manager.start_runtime_detection()
+    assert manager.get_menu_runtimes() == []
+    assert manager.get_current_runtime(wait=False) is None
+    assert not manager.runtimes_detected()
+    release.set()
+    deadline = threading.Event()
+    for _ in range(100):
+        if manager.runtimes_detected():
+            break
+        deadline.wait(0.02)
+    assert manager.runtimes_detected()

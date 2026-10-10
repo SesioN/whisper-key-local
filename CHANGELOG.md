@@ -4,7 +4,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+- **CPU thread setting** - `whisper.cpu_threads` (default 0 = one thread per physical core, performance cores on Apple Silicon, up to 16) for faster-whisper on CPU and whisper.cpp; faster-whisper used to be limited to 4 threads
+
 ### Changed
+- **Faster short transcriptions with faster-whisper** - recordings that fit in one 30 s window are decoded without timestamp tokens
+- **Faster startup** - GPU/runtime detection (nvidia-smi and a PowerShell query on non-NVIDIA PCs) and the experimental streaming model load in the background instead of delaying the tray; the tray Runtime menu shows "Detecting runtimes..." until detection finishes, and GPU detection runs once per session
 - **Faster hand-off after you stop recording** - the speech pre-check stops at the first detected speech instead of scanning the whole recording (it cost about 0.4 s per minute of audio), and is skipped entirely when the real-time VAD already heard speech during the recording
 - **Hotkeys stay responsive while transcribing** - transcription and delivery run on their own worker thread instead of the hotkey thread, so cancel, mute and push-to-talk keys keep working during long transcriptions
 - **Next recording can start 0.5 s sooner** - the clipboard is restored in the background after auto-paste instead of blocking for `clipboard.paste_clipboard_restore_delay`; a second paste within that delay restores the original content, not the first transcription

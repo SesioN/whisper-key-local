@@ -182,12 +182,15 @@ class SystemTray:
         return options
 
     def _build_runtime_items(self, is_busy: bool) -> list:
-        current_runtime = self.state_manager.get_current_runtime()
+        current_runtime = self.state_manager.get_current_runtime(wait=False)
+        runtime_options = [Option(runtime.key, runtime.menu_label, enabled=runtime.selectable and not is_busy)
+                           for runtime in self.state_manager.get_menu_runtimes()]
+        if not self.state_manager.runtimes_detected():
+            runtime_options = [Option("detecting", "Detecting runtimes...", enabled=False)]
         runtime_choice = Choice(
             "Runtime",
-            [Option(runtime.key, runtime.menu_label, enabled=runtime.selectable and not is_busy)
-             for runtime in self.state_manager.get_menu_runtimes()],
-            lambda: getattr(self.state_manager.get_current_runtime(), 'key', None),
+            runtime_options,
+            lambda: getattr(self.state_manager.get_current_runtime(wait=False), 'key', None),
             self.state_manager.request_runtime_change,
         )
         if current_runtime and current_runtime.compute_types:

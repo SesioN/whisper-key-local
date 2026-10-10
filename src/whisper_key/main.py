@@ -543,8 +543,6 @@ def main():
         streaming_manager = setup_streaming(streaming_config, model_registry)
         loading_screen.set_status("Starting whisper.cpp server..." if whisper_config.get('runtime') == VULKAN else "Loading Whisper model...")
         whisper_engine = setup_whisper_engine(whisper_config, vad_manager, model_registry, config_manager, loading_screen)
-        loading_screen.set_status("Loading streaming model...")
-        streaming_manager.initialize()
         loading_screen.set_status("Finishing startup...")
         clipboard_manager = setup_clipboard_manager(clipboard_config)
         audio_feedback = setup_audio_feedback(audio_feedback_config)
@@ -586,7 +584,8 @@ def main():
         system_tray.attach_voice_command_manager_window(
             setup_voice_command_manager_window(voice_command_manager, hotkey_listener, system_tray))
 
-        state_manager.get_runtimes()
+        state_manager.start_runtime_detection()
+        streaming_manager.start_background_initialize(on_ready=state_manager.handle_streaming_ready)
         system_tray.start()
         loading_screen.close()
         if floating_widget and floating_widget_config['enabled']:
