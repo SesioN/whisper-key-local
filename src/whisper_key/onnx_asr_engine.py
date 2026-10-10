@@ -242,11 +242,6 @@ class OnnxAsrEngine:
             self.logger.warning("No audio data to transcribe")
             return None
 
-        if self.vad_manager and self.vad_manager.is_available():
-            if not self.vad_manager.check_audio_for_speech(audio_data):
-                print("   ✗ No speech detected, skipping transcription")
-                return None
-
         start_time = time.time()
         text = self._recognize(np.ascontiguousarray(audio_data.flatten(), dtype=np.float32)).strip()
         elapsed = time.time() - start_time

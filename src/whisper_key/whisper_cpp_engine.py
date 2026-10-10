@@ -130,7 +130,6 @@ class WhisperCppEngine:
                  beam_size: int = 5,
                  initial_prompt: str = "",
                  hotwords: list = None,
-                 vad_manager=None,
                  model_registry=None,
                  binary_path: str = None,
                  model_dir: str = None):
@@ -143,7 +142,6 @@ class WhisperCppEngine:
         self.logger = logging.getLogger(__name__)
         if self.hotwords:
             self.logger.warning("hotwords are not supported by whisper.cpp and will be ignored")
-        self.vad_manager = vad_manager
         self.registry = model_registry
         self._prompt_skip_logged_models = set()
 
@@ -416,12 +414,6 @@ class WhisperCppEngine:
         if audio_data is None or len(audio_data) == 0:
             self.logger.warning("No audio data to transcribe")
             return None
-
-        if self.vad_manager and self.vad_manager.is_available():
-            speech_detected = self.vad_manager.check_audio_for_speech(audio_data)
-            if not speech_detected:
-                print("   X No speech detected, skipping transcription")
-                return None
 
         start_time = time.time()
         audio_seconds = len(audio_data) / AudioRecorder.WHISPER_SAMPLE_RATE

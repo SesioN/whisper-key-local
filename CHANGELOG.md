@@ -4,13 +4,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Changed
+- **Faster hand-off after you stop recording** - the speech pre-check stops at the first detected speech instead of scanning the whole recording (it cost about 0.4 s per minute of audio), and is skipped entirely when the real-time VAD already heard speech during the recording
+- **Hotkeys stay responsive while transcribing** - transcription and delivery run on their own worker thread instead of the hotkey thread, so cancel, mute and push-to-talk keys keep working during long transcriptions
+- **Next recording can start 0.5 s sooner** - the clipboard is restored in the background after auto-paste instead of blocking for `clipboard.paste_clipboard_restore_delay`; a second paste within that delay restores the original content, not the first transcription
+- **Long silences are no longer transcribed** - trailing silence measured by the real-time VAD is cut down to 1 s before transcription (e.g. the 30 s before a silence-timeout stop), which saves time and avoids hallucinated phrases such as "Thank you."
+
 ### Fixed
+- **Clipboard images and files lost after auto-paste** - with `clipboard.paste_preserve_clipboard` all clipboard formats (images, copied files, rich text) are restored, not only plain text
+- **Speech pre-check ran while disabled** - `vad.vad_precheck_enabled: false` was ignored whenever real-time VAD was on
 - **Stereo microphones transcribed garbage** - with `audio.channels: 2` the two channels were interleaved into one stream at double length; they are now mixed down to mono when captured
 - **Voice commands fired inside other words** - a trigger like "go" ran on "I'm going home", which with `voice_commands.match_in_dictation` replaced the dictation; triggers now match whole words only, and punctuation in triggers ("what's up") is normalized like the spoken text
 - **Corrections with symbols never matched** - `post_processing.corrections` entries such as "C++", "C#" or ".NET" are now replaced
 - **GPU out of memory when switching models** - faster-whisper on CUDA/ROCm kept the old model loaded while the new one loaded; it is now released first and restored if the new model fails
 - **CUDA errors did not fall back to the previous runtime** - faster-whisper transcription errors were swallowed, so the automatic runtime fallback never ran
-- **Clipboard images wiped after auto-paste** - when the clipboard held an image or files, restoring it after the paste overwrote it with empty text
 
 ### Removed
 - `audio.dtype` setting, which had no effect (audio is always captured as float32)

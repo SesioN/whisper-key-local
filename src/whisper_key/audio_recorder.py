@@ -2,6 +2,7 @@ import logging
 import threading
 import time
 from collections import deque
+from dataclasses import dataclass
 from typing import Optional, Callable
 
 import numpy as np
@@ -9,6 +10,25 @@ import sounddevice as sd
 import soxr
 
 from .voice_activity_detection import VadEvent, VAD_CHUNK_SIZE
+
+
+@dataclass
+class Recording:
+    audio: np.ndarray
+    realtime_speech_detected: bool = False
+    trailing_silence_seconds: float = 0.0
+
+    @property
+    def duration_seconds(self) -> float:
+        return len(self.audio) / AudioRecorder.WHISPER_SAMPLE_RATE
+
+
+def trim_trailing_silence(audio: np.ndarray, trailing_silence_seconds: float, keep_seconds: float,
+                          min_remaining_seconds: float, sample_rate: int) -> np.ndarray:
+    trim_samples = int(max(0.0, trailing_silence_seconds - keep_seconds) * sample_rate)
+    if trim_samples <= 0 or len(audio) - trim_samples < min_remaining_seconds * sample_rate:
+        return audio
+    return audio[:len(audio) - trim_samples]
 
 
 def to_mono_block(input_block: np.ndarray) -> np.ndarray:
@@ -177,14 +197,15 @@ class AudioRecorder:
         with self._pre_roll_lock:
             self._clear_pre_roll()
 
-    def _take_recorded_chunks(self) -> Optional[list]:
+    def _take_recorded_chunks(self) -> Optional[tuple]:
         # Flag flip and list swap under the callback's lock so no chunk lands after the snapshot
         with self._pre_roll_lock:
             if not self.is_recording:
                 return None
             self.is_recording = False
             recorded_chunks, self.audio_data = self.audio_data, []
-        return recorded_chunks
+        analysis = self.continuous_vad.get_recording_analysis() if self.continuous_vad else (False, 0.0)
+        return recorded_chunks, analysis
     
     def _test_audio_source(self):
         try:
@@ -303,35 +324,36 @@ class AudioRecorder:
                 self.is_recording = False
                 return False
 
-    def stop_recording(self) -> Optional[np.ndarray]:
+    def stop_recording(self) -> Optional[Recording]:
         with self._lifecycle_lock:
             if not self.is_recording:
                 return None
 
-            recorded_chunks = self._take_recorded_chunks()
+            recorded = self._take_recorded_chunks()
             stream_no_longer_needed = not (self.is_monitoring or self.is_buffering)
             stream_thread = self.recording_thread
 
         if stream_no_longer_needed:
             self._wait_for_thread_finish(stream_thread)
 
-        return self._process_audio_data(recorded_chunks)
-    
-    def _process_audio_data(self, recorded_chunks: Optional[list]) -> Optional[np.ndarray]:
+        return self._process_audio_data(recorded)
+
+    def _process_audio_data(self, recorded: Optional[tuple]) -> Optional[Recording]:
+        recorded_chunks, (realtime_speech_detected, trailing_silence_seconds) = recorded or ([], (False, 0.0))
         if not recorded_chunks:
             print("   ✗ No audio data recorded!")
             return None
 
-        audio_array = np.concatenate(recorded_chunks, axis=0)
+        audio_array = np.concatenate(recorded_chunks, axis=0).reshape(-1)
 
         if self._needs_resampling():
             recording_rate = self._get_recording_sample_rate()
             self.logger.info(f"Resampling from {recording_rate} Hz to {self.WHISPER_SAMPLE_RATE} Hz")
             audio_array = self._resample_audio(audio_array, recording_rate, self.WHISPER_SAMPLE_RATE)
 
-        duration = self.get_audio_duration(audio_array)
-        self.logger.info(f"Recorded {duration:.2f} seconds of audio")
-        return audio_array
+        recording = Recording(audio_array, realtime_speech_detected, trailing_silence_seconds)
+        self.logger.info(f"Recorded {recording.duration_seconds:.2f} seconds of audio")
+        return recording
     
     def cancel_recording(self):
         with self._lifecycle_lock:
@@ -437,27 +459,19 @@ class AudioRecorder:
                 print(f"⏰ Maximum recording duration of {self.max_duration}s reached - stopping recording")
                 
                 # Only the callback lock here: this runs on the stream thread (see WASAPI note)
-                recorded_chunks = self._take_recorded_chunks()
-                if recorded_chunks is None:
+                recorded = self._take_recorded_chunks()
+                if recorded is None:
                     return False
-                audio_data = self._process_audio_data(recorded_chunks)
-                
+                recording = self._process_audio_data(recorded)
+
                 if self.on_max_duration_reached:
-                    if self.is_monitoring or self.is_buffering:
-                        threading.Thread(target=self.on_max_duration_reached, args=(audio_data,), daemon=True).start()
-                    else:
-                        self.on_max_duration_reached(audio_data)
+                    threading.Thread(target=self.on_max_duration_reached, args=(recording,), daemon=True).start()
                 return True
         return False
     
     def get_recording_status(self) -> bool:
         return self.is_recording
     
-    def get_audio_duration(self, audio_data: np.ndarray) -> float:
-        if audio_data is None or len(audio_data) == 0:
-            return 0.0
-        return len(audio_data) / self.sample_rate
-
     def get_device_id(self) -> Optional[int]:
         if self.device is not None:
             return self.device

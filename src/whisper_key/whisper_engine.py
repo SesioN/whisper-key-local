@@ -21,7 +21,6 @@ class WhisperEngine:
                  beam_size: int = 5,
                  initial_prompt: str = "",
                  hotwords: list = None,
-                 vad_manager = None,
                  model_registry = None):
 
         self.model_key = model_key
@@ -39,8 +38,6 @@ class WhisperEngine:
         self._loading_thread = None
         self._progress_callback = None
         self._warmed_model = None
-
-        self.vad_manager = vad_manager
 
         self._load_model()
     
@@ -199,11 +196,6 @@ class WhisperEngine:
             self.logger.warning("No audio data to transcribe")
             return None
 
-        if self.vad_manager and self.vad_manager.is_available():
-            if not self.vad_manager.check_audio_for_speech(audio_data):
-                print("   ✗ No speech detected, skipping transcription")
-                return None
-
         start_time = time.time()
         audio_data = np.ascontiguousarray(audio_data.reshape(-1), dtype=np.float32)
 
@@ -262,7 +254,6 @@ def create_whisper_engine(engine_type: str, whisper_config: dict, vad_manager, m
             beam_size=whisper_config['beam_size'],
             initial_prompt=whisper_config.get('initial_prompt', ''),
             hotwords=whisper_config.get('hotwords', []),
-            vad_manager=vad_manager,
             model_registry=model_registry,
             binary_path=whisper_config.get('cpp_binary'),
             model_dir=whisper_config.get('cpp_model_dir'),
@@ -276,6 +267,5 @@ def create_whisper_engine(engine_type: str, whisper_config: dict, vad_manager, m
         beam_size=whisper_config['beam_size'],
         initial_prompt=whisper_config.get('initial_prompt', ''),
         hotwords=whisper_config.get('hotwords', []),
-        vad_manager=vad_manager,
         model_registry=model_registry,
     )

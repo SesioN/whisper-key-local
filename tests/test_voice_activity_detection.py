@@ -62,3 +62,76 @@ def test_detector_reports_trailing_silence_duration():
     for _ in range(8):
         detector.process_chunk(frame())
     assert abs(detector.get_silence_duration() - 5 * VAD_HOP_DURATION_SEC) < 1e-9
+
+
+class CountingVad:
+    instances = []
+
+    def __init__(self, probabilities):
+        self.probabilities = probabilities
+        self.calls = 0
+
+    def process(self, chunk):
+        assert len(chunk) == 256
+        probability = self.probabilities[min(self.calls, len(self.probabilities) - 1)]
+        self.calls += 1
+        return probability, 0
+
+
+def install_counting_vad(monkeypatch, probabilities):
+    from whisper_key import voice_activity_detection
+    CountingVad.instances = []
+
+    def factory():
+        vad = CountingVad(probabilities)
+        CountingVad.instances.append(vad)
+        return vad
+
+    monkeypatch.setattr(voice_activity_detection, "TenVad", factory)
+    manager = voice_activity_detection.VadManager.__new__(voice_activity_detection.VadManager)
+    manager.vad_precheck_enabled = True
+    manager.vad_realtime_enabled = False
+    manager.vad_onset_threshold = 0.7
+    manager.vad_offset_threshold = 0.55
+    manager.vad_min_speech_duration = 0.1
+    manager.ten_vad = object()
+    import logging
+    manager.logger = logging.getLogger("test")
+    return manager
+
+
+def test_precheck_stops_at_first_speech_run(monkeypatch):
+    manager = install_counting_vad(monkeypatch, [0.1] * 10 + [0.9] * 1000)
+    assert manager.check_audio_for_speech(np.zeros(16000 * 60, dtype=np.float32))
+    assert CountingVad.instances[0].calls == 16
+
+
+def test_precheck_scans_everything_when_silent(monkeypatch):
+    manager = install_counting_vad(monkeypatch, [0.1])
+    assert not manager.check_audio_for_speech(np.zeros(16000, dtype=np.float32))
+    assert CountingVad.instances[0].calls == 63
+
+
+def test_precheck_uses_fresh_vad_state_each_time(monkeypatch):
+    manager = install_counting_vad(monkeypatch, [0.1])
+    manager.check_audio_for_speech(np.zeros(512, dtype=np.float32))
+    manager.check_audio_for_speech(np.zeros(512, dtype=np.float32))
+    assert len(CountingVad.instances) == 2
+
+
+def test_recording_analysis_reports_speech_and_trailing_silence():
+    detector, _ = make_detector([0.9] * 3 + [0.1] * 5)
+    for _ in range(8):
+        detector.process_chunk(frame())
+    speech_detected, trailing_silence = detector.get_recording_analysis()
+    assert speech_detected
+    assert abs(trailing_silence - 5 * VAD_HOP_DURATION_SEC) < 1e-9
+    detector.reset()
+    assert detector.get_recording_analysis() == (False, 0.0)
+
+
+def test_recording_analysis_reports_no_trailing_silence_without_speech():
+    detector, _ = make_detector([0.1] * 8)
+    for _ in range(8):
+        detector.process_chunk(frame())
+    assert detector.get_recording_analysis() == (False, 0.0)

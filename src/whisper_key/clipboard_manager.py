@@ -1,10 +1,11 @@
 import logging
+import threading
 import time
 from typing import Optional
 
 import pyperclip
 
-from .platform import keyboard
+from .platform import clipboard, keyboard
 from .utils import parse_hotkey
 
 class ClipboardManager:
@@ -26,6 +27,8 @@ class ClipboardManager:
         self.type_auto_enter_delay = type_auto_enter_delay
         self.type_auto_enter_delay_per_100_chars = type_auto_enter_delay_per_100_chars
         self.on_delivery_blocked = None
+        self._clipboard_lock = threading.RLock()
+        self._pending_restore = None
         keyboard.set_delay(macos_key_simulation_delay)
         if self.delivery_method == "paste":
             self._test_clipboard_access()
@@ -110,29 +113,54 @@ class ClipboardManager:
             self.logger.error(f"Failed to inject text: {e}")
             return False
 
-    def _clipboard_paste(self, text: str) -> bool:
-        try:
-            original_content = None
-            if self.paste_preserve_clipboard and not self.copy_to_clipboard:
-                original_content = pyperclip.paste()
+    def _take_original_clipboard(self):
+        pending = self._pending_restore
+        self._pending_restore = None
+        if pending:
+            timer, original_clipboard = pending
+            timer.cancel()
+            return original_clipboard
+        return clipboard.snapshot()
 
-            if not self.copy_text(text):
+    def _schedule_restore(self, original_clipboard):
+        timer = threading.Timer(self.paste_clipboard_restore_delay, self._restore_clipboard, args=(original_clipboard,))
+        timer.daemon = True
+        self._pending_restore = (timer, original_clipboard)
+        timer.start()
+
+    def _restore_clipboard(self, original_clipboard):
+        with self._clipboard_lock:
+            if not self._pending_restore or self._pending_restore[1] is not original_clipboard:
+                return
+            self._pending_restore = None
+            try:
+                clipboard.restore(original_clipboard)
+            except Exception as e:
+                self.logger.error(f"Failed to restore the clipboard: {e}")
+
+    def _clipboard_paste(self, text: str) -> bool:
+        with self._clipboard_lock:
+            original_clipboard = None
+            try:
+                if self.paste_preserve_clipboard and not self.copy_to_clipboard:
+                    original_clipboard = self._take_original_clipboard()
+
+                if not self.copy_text(text):
+                    return False
+
+                time.sleep(self.paste_pre_paste_delay)
+                keyboard.send_hotkey(*self.paste_keys)
+
+                print("   ✓ Auto-pasted via key simulation")
+                return True
+
+            except Exception as e:
+                self.logger.error(f"Failed to simulate paste keypress: {e}")
                 return False
 
-            time.sleep(self.paste_pre_paste_delay)
-            keyboard.send_hotkey(*self.paste_keys)
-
-            print(f"   ✓ Auto-pasted via key simulation")
-
-            if original_content:
-                time.sleep(self.paste_clipboard_restore_delay)
-                pyperclip.copy(original_content)
-
-            return True
-
-        except Exception as e:
-            self.logger.error(f"Failed to simulate paste keypress: {e}")
-            return False
+            finally:
+                if original_clipboard:
+                    self._schedule_restore(original_clipboard)
 
     def _deliver_to_blocked_target(self, text: str) -> bool:
         self.logger.warning("Foreground window runs at a higher privilege level - auto-paste blocked")

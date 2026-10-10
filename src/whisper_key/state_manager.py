@@ -2,13 +2,14 @@ import gc
 import logging
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import platform
 from typing import Optional, TYPE_CHECKING
 
 import sounddevice as sd
 
-from .audio_recorder import AudioRecorder
+from .audio_recorder import AudioRecorder, Recording, trim_trailing_silence
 from .whisper_engine import WhisperEngine, create_whisper_engine
 from .runtime_options import (FASTER_WHISPER, INSTALLABLE, ONNX_ASR, UNSUPPORTED, WHISPER_CPP, Runtime, best_onnx_runtime,
                               choose_compute_type, current_runtime_key, detect_runtimes, runtimes_for_engine_family,
@@ -35,6 +36,8 @@ class StateManager:
     MIN_VAD_OFFSET_THRESHOLD = 0.05
     MAX_VAD_ONSET_THRESHOLD = 0.95
     AUTO_TRIGGER_COOLDOWN_SECONDS = 1.0  # Lets feedback sounds die out before the VAD may start a recording
+    TRAILING_SILENCE_KEEP_SECONDS = 1.0
+    MIN_TRIMMED_RECORDING_SECONDS = 0.5
 
     def __init__(self,
                  audio_recorder: AudioRecorder,
@@ -86,6 +89,7 @@ class StateManager:
         self._auto_trigger_paste = config_manager.get_setting('vad', 'auto_trigger_paste')
         self._auto_trigger_lock = threading.Lock()
         self._start_lock = threading.Lock()
+        self._pipeline_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="Transcription")
 
         self._runtimes = None
         self._runtime_install_running = False
@@ -155,9 +159,24 @@ class StateManager:
     def _show_outcome(self, outcome: str):
         self.floating_widget.show_outcome(outcome)
 
-    def handle_max_recording_duration_reached(self, audio_data):
+    def handle_max_recording_duration_reached(self, recording: Optional[Recording]):
         self.logger.info("Max recording duration reached - starting transcription")
-        self._transcription_pipeline(audio_data, use_auto_enter=False)
+        self._submit_transcription(recording, use_auto_enter=False)
+
+    def _submit_transcription(self, recording: Optional[Recording], use_auto_enter: bool):
+        with self._state_lock:
+            self.is_processing = True
+        try:
+            future = self._pipeline_executor.submit(self._transcription_pipeline, recording, use_auto_enter)
+        except RuntimeError:
+            with self._state_lock:
+                self.is_processing = False
+            return
+        future.add_done_callback(self._log_pipeline_failure)
+
+    def _log_pipeline_failure(self, future):
+        if not future.cancelled() and future.exception():
+            self.logger.error("Transcription pipeline failed", exc_info=future.exception())
 
     def handle_vad_event(self, event: VadEvent):
         if event == VadEvent.SILENCE_TIMEOUT:
@@ -168,8 +187,8 @@ class StateManager:
                 timeout_seconds = int(self.vad_manager.vad_silence_timeout_seconds)
                 self._clear_streaming_display()
                 print(f"⏰ Stopping recording after {timeout_seconds} seconds of silence...")
-                audio_data = self.audio_recorder.stop_recording()
-            self._transcription_pipeline(audio_data, use_auto_enter=False)
+                recording = self.audio_recorder.stop_recording()
+                self._submit_transcription(recording, use_auto_enter=False)
         elif event == VadEvent.SPEECH_START:
             self._handle_auto_trigger_speech_start()
         elif event == VadEvent.SPEECH_END:
@@ -290,9 +309,8 @@ class StateManager:
             if not self.audio_recorder.get_recording_status():
                 return False
             self._clear_streaming_display()
-            audio_data = self.audio_recorder.stop_recording()
-
-        self._transcription_pipeline(audio_data, use_auto_enter)
+            recording = self.audio_recorder.stop_recording()
+            self._submit_transcription(recording, use_auto_enter)
         return True
     
     def cancel_active_recording(self):
@@ -394,7 +412,24 @@ class StateManager:
             self._engage_output_audio_control()
             self._update_ui_state("recording")
     
-    def _transcription_pipeline(self, audio_data, use_auto_enter: bool = False):
+    def _prepare_audio(self, recording: Recording):
+        audio = trim_trailing_silence(recording.audio, recording.trailing_silence_seconds,
+                                      self.TRAILING_SILENCE_KEEP_SECONDS, self.MIN_TRIMMED_RECORDING_SECONDS,
+                                      AudioRecorder.WHISPER_SAMPLE_RATE)
+        trimmed_seconds = (len(recording.audio) - len(audio)) / AudioRecorder.WHISPER_SAMPLE_RATE
+        if trimmed_seconds > 0:
+            self.logger.info(f"Trimmed {trimmed_seconds:.2f}s of trailing silence")
+        return audio
+
+    def _contains_speech(self, recording: Recording, audio) -> bool:
+        if recording.realtime_speech_detected:
+            self.logger.info("Real-time VAD heard speech during the recording, skipping the pre-check")
+            return True
+        if not self.vad_manager.is_precheck_enabled():
+            return True
+        return self.vad_manager.check_audio_for_speech(audio)
+
+    def _transcription_pipeline(self, recording: Optional[Recording], use_auto_enter: bool = False):
         fallback_to = None
         self.output_audio_control.release()
         try:
@@ -410,13 +445,17 @@ class StateManager:
 
             self.audio_feedback.play_stop_sound()
 
-            if audio_data is None:
+            if recording is None:
                 return
 
-            duration = self.audio_recorder.get_audio_duration(audio_data)
-            print(f"   ✓ Recorded {duration:.1f} seconds, transcribing...")
+            print(f"   ✓ Recorded {recording.duration_seconds:.1f} seconds, transcribing...")
 
             self._update_ui_state("processing")
+
+            audio_data = self._prepare_audio(recording)
+            if not self._contains_speech(recording, audio_data):
+                print("   ✗ No speech detected, skipping transcription")
+                return
 
             try:
                 transcribed_text = engine.transcribe_audio(audio_data)
@@ -542,8 +581,8 @@ class StateManager:
             
             time.sleep(duration_seconds)
             
-            audio_data = self.audio_recorder.stop_recording()
-            self._transcription_pipeline(audio_data)
+            recording = self.audio_recorder.stop_recording()
+            self._transcription_pipeline(recording)
             
         except Exception as e:
             self.logger.error(f"Manual test failed: {e}")
@@ -563,6 +602,7 @@ class StateManager:
         if installer:
             installer.cancel()
 
+        self._pipeline_executor.shutdown(wait=False, cancel_futures=True)
         self.system_tray.stop()
         self.terminal_title.stop()
         self.floating_widget.stop()
