@@ -22,6 +22,12 @@ class Section:
 
 
 @dataclass
+class Info:
+    label: str
+    value: Callable[[], str]
+
+
+@dataclass
 class Action:
     label: str
     on_select: Callable[[], None]
@@ -125,6 +131,8 @@ def _pystray_items(items: list, pystray) -> list:
         elif isinstance(item, Footer):
             separator()
             out += _pystray_items(item.items, pystray)
+        elif isinstance(item, Info):
+            out.append(pystray.MenuItem(_info_text(item), None, enabled=False))
         elif isinstance(item, Action):
             out.append(pystray.MenuItem(item.label, _on_click(item.on_select), enabled=_enabled(item.enabled),
                                         default=item.default))
@@ -177,6 +185,10 @@ def _commit(slider: Slider, value):
 
 def _slider_is_at(slider: Slider, value):
     return lambda: abs(slider.current() - value) < slider.step / 2
+
+
+def _info_text(info: Info):
+    return lambda _item: f"{info.label}: {info.value()}"
 
 
 def _enabled(value):

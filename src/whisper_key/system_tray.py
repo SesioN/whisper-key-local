@@ -4,7 +4,7 @@ import signal
 import threading
 from typing import Optional, TYPE_CHECKING
 
-from .utils import open_file
+from .utils import beautify_hotkey_bindings, open_file
 from .platform import IS_WINDOWS, permissions, icons, autostart
 from .runtime_options import COMPUTE_TYPES
 from .orb_skins import SKINS as ORB_SKINS
@@ -12,7 +12,7 @@ from .orb_skins.base import DEFAULT_IDLE_OPACITY, appearance_matrix, apply_color
 from .orb_skins.preview import render_skin_preview, skin_palette_color
 from .widget_sizes import (MAX_SIZE as MAX_WIDGET_SIZE, MIN_SIZE as MIN_WIDGET_SIZE, NAMED_SIZES as NAMED_WIDGET_SIZES,
                            SNAP_DISTANCE as WIDGET_SIZE_SNAP_DISTANCE, size_label)
-from .tray_menu_model import Action, Choice, Footer, Header, Option, Section, Slider, Submenu, Toggle, to_pystray
+from .tray_menu_model import Action, Choice, Footer, Header, Info, Option, Section, Slider, Submenu, Toggle, to_pystray
 
 try:
     import pystray
@@ -111,6 +111,7 @@ class SystemTray:
         return [
             Header("Whisper Key", self._status_text, lambda: self.state_manager.is_muted, self._toggle_mute),
             Section("Recording"),
+            Info("Shortcut", self._recording_shortcut_text),
             Choice("Recording mode", [Option(mode, label) for mode, label in RECORDING_MODES],
                    self._current_recording_mode, self._set_recording_mode, style="segmented") if self.recording_mode_changer else None,
             Toggle("Voice-activated recording", lambda: self.state_manager.auto_trigger_enabled, self._set_auto_trigger) if self.state_manager.is_auto_trigger_available() else None,
@@ -507,6 +508,16 @@ class SystemTray:
     def attach_recording_mode_changer(self, recording_mode_changer):
         self.recording_mode_changer = recording_mode_changer
         self.refresh_menu()
+
+    def _recording_shortcut_text(self) -> str:
+        bindings = self.config_manager.get_hotkey_bindings()
+        start = beautify_hotkey_bindings(bindings['recording_hotkey'])
+        if not start:
+            return "Not set"
+        if self._current_recording_mode() == "push_to_talk":
+            return f"Hold {start}"
+        stop = beautify_hotkey_bindings(bindings['stop_key'])
+        return f"{start}, stop {stop}" if stop else start
 
     def _current_recording_mode(self):
         return self.config_manager.get_setting('hotkey', 'recording_mode')

@@ -11,7 +11,7 @@ from typing import Callable, Optional
 from PIL import Image, ImageDraw, ImageTk
 
 from .ui_theme import load_theme, rgb_color
-from .tray_menu_model import Action, Choice, Footer, Header, Section, Slider, Submenu, Toggle, resolve
+from .tray_menu_model import Action, Choice, Footer, Header, Info, Section, Slider, Submenu, Toggle, resolve
 
 TOGGLE = "toggle"
 REFRESH = "refresh"
@@ -461,6 +461,8 @@ class _FlyoutView:
                 footer += [(_ActionRow, action) for action in item.items if action is not None]
             elif isinstance(item, Section):
                 body.append((_SectionRow, item.label))
+            elif isinstance(item, Info):
+                body.append((_InfoRow, item))
             elif isinstance(item, Action):
                 body.append((_ActionRow, item))
             elif isinstance(item, Toggle):
@@ -839,6 +841,21 @@ class _BackRow(_Row):
 
     def activate(self, event=None):
         self.view.pop_page()
+
+
+class _InfoRow(_Row):
+    focusable = False
+
+    def draw_content(self):
+        view, theme = self.view, self.view.theme
+        left = view.px(ROW_INSET + CONTENT_PADDING)
+        right = view.width - left
+        middle = self.middle()
+        label_right = left + view.font_body.measure(self.data.label)
+        self.canvas.create_text(left, middle, anchor="w", font=view.font_body, fill=theme.text,
+                                text=view.fit_text(view.font_body, self.data.label, right - left))
+        value = view.fit_text(view.font_small, self.data.value(), right - label_right - view.px(16))
+        self.canvas.create_text(right, middle, anchor="e", text=value, font=view.font_small, fill=theme.secondary)
 
 
 class _ActionRow(_Row):
