@@ -4,6 +4,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Fixed
+- **App name in Windows** - the exe now carries "Whisper Key" and the app version in its file details, so Windows Startup apps, Task Manager and the file properties show Whisper Key instead of pyapp 0.29.0
+
 ## [1.7.1] - 2026-10-10
 
 ### Fixed

@@ -135,6 +135,26 @@ function Set-PatchedText {
     [System.IO.File]::WriteAllText($Path, $Content)
 }
 
+function Patch-VersionInfo {
+    param($PyAppSourcePath)
+    Set-PatchedText (Join-Path $PyAppSourcePath "build.rs") @'
+        res.set_icon("icon.ico");
+'@ @'
+        res.set_icon("icon.ico");
+        println!("cargo:rerun-if-env-changed=WHISPER_KEY_EXE_VERSION");
+        let exe_version = std::env::var("WHISPER_KEY_EXE_VERSION").unwrap_or_default();
+        res.set("FileDescription", "Whisper Key");
+        res.set("ProductName", "Whisper Key");
+        res.set("FileVersion", &exe_version);
+        res.set("ProductVersion", &exe_version);
+        let version_parts: Vec<u64> = exe_version.split('.').take(3).map(|part| part.parse().unwrap_or(0)).collect();
+        let packed_version = version_parts.iter().chain(std::iter::repeat(&0)).take(4)
+            .fold(0u64, |packed, part| (packed << 16) | (part & 0xFFFF));
+        res.set_version_info(winresource::VersionInfo::FILEVERSION, packed_version);
+        res.set_version_info(winresource::VersionInfo::PRODUCTVERSION, packed_version);
+'@ 'res.set_version_info(winresource::VersionInfo::FILEVERSION'
+}
+
 function Patch-SelfUpdate {
     param($PyAppSourcePath)
     Set-PatchedText (Join-Path $PyAppSourcePath "src\commands\self_cmd\update.rs") @'
@@ -279,6 +299,7 @@ $IconPath = Join-Path $ProjectRoot "src\whisper_key\platform\windows\assets\whis
 if (Test-Path $IconPath) {
     Write-Host "Patching icon support..." -ForegroundColor Yellow
     Patch-IconSupport $PyAppSourcePath $IconPath
+    Patch-VersionInfo $PyAppSourcePath
 } else {
     Write-Host "Warning: Icon not found at $IconPath, building without icon" -ForegroundColor Yellow
 }
@@ -293,7 +314,7 @@ Write-Host "Starting pyapp build for $AppName v$AppVersion..." -ForegroundColor 
 Write-Host "PyApp source: $PyAppSourcePath" -ForegroundColor Gray
 Write-Host "Distribution: $DistPath" -ForegroundColor Gray
 
-$PyAppVars = "PYAPP_PROJECT_NAME", "PYAPP_PROJECT_VERSION", "PYAPP_PROJECT_PATH", "PYAPP_PYTHON_VERSION", "PYAPP_EXEC_CODE", "PYAPP_SELF_COMMAND", "PYAPP_PASS_LOCATION", "PYAPP_IS_GUI", "PYAPP_WINDOWS_SUBSYSTEM"
+$PyAppVars = "PYAPP_PROJECT_NAME", "PYAPP_PROJECT_VERSION", "PYAPP_PROJECT_PATH", "PYAPP_PYTHON_VERSION", "PYAPP_EXEC_CODE", "PYAPP_SELF_COMMAND", "PYAPP_PASS_LOCATION", "PYAPP_IS_GUI", "PYAPP_WINDOWS_SUBSYSTEM", "WHISPER_KEY_EXE_VERSION"
 $SavedEnv = @{}
 foreach ($Var in $PyAppVars) { $SavedEnv[$Var] = [Environment]::GetEnvironmentVariable($Var) }
 $PushedLocation = $false
@@ -310,6 +331,7 @@ try {
         $env:PYAPP_PROJECT_VERSION = $AppVersion
     }
     $env:PYAPP_PYTHON_VERSION = "3.12"
+    $env:WHISPER_KEY_EXE_VERSION = $AppVersion
     $ExecCode = 'from whisper_key.main import main; main()'
     $NoTerminalExecCode = 'import os; os.environ["WHISPER_KEY_NO_TERMINAL"] = "1"; from whisper_key.main import main; main()'
     $env:PYAPP_SELF_COMMAND = "self"
