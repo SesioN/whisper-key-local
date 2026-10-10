@@ -28,6 +28,7 @@ from .terminal_title import TerminalTitle
 from .text_postprocessor import TextPostProcessor
 from .system_tray import SystemTray
 from .audio_feedback import AudioFeedback
+from .output_audio_control import OutputAudioControl
 from .instance_manager import guard_against_multiple_instances
 from .model_registry import ONNX_FAMILY, ModelRegistry
 from .streaming_manager import StreamingManager
@@ -416,7 +417,7 @@ def setup_voice_command_manager_window(voice_command_manager, hotkey_listener, s
         key_name_for_virtual_key=hotkeys.key_name_for_virtual_key
     )
 
-def setup_shortcut_manager_window(config_manager, hotkey_listener, voice_commands_enabled):
+def setup_shortcut_manager_window(config_manager, hotkey_listener, system_tray, voice_commands_enabled):
     if not IS_WINDOWS:
         return None
     try:
@@ -431,6 +432,7 @@ def setup_shortcut_manager_window(config_manager, hotkey_listener, voice_command
         hotkey_listener.apply_hotkey_bindings(get_active_hotkey_bindings(config_manager.get_hotkey_bindings(), voice_commands_enabled))
         print("   ✓ Shortcuts saved")
         config_manager.print_startup_hotkey_instructions()
+        system_tray.refresh_menu()
 
     return ShortcutManagerWindow(
         get_hotkey_bindings=config_manager.get_hotkey_bindings,
@@ -544,6 +546,11 @@ def main():
         loading_screen.set_status("Finishing startup...")
         clipboard_manager = setup_clipboard_manager(clipboard_config)
         audio_feedback = setup_audio_feedback(audio_feedback_config)
+        output_audio_config = config_manager.config['output_audio']
+        output_audio_control = OutputAudioControl(
+            mute_output_enabled=output_audio_config['mute_while_recording'],
+            pause_media_enabled=output_audio_config['pause_media_while_recording']
+        )
         voice_command_manager = setup_voice_commands(voice_commands_config, clipboard_manager, log_transcriptions)
         text_postprocessor = setup_text_postprocessor(post_processing_config)
 
@@ -557,7 +564,8 @@ def main():
             vad_manager=vad_manager,
             text_postprocessor=text_postprocessor,
             voice_command_manager=voice_command_manager,
-            terminal_title=terminal_title
+            terminal_title=terminal_title,
+            output_audio_control=output_audio_control
         )
         audio_recorder = setup_audio_recorder(audio_config, state_manager, vad_manager, streaming_manager)
         state_manager.attach_vad_sensitivity_window(setup_vad_sensitivity_window(vad_config, state_manager))
@@ -572,7 +580,7 @@ def main():
         system_tray.attach_recording_mode_changer(
             lambda mode: change_recording_mode(config_manager, hotkey_listener, mode))
         system_tray.attach_shortcut_manager_window(
-            setup_shortcut_manager_window(config_manager, hotkey_listener, voice_commands_config['enabled']))
+            setup_shortcut_manager_window(config_manager, hotkey_listener, system_tray, voice_commands_config['enabled']))
         system_tray.attach_voice_command_manager_window(
             setup_voice_command_manager_window(voice_command_manager, hotkey_listener, system_tray))
 

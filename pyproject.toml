@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "whisper-key-local"
-version = "1.6.0"
+version = "1.7.0"
 description = "Global hotkeys to record speech and transcribe directly to your cursor"
 readme = "README.md"
 license = "MIT"
@@ -33,6 +33,10 @@ dependencies = [
     # Windows-only
     "global-hotkeys>=0.1.7; sys_platform=='win32'",
     "pywin32>=306; sys_platform=='win32'",
+    "pycaw>=20251023; sys_platform=='win32'",
+    "winrt-Windows.Media.Control>=3.0; sys_platform=='win32'",
+    "winrt-Windows.Foundation>=3.0; sys_platform=='win32'",
+    "winrt-Windows.Foundation.Collections>=3.0; sys_platform=='win32'",
 
     # macOS-only
     "pyobjc-framework-Quartz; sys_platform=='darwin'",

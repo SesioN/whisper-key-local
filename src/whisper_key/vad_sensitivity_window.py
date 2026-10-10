@@ -6,12 +6,10 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable
 
+from .themed_widgets import HINT_STYLE, apply_theme, apply_window_chrome
+
 METER_WIDTH = 300
 METER_HEIGHT = 30
-METER_BACKGROUND_COLOR = "#222222"
-METER_SPEECH_COLOR = "#00C853"
-METER_SILENCE_COLOR = "#757575"
-THRESHOLD_LINE_COLOR = "#FF5252"
 METER_REFRESH_INTERVAL_MS = 30
 MIN_ONSET_THRESHOLD = 0.05
 MAX_ONSET_THRESHOLD = 0.95
@@ -114,17 +112,20 @@ class VadSensitivityWindow:
     def _build_window(self, root, command_queue):
         root.title("Whisper Key - Voice detection sensitivity")
         root.resizable(False, False)
+        theme = apply_theme(root)
+        meter_speech_color = theme.accent
+        meter_silence_color = theme.disabled
 
-        frame = ttk.Frame(root, padding=20)
+        frame = ttk.Frame(root, padding=24)
         frame.pack()
 
         ttk.Label(frame, text="Speech detection threshold").pack(anchor="w")
         threshold_label = ttk.Label(frame, text=f"{self.onset_threshold:.2f}")
         threshold_label.pack(anchor="e")
 
-        meter = tk.Canvas(frame, width=METER_WIDTH, height=METER_HEIGHT, bg=METER_BACKGROUND_COLOR, highlightthickness=0)
-        level_bar = meter.create_rectangle(0, 0, 0, METER_HEIGHT, fill=METER_SILENCE_COLOR, outline="")
-        threshold_line = meter.create_line(0, 0, 0, METER_HEIGHT, fill=THRESHOLD_LINE_COLOR, width=2)
+        meter = tk.Canvas(frame, width=METER_WIDTH, height=METER_HEIGHT, bg=theme.surface, highlightbackground=theme.border, highlightthickness=1)
+        level_bar = meter.create_rectangle(0, 0, 0, METER_HEIGHT, fill=meter_silence_color, outline="")
+        threshold_line = meter.create_line(0, 0, 0, METER_HEIGHT, fill=theme.danger, width=2)
 
         def show_threshold(value):
             self.onset_threshold = self._clamp_threshold(value)
@@ -157,7 +158,7 @@ class VadSensitivityWindow:
         slider.pack(pady=(5, 10))
         meter.pack()
 
-        ttk.Label(frame, text="Speak: the bar should pass the red line only while you talk").pack(pady=(10, 0))
+        ttk.Label(frame, style=HINT_STYLE, text="Speak: the bar should pass the marker line only while you talk").pack(pady=(10, 0))
 
         drawn_meter = [None]
 
@@ -165,7 +166,7 @@ class VadSensitivityWindow:
             probability = max(0.0, min(1.0, self.speech_probability))
             if drawn_meter[0] != (probability, self.onset_threshold):
                 drawn_meter[0] = (probability, self.onset_threshold)
-                color = METER_SPEECH_COLOR if probability > self.onset_threshold else METER_SILENCE_COLOR
+                color = meter_speech_color if probability > self.onset_threshold else meter_silence_color
                 meter.coords(level_bar, 0, 0, probability * METER_WIDTH, METER_HEIGHT)
                 meter.itemconfig(level_bar, fill=color)
             root.after(METER_REFRESH_INTERVAL_MS, refresh_meter)
@@ -184,6 +185,7 @@ class VadSensitivityWindow:
                 pass
             root.after(QUEUE_POLL_INTERVAL_MS, process_command_queue)
 
+        apply_window_chrome(root, theme)
         show_threshold(self.onset_threshold)
         refresh_meter()
         process_command_queue()
