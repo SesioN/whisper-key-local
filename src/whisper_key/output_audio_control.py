@@ -34,7 +34,8 @@ class OutputAudioControl:
             media.init_thread()
         except Exception as e:
             self.logger.warning(f"Output audio control unavailable: {e}")
-            self._worker_alive = False
+            with self._state_lock:
+                self._worker_alive = False
             return
         while True:
             task = self._tasks.get()
@@ -44,7 +45,8 @@ class OutputAudioControl:
                 self.logger.warning(f"Output audio control failed: {e}")
 
     def engage(self):
-        if not (self.mute_output_enabled or self.pause_media_enabled):
+        mute_output, pause_media = self.mute_output_enabled, self.pause_media_enabled
+        if not (mute_output or pause_media):
             return
         self._ensure_worker()
         with self._state_lock:
@@ -52,7 +54,7 @@ class OutputAudioControl:
                 return
             self._engaged = True
             self._needs_release = True
-            self._tasks.put(self._engage)
+            self._tasks.put(lambda: self._engage(mute_output, pause_media))
 
     def release(self):
         with self._state_lock:
@@ -74,21 +76,24 @@ class OutputAudioControl:
         except Exception as e:
             self.logger.warning(f"Output audio control failed: {e}")
 
-    def _engage(self):
+    def _engage(self, mute_output: bool, pause_media: bool):
         if not self._engaged:
             return
-        self._run_step(self._pause_media)
+        if pause_media:
+            self._run_step(self._pause_media)
+        if not mute_output:
+            return
         threading.Event().wait(self.MUTE_DELAY_SECONDS)
         if not self._engaged:
             return
         self._run_step(self._mute_output)
 
     def _pause_media(self):
-        if self.pause_media_enabled and not self._paused_media:
+        if not self._paused_media:
             self._paused_media = media.pause_playing_media()
 
     def _mute_output(self):
-        if self.mute_output_enabled and not self._muted_by_us and not media.is_output_muted():
+        if not self._muted_by_us and not media.is_output_muted():
             media.set_output_muted(True)
             self._muted_by_us = True
 
@@ -107,7 +112,7 @@ class OutputAudioControl:
             media.resume_media(self._paused_media)
             self._paused_media = []
 
-    def release_blocking(self, timeout=3.0):
+    def release_blocking(self, timeout=15.0):
         if not self._worker_alive:
             return
         self.release()

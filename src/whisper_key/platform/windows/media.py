@@ -27,16 +27,22 @@ async def _pause_playing_sessions() -> list:
     manager = await SessionManager.request_async()
     paused_sessions = []
     for session in manager.get_sessions():
-        if session.get_playback_info().playback_status != PlaybackStatus.PLAYING:
+        try:
+            if session.get_playback_info().playback_status != PlaybackStatus.PLAYING:
+                continue
+            if await session.try_pause_async():
+                paused_sessions.append(session)
+        except OSError:
             continue
-        if await session.try_pause_async():
-            paused_sessions.append(session)
     return paused_sessions
 
 
 async def _resume_sessions(paused_sessions: list):
     for session in paused_sessions:
-        await session.try_play_async()
+        try:
+            await session.try_play_async()
+        except OSError:
+            continue
 
 
 def pause_playing_media() -> list:
