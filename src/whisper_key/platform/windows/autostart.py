@@ -4,6 +4,9 @@ import winreg
 from pathlib import Path
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+STARTUP_APPROVED_KEY = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
+STARTUP_APPROVED_DISABLED_FLAG = 0x01
+STARTUP_SETTINGS_URI = "ms-settings:startupapps"
 VALUE_NAME = "WhisperKey"
 CONSOLE_SUFFIX = "-console"
 
@@ -39,8 +42,21 @@ def _read_command():
         return None
 
 
+def is_blocked_by_system() -> bool:
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, STARTUP_APPROVED_KEY) as key:
+            approval, _ = winreg.QueryValueEx(key, VALUE_NAME)
+    except FileNotFoundError:
+        return False
+    return isinstance(approval, bytes) and len(approval) > 0 and bool(approval[0] & STARTUP_APPROVED_DISABLED_FLAG)
+
+
+def open_system_settings():
+    os.startfile(STARTUP_SETTINGS_URI)
+
+
 def is_enabled() -> bool:
-    return _read_command() is not None
+    return _read_command() is not None and not is_blocked_by_system()
 
 
 def enable():

@@ -541,7 +541,11 @@ class SystemTray:
         try:
             if enabled:
                 autostart.enable()
-                self.logger.info("Autostart enabled")
+                if autostart.is_blocked_by_system():
+                    self.logger.info("Autostart is turned off in Windows Startup apps, opening its settings")
+                    autostart.open_system_settings()
+                else:
+                    self.logger.info("Autostart enabled")
             else:
                 autostart.disable()
                 self.logger.info("Autostart disabled")
