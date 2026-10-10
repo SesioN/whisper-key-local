@@ -4,6 +4,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Fixed
+- **Smooth orb resizing** - resizing the Nebula orb with the scroll wheel or the tray slider no longer stutters; each size step used to rebuild its textures on the orb's thread (about 0.3 s), now they are built in the background and the cache is capped at three sizes
+
 ## [1.7.1] - 2026-10-10
 
 ### Fixed

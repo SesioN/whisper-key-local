@@ -261,6 +261,7 @@ class VoiceOrb:
         self._stop_event = threading.Event()
         self._rebuild_requested = False
         self._click_thread = None
+        self._prepare_thread = None
 
         self._hwnd = None
         self._hinstance = None
@@ -468,6 +469,24 @@ class VoiceOrb:
         skin = get_skin(self.skin)
         self._renderer = skin(canvas, self._orb_radius())
         self._badges = BadgeRenderer(canvas, self._orb_radius() / skin.VISUAL_SCALE, self._dpi)
+        self._redraw_now = True
+        self._prepare_skin_in_background(skin)
+
+    def _prepare_skin_in_background(self, skin):
+        orb_radius = self._orb_radius()
+        if skin.is_prepared(orb_radius) or (self._prepare_thread and self._prepare_thread.is_alive()):
+            return
+        self._prepare_thread = threading.Thread(target=self._prepare_skin, args=(skin, orb_radius),
+                                                daemon=True, name="VoiceOrbPrepare")
+        self._prepare_thread.start()
+
+    def _prepare_skin(self, skin, orb_radius: float):
+        try:
+            skin.prepare(orb_radius)
+        except Exception:
+            self.logger.exception("Preparing the orb skin failed")
+            return
+        self._rebuild_requested = True
 
     def _release_surface(self):
         surface, self._surface = self._surface, None
