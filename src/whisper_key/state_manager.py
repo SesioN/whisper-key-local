@@ -461,7 +461,7 @@ class StateManager:
             self._show_outcome("success" if success else "error")
 
         except Exception as e:
-            self.logger.error(f"Error in processing workflow: {e}")
+            self.logger.exception(f"Error in processing workflow: {e}")
             print(f"❌ Error processing recording: {e}")
             self._show_outcome("error")
         
@@ -1295,7 +1295,6 @@ class StateManager:
             print(f"🎤 Switching to: {device_name}")
 
             channels = self.audio_recorder.channels
-            dtype = self.audio_recorder.dtype
             max_duration = self.audio_recorder.max_duration
             on_max_duration = self.audio_recorder.on_max_duration_reached
             vad_manager = self.audio_recorder.vad_manager
@@ -1307,7 +1306,6 @@ class StateManager:
             new_recorder = AudioRecorder(
                 on_vad_event=self.handle_vad_event,
                 channels=channels,
-                dtype=dtype,
                 max_duration=max_duration,
                 on_max_duration_reached=on_max_duration,
                 vad_manager=vad_manager,

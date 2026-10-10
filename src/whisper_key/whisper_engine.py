@@ -1,3 +1,4 @@
+import gc
 import logging
 import time
 import threading
@@ -71,13 +72,8 @@ class WhisperEngine:
             if not was_cached:
                 print("Downloading model, this may take a few minutes....")
 
-            model_source = self._get_model_source(self.model_key)
-            model = WhisperModel(
-                model_source,
-                device=self.device,
-                compute_type=self.compute_type
-            )
-            self._warm_up_model(model)
+            model = self._create_model(self.model_key)
+            self._warm_up_model(model, self.model_key)
             self.model = model
 
             if not was_cached:
@@ -91,8 +87,16 @@ class WhisperEngine:
             self.logger.error(f"Failed to load Whisper model: {e}")
             raise
     
+    def _create_model(self, model_key: str) -> WhisperModel:
+        return WhisperModel(
+            self._get_model_source(model_key),
+            device=self.device,
+            compute_type=self.compute_type
+        )
+
     def unload(self):
         self.model = None
+        self._warmed_model = None
 
     def close(self):
         pass
@@ -101,16 +105,16 @@ class WhisperEngine:
         self._load_model()
 
     def warm_up(self):
-        if self._warmed_model is not self.model:
-            self._warm_up_model(self.model)
+        if self.model is not None and self._warmed_model is not self.model:
+            self._warm_up_model(self.model, self.model_key)
 
-    def _warm_up_model(self, model):
-        segments, _ = model.transcribe(np.zeros(16000, dtype=np.float32), beam_size=1, language=self._warm_up_language())
+    def _warm_up_model(self, model, model_key: str):
+        segments, _ = model.transcribe(np.zeros(16000, dtype=np.float32), beam_size=1, language=self._warm_up_language(model_key))
         list(segments)
         self._warmed_model = model
 
-    def _warm_up_language(self) -> str:
-        if self._is_english_only(self.model_key):
+    def _warm_up_language(self, model_key: str) -> str:
+        if self._is_english_only(model_key):
             return "en"
         return self.language or "en"
 
@@ -138,16 +142,15 @@ class WhisperEngine:
 
                 self.logger.info(f"Loading Whisper model: {new_model_key} (async)")
 
-                model_source = self._get_model_source(new_model_key)
-                new_model = WhisperModel(
-                    model_source,
-                    device=self.device,
-                    compute_type=self.compute_type
-                )
+                if self.device != "cpu":
+                    self.unload()
+                    gc.collect()
+
+                new_model = self._create_model(new_model_key)
                 if progress_callback:
                     progress_callback("Warming up model...")
+                self._warm_up_model(new_model, new_model_key)
                 self.model_key = new_model_key
-                self._warm_up_model(new_model)
                 self.model = new_model
                 self.logger.info(f"Whisper model [{new_model_key}] loaded successfully (async)")
 
@@ -155,8 +158,9 @@ class WhisperEngine:
                     progress_callback("Model ready!")
 
             except Exception as e:
-                self.model_key = old_model_key
                 self.logger.error(f"Failed to load Whisper model async: {e}")
+                if self.model is None:
+                    self._restore_model(old_model_key)
                 if progress_callback:
                     progress_callback(f"Failed to load model: {e}")
             finally:
@@ -171,6 +175,17 @@ class WhisperEngine:
         self._loading_thread = threading.Thread(target=_background_loader, daemon=True)
         self._loading_thread.start()
     
+    def _restore_model(self, model_key: str):
+        try:
+            gc.collect()
+            model = self._create_model(model_key)
+            self._warm_up_model(model, model_key)
+            self.model_key = model_key
+            self.model = model
+            self.logger.info(f"Restored Whisper model [{model_key}]")
+        except Exception as restore_error:
+            self.logger.error(f"Failed to restore Whisper model [{model_key}]: {restore_error}")
+
     def is_loading(self) -> bool:
         return self._loading_thread is not None and self._loading_thread.is_alive()
     
@@ -179,66 +194,42 @@ class WhisperEngine:
                          audio_data: np.ndarray) -> Optional[str]:
         if self.model is None:
             return None
-        
+
         if audio_data is None or len(audio_data) == 0:
             self.logger.warning("No audio data to transcribe")
             return None
-        
-        try:
-            speech_detected = True
-            if self.vad_manager and self.vad_manager.is_available():
-                speech_detected = self.vad_manager.check_audio_for_speech(audio_data)
-            
-            if not speech_detected:
+
+        if self.vad_manager and self.vad_manager.is_available():
+            if not self.vad_manager.check_audio_for_speech(audio_data):
                 print("   ✗ No speech detected, skipping transcription")
                 return None
-                       
-            start_time = time.time() # Time transcription for user feedback
-            
-            # Prep audio for faster-whisper
-            if len(audio_data.shape) > 1:
-                audio_data = audio_data.flatten()
-            
-            audio_data = audio_data.astype(np.float32)
-            
-            transcribe_kwargs = dict(
-                beam_size=self.beam_size,
-                language="en" if self._is_english_only(self.model_key) else self.language,
-                condition_on_previous_text=False,
-            )
-            if self._model_supports_prompt():
-                if self.initial_prompt:
-                    transcribe_kwargs["initial_prompt"] = self.initial_prompt
-                if self.hotwords:
-                    transcribe_kwargs["hotwords"] = self.hotwords
 
-            segments, info = self.model.transcribe(audio_data, **transcribe_kwargs)
-            
-            transcribed_text = ""
-            for segment in segments:
-                transcribed_text += segment.text
-            
-            transcribed_text = transcribed_text.strip()
+        start_time = time.time()
+        audio_data = np.ascontiguousarray(audio_data.reshape(-1), dtype=np.float32)
 
-            end_time = time.time()
-            transcription_time = end_time - start_time
-            print(f"   ✓ Transcription completed in {transcription_time:.1f} seconds")
+        transcribe_kwargs = dict(
+            beam_size=self.beam_size,
+            language="en" if self._is_english_only(self.model_key) else self.language,
+            condition_on_previous_text=False,
+        )
+        if self._model_supports_prompt():
+            if self.initial_prompt:
+                transcribe_kwargs["initial_prompt"] = self.initial_prompt
+            if self.hotwords:
+                transcribe_kwargs["hotwords"] = self.hotwords
 
-            detected_language = info.language
-            confidence = info.language_probability
-            self.logger.info(f"Transcription complete. Language: {detected_language} (confidence: {confidence:.2f}) - Time: {transcription_time:.2f}s")
+        segments, info = self.model.transcribe(audio_data, **transcribe_kwargs)
+        transcribed_text = "".join(segment.text for segment in segments).strip()
 
-            if transcribed_text:
-                return transcribed_text
-            else:
-                self.logger.info("Transcription was empty")
-                return None
-                
-        except Exception as e:
-            self.logger.error(f"Transcription failed: {e}")
-            return None
-    
-    
+        transcription_time = time.time() - start_time
+        print(f"   ✓ Transcription completed in {transcription_time:.1f} seconds")
+        self.logger.info(f"Transcription complete. Language: {info.language} (confidence: {info.language_probability:.2f}) - Time: {transcription_time:.2f}s")
+
+        if transcribed_text:
+            return transcribed_text
+        self.logger.info("Transcription was empty")
+        return None
+
     def change_model(self,
                      new_model_key: str,
                      progress_callback: Optional[Callable[[str], None]] = None):

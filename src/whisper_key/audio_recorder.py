@@ -10,6 +10,13 @@ import soxr
 
 from .voice_activity_detection import VadEvent, VAD_CHUNK_SIZE
 
+
+def to_mono_block(input_block: np.ndarray) -> np.ndarray:
+    if input_block.ndim > 1 and input_block.shape[1] > 1:
+        return input_block.mean(axis=1, keepdims=True, dtype=np.float32)
+    return input_block.copy()
+
+
 class AudioRecorder:
     WHISPER_SAMPLE_RATE = 16000
     THREAD_JOIN_TIMEOUT = 2.0
@@ -20,7 +27,6 @@ class AudioRecorder:
     def __init__(self,
                  on_vad_event: Callable[[VadEvent], None],
                  channels: int = 1,
-                 dtype: str = "float32",
                  max_duration: int = 30,
                  on_max_duration_reached: callable = None,
                  vad_manager = None,
@@ -33,7 +39,6 @@ class AudioRecorder:
 
         self.sample_rate = self.WHISPER_SAMPLE_RATE
         self.channels = channels
-        self.dtype = dtype
         self.max_duration = max_duration
         self.on_max_duration_reached = on_max_duration_reached
         self.on_monitoring_failed = on_monitoring_failed
@@ -353,15 +358,16 @@ class AudioRecorder:
             else:
                 vad_blocksize = VAD_CHUNK_SIZE
 
-            def audio_callback(audio_data, frames, _time, status):
+            def audio_callback(input_block, frames, _time, status):
                 if self.recording_thread is not stream_thread:
                     return
 
+                audio_data = to_mono_block(input_block)
                 with self._pre_roll_lock:
                     if self.is_recording:
-                        self.audio_data.append(audio_data.copy())
+                        self.audio_data.append(audio_data)
                     elif (self.is_monitoring or self.is_buffering) and self.pre_roll_seconds > 0:
-                        self._append_pre_roll(audio_data.copy())
+                        self._append_pre_roll(audio_data)
 
                 if self.is_recording or self.is_monitoring:
                     if self.continuous_vad and frames == vad_blocksize:

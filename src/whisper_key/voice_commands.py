@@ -29,14 +29,18 @@ def _create_round_trip_yaml() -> YAML:
 
 
 def normalize_spoken_text(text: str) -> str:
-    return re.sub(r'[^\w\s]', '', text.lower()).strip()
+    return " ".join(re.sub(r'[^\w\s]', '', text.lower()).split())
+
+
+def _contains_phrase(normalized_text: str, normalized_phrase: str) -> bool:
+    return re.search(rf'(?<!\w){re.escape(normalized_phrase)}(?!\w)', normalized_text) is not None
 
 
 def find_matching_commands(commands: list, text: str) -> list:
     normalized = normalize_spoken_text(text)
-    ordered_commands = sorted(commands, key=lambda command: len(str(command.get('trigger', ''))), reverse=True)
-    return [command for command in ordered_commands
-            if command.get('trigger') and str(command['trigger']).lower() in normalized]
+    triggers = [(command, normalize_spoken_text(str(command.get('trigger') or ''))) for command in commands]
+    ordered = sorted(triggers, key=lambda pair: len(pair[1]), reverse=True)
+    return [command for command, trigger in ordered if trigger and _contains_phrase(normalized, trigger)]
 
 
 def command_to_entry(command, source_index=None) -> dict:
@@ -68,7 +72,9 @@ def find_entry_problems(entries: list) -> list:
             unsendable_keys = [key.strip() for key in entry['value'].split('+') if key.strip() and not keyboard.can_send_key(key.strip())]
             if unsendable_keys:
                 problems.append(f"{label}: key {', '.join(unsendable_keys)} cannot be sent")
-        normalized_trigger = trigger.lower()
+        normalized_trigger = normalize_spoken_text(trigger)
+        if trigger and not normalized_trigger:
+            problems.append(f"{label}: trigger has no words to match")
         if normalized_trigger in used_triggers:
             problems.append(f"{label}: trigger is used twice")
         if normalized_trigger:

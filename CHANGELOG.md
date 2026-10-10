@@ -4,6 +4,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Fixed
+- **Stereo microphones transcribed garbage** - with `audio.channels: 2` the two channels were interleaved into one stream at double length; they are now mixed down to mono when captured
+- **Voice commands fired inside other words** - a trigger like "go" ran on "I'm going home", which with `voice_commands.match_in_dictation` replaced the dictation; triggers now match whole words only, and punctuation in triggers ("what's up") is normalized like the spoken text
+- **Corrections with symbols never matched** - `post_processing.corrections` entries such as "C++", "C#" or ".NET" are now replaced
+- **GPU out of memory when switching models** - faster-whisper on CUDA/ROCm kept the old model loaded while the new one loaded; it is now released first and restored if the new model fails
+- **CUDA errors did not fall back to the previous runtime** - faster-whisper transcription errors were swallowed, so the automatic runtime fallback never ran
+- **Clipboard images wiped after auto-paste** - when the clipboard held an image or files, restoring it after the paste overwrote it with empty text
+
+### Removed
+- `audio.dtype` setting, which had no effect (audio is always captured as float32)
+
 ## [1.8.0] - 2026-10-10
 
 ### Added

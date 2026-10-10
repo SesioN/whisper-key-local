@@ -124,7 +124,7 @@ class ClipboardManager:
 
             print(f"   ✓ Auto-pasted via key simulation")
 
-            if original_content is not None:
+            if original_content:
                 time.sleep(self.paste_clipboard_restore_delay)
                 pyperclip.copy(original_content)
 

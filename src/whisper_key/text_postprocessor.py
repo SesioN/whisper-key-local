@@ -29,7 +29,7 @@ class TextPostProcessor:
 
         variants_longest_first = sorted(self.replacements, key=len, reverse=True)
         pattern = "|".join(re.escape(variant) for variant in variants_longest_first)
-        self.corrections_regex = re.compile(rf"\b(?:{pattern})\b", re.IGNORECASE)
+        self.corrections_regex = re.compile(rf"(?<!\w)(?:{pattern})(?!\w)", re.IGNORECASE)
         self.logger.info(f"Loaded {len(self.replacements)} text corrections")
 
     def _lookup_replacement(self, match: re.Match) -> str:

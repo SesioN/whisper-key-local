@@ -156,8 +156,7 @@ Delete this file and restart app to reset to defaults.
 | `vad.auto_trigger_paste` | `true` | false = voice-activated recordings are only copied to the clipboard |
 | **Audio** |||
 | `audio.host` | `null` | Audio API (WASAPI, Core Audio, etc.) |
-| `audio.channels` | `1` | 1 = mono, 2 = stereo |
-| `audio.dtype` | `float32` | float32/int16/int24/int32 |
+| `audio.channels` | `1` | Channels captured from the microphone (1 or 2); always mixed down to mono for transcription |
 | `audio.max_duration` | `900` | Max recording seconds (0 = unlimited) |
 | `audio.pre_roll_seconds` | `1.0` | Seconds of audio from before the recording starts (hotkey, voice command and voice-activated), so the first word is not cut off. Keeps the microphone open while the app runs, paused while muted. Range 0-10, `0` turns it off |
 | `audio.input_device` | `default` | Device ID or "default" |

@@ -18,3 +18,10 @@ def test_corrections_do_not_touch_partial_words():
 
 def test_strip_trailing_period():
     assert TextPostProcessor(strip_trailing_period=True).process('Hello world.') == 'Hello world'
+
+
+def test_variants_with_symbols_at_word_edges_match():
+    processor = TextPostProcessor(corrections={'C++': ['c plus plus'], '.NET': ['dot net'], 'C#': ['c sharp']})
+    assert processor.process('I write c plus plus, dot net and C Sharp.') == 'I write C++, .NET and C#.'
+    processor = TextPostProcessor(corrections={'Node.js': ['node.js']})
+    assert processor.process('node.js!') == 'Node.js!'

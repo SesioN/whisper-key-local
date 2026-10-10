@@ -273,15 +273,10 @@ audio: # Audio Recording Settings
     # e.g., "WASAPI", "MME", "DirectSound", "Core Audio"
     host: null
 
-    # Audio channels
+    # Audio channels captured from the microphone, always mixed down to mono for transcription
     # 1 = mono (recommended for speech)
-    # 2 = stereo
+    # 2 = both channels of a stereo microphone
     channels: 1
-
-    # Recording format
-    # Options: "float32", "int16", "int24", "int32"
-    # float32 recommended for best quality
-    dtype: float32
 
     # Maximum recording duration (seconds)
     # Set to 0 for unlimited recording
