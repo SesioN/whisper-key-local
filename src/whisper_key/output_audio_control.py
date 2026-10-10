@@ -6,7 +6,7 @@ from .platform import media
 
 
 class OutputAudioControl:
-    ENGAGE_DELAY_SECONDS = 0.4  # Lets the start sound finish before output is muted
+    MUTE_DELAY_SECONDS = 0.4
 
     def __init__(self, mute_output_enabled=False, pause_media_enabled=False):
         self.mute_output_enabled = mute_output_enabled
@@ -54,10 +54,12 @@ class OutputAudioControl:
             self.logger.warning(f"Output audio control failed: {e}")
 
     def _engage(self):
-        threading.Event().wait(self.ENGAGE_DELAY_SECONDS)
         if not self._engaged:
             return
         self._run_step(self._pause_media)
+        threading.Event().wait(self.MUTE_DELAY_SECONDS)
+        if not self._engaged:
+            return
         self._run_step(self._mute_output)
 
     def _pause_media(self):

@@ -3,7 +3,7 @@ import asyncio
 
 def init_thread():
     import comtypes
-    comtypes.CoInitialize()
+    comtypes.CoInitializeEx(comtypes.COINIT_MULTITHREADED)
 
 
 def _endpoint_volume():
