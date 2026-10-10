@@ -16,7 +16,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Separate pre-check sensitivity** - the speech pre-check uses its own, more permissive thresholds (`vad.vad_precheck_onset_threshold` 0.5 / `vad.vad_precheck_offset_threshold` 0.35, the TEN VAD default) so quiet speech is no longer skipped as silence; the real-time thresholds for silence timeout and voice-activated recording are unchanged
 - **Long silences are no longer transcribed** - trailing silence measured by the real-time VAD is cut down to 1 s before transcription (e.g. the 30 s before a silence-timeout stop), which saves time and avoids hallucinated phrases such as "Thank you."
 
+- **Less work in the microphone callback** - voice detection, the live streaming preview and its console output run on a separate analysis thread, so a busy moment no longer delays the audio driver and drops samples; input overflows (lost audio) are now reported as warnings in the log
+- **Cleaner audio for voice detection** - audio for the real-time VAD is resampled as a continuous stream instead of block by block
+
 ### Fixed
+- **Voice detection broken on 22.05 kHz and 11.025 kHz microphones** - on WASAPI devices with these rates the real-time VAD received 255-sample frames, failed on every frame and flooded the log; frames are now always exactly 256 samples, and the real-time VAD turns itself off with one clear message after repeated errors
+- **Streaming preview could crash when a recording started** - the preview recognizer was reset from the hotkey thread while the audio thread decoded with it; resets now happen in order on the analysis thread
 - **Clipboard images and files lost after auto-paste** - with `clipboard.paste_preserve_clipboard` all clipboard formats (images, copied files, rich text) are restored, not only plain text
 - **Speech pre-check ran while disabled** - `vad.vad_precheck_enabled: false` was ignored whenever real-time VAD was on
 - **Stereo microphones transcribed garbage** - with `audio.channels: 2` the two channels were interleaved into one stream at double length; they are now mixed down to mono when captured

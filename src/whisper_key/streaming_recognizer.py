@@ -14,11 +14,9 @@ SHERPA_SAMPLE_RATE = 16000
 
 
 class StreamingRecognizer:
-    def __init__(self, model_type: str = "standard", recording_rate: int = 16000,
-                 model_registry: "ModelRegistry" = None):
+    def __init__(self, model_type: str = "standard", model_registry: "ModelRegistry" = None):
         self.logger = logging.getLogger(__name__)
         self.model_type = model_type
-        self.recording_rate = recording_rate
         self.model_registry = model_registry
         self.recognizer = None
         self.stream = None
@@ -116,11 +114,7 @@ class StreamingRecognizer:
         if not self.is_loaded():
             return
 
-        samples = audio_chunk.flatten().astype(np.float32)
-
-        if self.recording_rate != SHERPA_SAMPLE_RATE:
-            samples = soxr.resample(samples, self.recording_rate, SHERPA_SAMPLE_RATE).astype(np.float32)
-
+        samples = np.ascontiguousarray(audio_chunk.reshape(-1), dtype=np.float32)
         self.stream.accept_waveform(SHERPA_SAMPLE_RATE, samples)
 
         while self.recognizer.is_ready(self.stream):
@@ -140,6 +134,3 @@ class StreamingRecognizer:
         if not self.is_loaded():
             return
         self.recognizer.reset(self.stream)
-
-    def set_recording_rate(self, rate: int) -> None:
-        self.recording_rate = rate

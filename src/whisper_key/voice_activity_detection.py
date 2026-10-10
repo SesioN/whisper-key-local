@@ -169,6 +169,8 @@ class Hysteresis:
         return False
 
 class ContinuousVoiceDetector:
+    MAX_CONSECUTIVE_ERRORS = 50
+
     def __init__(self, ten_vad, vad_onset_threshold, vad_offset_threshold,
                  vad_silence_timeout_seconds, frame_duration_sec,
                  min_speech_duration_seconds, speech_end_silence_seconds,
@@ -193,6 +195,7 @@ class ContinuousVoiceDetector:
         self.event_callback = event_callback
         self.probability_callback = probability_callback
         self.logger = logging.getLogger(__name__)
+        self._consecutive_errors = 0
 
     def _dispatch_event(self, event: VadEvent):
         if self.event_callback:
@@ -212,9 +215,10 @@ class ContinuousVoiceDetector:
             speech_detected = self.hysteresis.detect_speech(probability)
             self.probability_buffer.append(probability)
             event = self._update_state(speech_detected)
+            self._consecutive_errors = 0
 
         except Exception as e:
-            self.logger.error(f"Error processing VAD chunk: {e}")
+            self._handle_processing_error(e)
             return VadEvent.NO_EVENT
 
         if self.probability_callback:
@@ -223,6 +227,15 @@ class ContinuousVoiceDetector:
             except Exception as e:
                 self.logger.error(f"VAD probability callback failed: {e}")
         return event
+
+    def _handle_processing_error(self, error: Exception):
+        self._consecutive_errors += 1
+        if self._consecutive_errors == 1:
+            self.logger.error(f"Error processing VAD chunk: {error}")
+        if self._consecutive_errors >= self.MAX_CONSECUTIVE_ERRORS:
+            self.ten_vad = None
+            self.logger.error(f"Real-time VAD turned off after {self._consecutive_errors} failed chunks in a row: {error}")
+            print("❌ Real-time voice detection stopped working (see log); silence timeout and voice activation are off until restart")
 
     def _update_state(self, speech_detected: bool) -> VadEvent:
         with self._lock:

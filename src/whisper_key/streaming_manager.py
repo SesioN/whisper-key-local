@@ -47,9 +47,6 @@ class ContinuousStreamingRecognizer:
             self.last_text = ""
             self.recognizer.reset()
 
-    def set_recording_rate(self, rate: int) -> None:
-        self.recognizer.set_recording_rate(rate)
-
 
 class StreamingManager:
     def __init__(self,

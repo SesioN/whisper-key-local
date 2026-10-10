@@ -9,6 +9,7 @@ import numpy as np
 import sounddevice as sd
 import soxr
 
+from .audio_analysis import AudioAnalysisWorker
 from .voice_activity_detection import VadEvent, VAD_CHUNK_SIZE
 
 
@@ -72,6 +73,7 @@ class AudioRecorder:
         self._pre_roll_lock = threading.Lock()
         self._lifecycle_lock = threading.Lock()
         self.recording_thread = None
+        self._analysis_worker = None
         self.recording_start_time = None
         self.logger = logging.getLogger(__name__)
 
@@ -112,12 +114,9 @@ class AudioRecorder:
 
     def _setup_continuous_streaming(self):
         if self.streaming_manager and self.streaming_manager.is_available():
-            continuous_streaming = self.streaming_manager.create_continuous_recognizer(
+            return self.streaming_manager.create_continuous_recognizer(
                 result_callback=self._handle_streaming_result
             )
-            recording_rate = self._get_recording_sample_rate()
-            continuous_streaming.set_recording_rate(recording_rate)
-            return continuous_streaming
         else:
             return None
 
@@ -229,7 +228,7 @@ class AudioRecorder:
             self.logger.info("Starting audio monitoring...")
             stream_is_running = self._stream_is_running()
             if not self.is_recording:
-                self.continuous_vad.reset()
+                self._reset_realtime_analysis(stream_is_running, reset_vad=True, reset_streaming=False)
             self.is_monitoring = True
             if not stream_is_running:
                 self._start_stream_thread()
@@ -281,6 +280,22 @@ class AudioRecorder:
         if stream_no_longer_needed:
             self._wait_for_thread_finish(stream_thread)
 
+    def _reset_realtime_analysis(self, stream_is_running: bool, reset_vad: bool, reset_streaming: bool):
+        worker = self._analysis_worker
+        if stream_is_running and worker and worker.is_running():
+            worker.request_reset(reset_vad, reset_streaming)
+        else:
+            self._reset_analysis_consumers(reset_vad, reset_streaming)
+
+    def _reset_analysis_consumers(self, reset_vad: bool, reset_streaming: bool):
+        if reset_vad and self.continuous_vad:
+            self.continuous_vad.reset()
+        if reset_streaming and self.continuous_streaming:
+            self.continuous_streaming.reset()
+
+    def _process_streaming_audio(self, audio_16k: np.ndarray):
+        self.continuous_streaming.process_chunk(audio_16k)
+
     def _stream_is_wanted(self) -> bool:
         return self.is_recording or self.is_monitoring or self.is_buffering
 
@@ -301,11 +316,7 @@ class AudioRecorder:
                 self.logger.info("Starting audio recording...")
                 stream_is_running = self._stream_is_running()
 
-                if self.continuous_vad and not voice_activated:
-                    self.continuous_vad.reset()
-
-                if self.continuous_streaming:
-                    self.continuous_streaming.reset()
+                self._reset_realtime_analysis(stream_is_running, reset_vad=not voice_activated, reset_streaming=True)
 
                 with self._pre_roll_lock:
                     self.audio_data = list(self.pre_roll_chunks)
@@ -368,17 +379,29 @@ class AudioRecorder:
         if stream_no_longer_needed:
             self._wait_for_thread_finish(stream_thread)
     
+    def _create_analysis_worker(self, recording_rate: int, block_samples: int) -> Optional[AudioAnalysisWorker]:
+        if not (self.continuous_vad or self.continuous_streaming):
+            return None
+        return AudioAnalysisWorker(
+            input_rate=recording_rate,
+            block_samples=block_samples,
+            process_vad_frame=self.continuous_vad.process_chunk if self.continuous_vad else None,
+            process_streaming_audio=self._process_streaming_audio if self.continuous_streaming else None,
+            reset_consumers=self._reset_analysis_consumers,
+        )
+
     def _record_audio(self):
         stream_thread = threading.current_thread()
+        analysis_worker = None
 
         try:
             recording_rate = self._get_recording_sample_rate()
             needs_resampling = self._needs_resampling()
-
-            if needs_resampling:
-                vad_blocksize = int(VAD_CHUNK_SIZE * recording_rate / self.WHISPER_SAMPLE_RATE)
-            else:
-                vad_blocksize = VAD_CHUNK_SIZE
+            blocksize = int(VAD_CHUNK_SIZE * recording_rate / self.WHISPER_SAMPLE_RATE)
+            analysis_worker = self._create_analysis_worker(recording_rate, blocksize)
+            if analysis_worker:
+                analysis_worker.start()
+            self._analysis_worker = analysis_worker
 
             def audio_callback(input_block, frames, _time, status):
                 if self.recording_thread is not stream_thread:
@@ -386,29 +409,23 @@ class AudioRecorder:
 
                 audio_data = to_mono_block(input_block)
                 with self._pre_roll_lock:
-                    if self.is_recording:
+                    is_recording = self.is_recording
+                    if is_recording:
                         self.audio_data.append(audio_data)
                     elif (self.is_monitoring or self.is_buffering) and self.pre_roll_seconds > 0:
                         self._append_pre_roll(audio_data)
+                    analyze = is_recording or self.is_monitoring
 
-                if self.is_recording or self.is_monitoring:
-                    if self.continuous_vad and frames == vad_blocksize:
-                        if needs_resampling:
-                            chunk_16k = self._resample_audio(audio_data, recording_rate, self.WHISPER_SAMPLE_RATE)
-                            self.continuous_vad.process_chunk(chunk_16k.reshape(-1, 1))
-                        else:
-                            self.continuous_vad.process_chunk(audio_data)
+                if analysis_worker and analyze:
+                    analysis_worker.submit(audio_data, feed_streaming=is_recording)
 
-                    if self.is_recording and self.continuous_streaming:
-                        self.continuous_streaming.process_chunk(audio_data)
-
-                if self.is_recording and self.on_audio_level is not None:
+                if is_recording and self.on_audio_level is not None:
                     self._report_audio_level(audio_data)
 
                 if status:
+                    if analysis_worker and status.input_overflow:
+                        analysis_worker.record_overflow()
                     self.logger.debug(f"Audio callback status: {status}")
-
-            blocksize = vad_blocksize if self.continuous_vad else None
 
             # WASAPI requires delay before reopening stream (OS-level async cleanup)
             if needs_resampling:
@@ -418,7 +435,7 @@ class AudioRecorder:
                                 channels=self.channels,
                                 callback=audio_callback,
                                 dtype=self.STREAM_DTYPE,
-                                blocksize=blocksize,
+                                blocksize=blocksize if analysis_worker else None,
                                 device=self.device) as stream:
 
                 # NOTE: WASAPI breaks if the calling thread is blocked or if audio
@@ -449,6 +466,9 @@ class AudioRecorder:
                 print("⚠️ Pre-roll buffering stopped (microphone stream failed). Mute and unmute or switch the microphone to restart it.")
             if monitoring_failed and self.on_monitoring_failed:
                 self.on_monitoring_failed(e)
+        finally:
+            if analysis_worker:
+                analysis_worker.stop()
     
     def _check_max_duration_exceeded(self) -> bool:
         recording_start_time = self.recording_start_time

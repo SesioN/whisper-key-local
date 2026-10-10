@@ -135,3 +135,20 @@ def test_recording_analysis_reports_no_trailing_silence_without_speech():
     for _ in range(8):
         detector.process_chunk(frame())
     assert detector.get_recording_analysis() == (False, 0.0)
+
+
+class FailingVad:
+    def process(self, chunk):
+        raise AssertionError("[TEN VAD]: audio data shape should be [256]")
+
+
+def test_detector_logs_once_and_turns_off_after_repeated_errors(caplog):
+    detector, events = make_detector([])
+    detector.ten_vad = FailingVad()
+    import logging
+    with caplog.at_level(logging.ERROR):
+        for _ in range(ContinuousVoiceDetector.MAX_CONSECUTIVE_ERRORS + 10):
+            assert detector.process_chunk(frame()) == VadEvent.NO_EVENT
+    assert caplog.text.count("Error processing VAD chunk") == 1
+    assert "turned off" in caplog.text
+    assert detector.ten_vad is None
