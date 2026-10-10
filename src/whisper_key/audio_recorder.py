@@ -8,7 +8,7 @@ import numpy as np
 import sounddevice as sd
 import soxr
 
-from .voice_activity_detection import VadEvent, VAD_CHUNK_SIZE, VAD_HOP_DURATION_SEC
+from .voice_activity_detection import VadEvent, VAD_CHUNK_SIZE
 
 class AudioRecorder:
     WHISPER_SAMPLE_RATE = 16000
@@ -16,7 +16,6 @@ class AudioRecorder:
     RECORDING_SLEEP_INTERVAL = 100
     STREAM_DTYPE = np.float32
     WASAPI_REOPEN_DELAY = 0.05
-    PRE_ROLL_SECONDS = 1.0
        
     def __init__(self,
                  on_vad_event: Callable[[VadEvent], None],
@@ -29,7 +28,8 @@ class AudioRecorder:
                  on_streaming_result: Callable[[str, bool], None] = None,
                  on_vad_probability: Callable[[float], None] = None,
                  device = None,
-                 on_monitoring_failed: Callable[[Exception], None] = None):
+                 on_monitoring_failed: Callable[[Exception], None] = None,
+                 pre_roll_seconds: float = 1.0):
 
         self.sample_rate = self.WHISPER_SAMPLE_RATE
         self.channels = channels
@@ -39,8 +39,11 @@ class AudioRecorder:
         self.on_monitoring_failed = on_monitoring_failed
         self.is_recording = False
         self.is_monitoring = False
+        self.is_buffering = False
+        self.pre_roll_seconds = max(0.0, float(pre_roll_seconds))
         self.audio_data = []
-        self.pre_roll_chunks = deque(maxlen=int(self.PRE_ROLL_SECONDS / VAD_HOP_DURATION_SEC) + 1)
+        self.pre_roll_chunks = deque()
+        self._pre_roll_sample_count = 0
         self._pre_roll_lock = threading.Lock()
         self._lifecycle_lock = threading.Lock()
         self.recording_thread = None
@@ -154,6 +157,21 @@ class AudioRecorder:
             if thread.is_alive():
                 self.logger.warning("Recording thread did not exit within timeout")
 
+    def _append_pre_roll(self, audio_chunk: np.ndarray):
+        self.pre_roll_chunks.append(audio_chunk)
+        self._pre_roll_sample_count += len(audio_chunk)
+        pre_roll_sample_limit = int(self.pre_roll_seconds * self._get_recording_sample_rate())
+        while self.pre_roll_chunks and self._pre_roll_sample_count - len(self.pre_roll_chunks[0]) >= pre_roll_sample_limit:
+            self._pre_roll_sample_count -= len(self.pre_roll_chunks.popleft())
+
+    def _clear_pre_roll(self):
+        self.pre_roll_chunks.clear()
+        self._pre_roll_sample_count = 0
+
+    def clear_pre_roll(self):
+        with self._pre_roll_lock:
+            self._clear_pre_roll()
+
     def _take_recorded_chunks(self) -> Optional[list]:
         # Flag flip and list swap under the callback's lock so no chunk lands after the snapshot
         with self._pre_roll_lock:
@@ -184,9 +202,10 @@ class AudioRecorder:
 
             self.logger.info("Starting audio monitoring...")
             stream_is_running = self._stream_is_running()
+            if not self.is_recording:
+                self.continuous_vad.reset()
             self.is_monitoring = True
             if not stream_is_running:
-                self.continuous_vad.reset()
                 self._start_stream_thread()
             return True
 
@@ -198,16 +217,49 @@ class AudioRecorder:
             self.logger.info("Stopping audio monitoring...")
             with self._pre_roll_lock:
                 self.is_monitoring = False
-                self.pre_roll_chunks.clear()
-            stream_no_longer_needed = not self.is_recording
+                if not self.is_buffering:
+                    self._clear_pre_roll()
+            stream_no_longer_needed = not (self.is_recording or self.is_buffering)
             stream_thread = self.recording_thread
 
         if stream_no_longer_needed:
             self._wait_for_thread_finish(stream_thread)
 
+    def start_buffering(self) -> bool:
+        with self._lifecycle_lock:
+            if self.is_buffering:
+                return True
+            if self.pre_roll_seconds <= 0:
+                return False
+
+            self.logger.info(f"Starting {self.pre_roll_seconds:g} s pre-roll buffering...")
+            stream_is_running = self._stream_is_running()
+            self.is_buffering = True
+            if not stream_is_running:
+                self._start_stream_thread()
+            return True
+
+    def stop_buffering(self):
+        with self._lifecycle_lock:
+            if not self.is_buffering:
+                return
+
+            self.logger.info("Stopping pre-roll buffering...")
+            with self._pre_roll_lock:
+                self.is_buffering = False
+                if not self.is_monitoring:
+                    self._clear_pre_roll()
+            stream_no_longer_needed = not (self.is_recording or self.is_monitoring)
+            stream_thread = self.recording_thread
+
+        if stream_no_longer_needed:
+            self._wait_for_thread_finish(stream_thread)
+
+    def _stream_is_wanted(self) -> bool:
+        return self.is_recording or self.is_monitoring or self.is_buffering
+
     def _stream_is_running(self) -> bool:
-        stream_is_wanted = self.is_recording or self.is_monitoring
-        return stream_is_wanted and self.recording_thread is not None and self.recording_thread.is_alive()
+        return self._stream_is_wanted() and self.recording_thread is not None and self.recording_thread.is_alive()
 
     def _start_stream_thread(self):
         self.recording_thread = threading.Thread(target=self._record_audio)
@@ -230,8 +282,8 @@ class AudioRecorder:
                     self.continuous_streaming.reset()
 
                 with self._pre_roll_lock:
-                    self.audio_data = list(self.pre_roll_chunks) if voice_activated else []
-                    self.pre_roll_chunks.clear()
+                    self.audio_data = list(self.pre_roll_chunks)
+                    self._clear_pre_roll()
                     self.recording_start_time = time.time()
                     self.is_recording = True
 
@@ -252,7 +304,7 @@ class AudioRecorder:
                 return None
 
             recorded_chunks = self._take_recorded_chunks()
-            stream_no_longer_needed = not self.is_monitoring
+            stream_no_longer_needed = not (self.is_monitoring or self.is_buffering)
             stream_thread = self.recording_thread
 
         if stream_no_longer_needed:
@@ -283,7 +335,7 @@ class AudioRecorder:
 
             self._take_recorded_chunks()
             self.recording_start_time = None
-            stream_no_longer_needed = not self.is_monitoring
+            stream_no_longer_needed = not (self.is_monitoring or self.is_buffering)
             stream_thread = self.recording_thread
 
         if stream_no_longer_needed:
@@ -308,8 +360,8 @@ class AudioRecorder:
                 with self._pre_roll_lock:
                     if self.is_recording:
                         self.audio_data.append(audio_data.copy())
-                    elif self.is_monitoring:
-                        self.pre_roll_chunks.append(audio_data.copy())
+                    elif (self.is_monitoring or self.is_buffering) and self.pre_roll_seconds > 0:
+                        self._append_pre_roll(audio_data.copy())
 
                 if self.is_recording or self.is_monitoring:
                     if self.continuous_vad and frames == vad_blocksize:
@@ -344,7 +396,7 @@ class AudioRecorder:
                 # NOTE: WASAPI breaks if the calling thread is blocked or if audio
                 # playback runs from this thread. Reason unknown. Don't add synchronization
                 # or audio calls here — print messages before start_recording() returns instead.
-                while (self.is_recording or self.is_monitoring) and self.recording_thread is stream_thread:
+                while self._stream_is_wanted() and self.recording_thread is stream_thread:
                     if self.is_recording:
                         self._check_max_duration_exceeded()
                     if not stream.active:
@@ -357,11 +409,16 @@ class AudioRecorder:
             print(f"❌ Recording failed: {e}")
             with self._lifecycle_lock:
                 monitoring_failed = self.recording_thread is stream_thread and self.is_monitoring
+                buffering_failed = self.recording_thread is stream_thread and self.is_buffering
                 if self.recording_thread is stream_thread:
                     with self._pre_roll_lock:
                         self.is_recording = False
                         self.is_monitoring = False
-                        self.pre_roll_chunks.clear()
+                        self.is_buffering = False
+                        self._clear_pre_roll()
+            if buffering_failed:
+                self.logger.warning("Pre-roll buffering stopped; recordings start without pre-roll until the microphone is reopened")
+                print("⚠️ Pre-roll buffering stopped (microphone stream failed). Mute and unmute or switch the microphone to restart it.")
             if monitoring_failed and self.on_monitoring_failed:
                 self.on_monitoring_failed(e)
     
@@ -380,7 +437,7 @@ class AudioRecorder:
                 audio_data = self._process_audio_data(recorded_chunks)
                 
                 if self.on_max_duration_reached:
-                    if self.is_monitoring:
+                    if self.is_monitoring or self.is_buffering:
                         threading.Thread(target=self.on_max_duration_reached, args=(audio_data,), daemon=True).start()
                     else:
                         self.on_max_duration_reached(audio_data)

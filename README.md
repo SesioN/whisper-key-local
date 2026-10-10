@@ -151,7 +151,7 @@ Delete this file and restart app to reset to defaults.
 | `vad.vad_min_speech_duration` | `0.1` | Min speech segment (seconds); also how long speech must last to start a voice-activated recording |
 | `vad.vad_realtime_enabled` | `true` | Auto-stop on silence |
 | `vad.vad_silence_timeout_seconds` | `30.0` | Seconds before auto-stop |
-| `vad.auto_trigger_enabled` | `false` | Start recording when speech is detected, stop after a short silence. Keeps the microphone open and the VAD running (about 0.1 ms per 16 ms audio block, under 1% of one core); any nearby speech (TV, calls) is transcribed and delivered like a hotkey recording, including auto-paste unless `vad.auto_trigger_paste` is false. The tray tooltip shows when the microphone is listening. The live streaming preview starts without the 1 s pre-roll; the final transcription includes it |
+| `vad.auto_trigger_enabled` | `false` | Start recording when speech is detected, stop after a short silence. Keeps the microphone open and the VAD running (about 0.1 ms per 16 ms audio block, under 1% of one core); any nearby speech (TV, calls) is transcribed and delivered like a hotkey recording, including auto-paste unless `vad.auto_trigger_paste` is false. The tray tooltip shows when the microphone is listening. The live streaming preview starts without the pre-roll (`audio.pre_roll_seconds`); the final transcription includes it |
 | `vad.auto_trigger_silence_seconds` | `1.5` | Silence that ends a voice-activated recording |
 | `vad.auto_trigger_paste` | `true` | false = voice-activated recordings are only copied to the clipboard |
 | **Audio** |||
@@ -159,6 +159,7 @@ Delete this file and restart app to reset to defaults.
 | `audio.channels` | `1` | 1 = mono, 2 = stereo |
 | `audio.dtype` | `float32` | float32/int16/int24/int32 |
 | `audio.max_duration` | `900` | Max recording seconds (0 = unlimited) |
+| `audio.pre_roll_seconds` | `1.0` | Seconds of audio from before the recording starts (hotkey, voice command and voice-activated), so the first word is not cut off. Keeps the microphone open while the app runs, paused while muted. Range 0-10, `0` turns it off |
 | `audio.input_device` | `default` | Device ID or "default" |
 | **Clipboard** |||
 | `clipboard.auto_paste` | `true` | false = clipboard only. Windows blocks typing into apps running as administrator; then the text stays on the clipboard and a notification asks you to press Ctrl+V |
