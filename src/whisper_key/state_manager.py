@@ -21,6 +21,7 @@ from .system_tray import SystemTray
 from .config_manager import ConfigManager
 from .text_postprocessor import TextPostProcessor
 from .audio_feedback import AudioFeedback
+from .output_audio_control import OutputAudioControl
 from .utils import OptionalComponent
 from .voice_activity_detection import VadEvent, VadManager
 from .voice_commands import VoiceCommandManager
@@ -45,7 +46,8 @@ class StateManager:
                  system_tray: Optional[SystemTray] = None,
                  audio_feedback: Optional[AudioFeedback] = None,
                  voice_command_manager: Optional[VoiceCommandManager] = None,
-                 terminal_title: Optional[TerminalTitle] = None):
+                 terminal_title: Optional[TerminalTitle] = None,
+                 output_audio_control: Optional[OutputAudioControl] = None):
 
         self.audio_recorder = audio_recorder
         self.whisper_engine = whisper_engine
@@ -53,6 +55,7 @@ class StateManager:
         self.system_tray = OptionalComponent(system_tray)
         self.config_manager = config_manager
         self.audio_feedback = OptionalComponent(audio_feedback)
+        self.output_audio_control = OptionalComponent(output_audio_control)
         self.vad_manager = vad_manager
         self.text_postprocessor = text_postprocessor
         self.voice_command_manager = voice_command_manager
@@ -289,6 +292,7 @@ class StateManager:
         self._clear_streaming_display()
         self._command_mode = False
         self.audio_recorder.cancel_recording()
+        self.output_audio_control.release()
         self._start_auto_trigger_cooldown()
         self.audio_feedback.play_cancel_sound()
         self._update_ui_state("idle")
@@ -358,6 +362,7 @@ class StateManager:
             print("\n🎤 Command mode activated! Speak a command...")
             self.config_manager.print_command_stop_instructions()
             self.audio_feedback.play_start_sound()
+            self.output_audio_control.engage()
             self._update_ui_state("recording")
 
     def _begin_recording(self, auto_triggered: bool = False):
@@ -376,10 +381,12 @@ class StateManager:
             if not auto_triggered:
                 self.config_manager.print_stop_instructions_based_on_config()
             self.audio_feedback.play_start_sound()
+            self.output_audio_control.engage()
             self._update_ui_state("recording")
     
     def _transcription_pipeline(self, audio_data, use_auto_enter: bool = False):
         fallback_to = None
+        self.output_audio_control.release()
         try:
             with self._state_lock:
                 if self.is_engine_unavailable():
@@ -537,6 +544,7 @@ class StateManager:
 
         if self.audio_recorder.get_recording_status():
             self.audio_recorder.stop_recording()
+        self.output_audio_control.release_blocking()
         self.vad_sensitivity_window.stop()
         self.audio_recorder.stop_monitoring()
 
@@ -1141,6 +1149,14 @@ class StateManager:
     def update_transcription_mode(self, value):
         self.config_manager.update_user_setting('clipboard', 'auto_paste', value)
         self.clipboard_manager.update_auto_paste(value)
+
+    def update_mute_output_while_recording(self, enabled: bool):
+        self.output_audio_control.set_mute_output_enabled(enabled)
+        self.config_manager.update_user_setting('output_audio', 'mute_while_recording', enabled)
+
+    def update_pause_media_while_recording(self, enabled: bool):
+        self.output_audio_control.set_pause_media_enabled(enabled)
+        self.config_manager.update_user_setting('output_audio', 'pause_media_while_recording', enabled)
 
     def update_audio_feedback(self, enabled: bool):
         self.audio_feedback.set_enabled(enabled)
