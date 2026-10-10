@@ -10,7 +10,7 @@ from typing import Callable
 from .key_capture import KeyCapture
 from .platform import dialogs
 from .themed_widgets import (ACCENT_BUTTON_STYLE, ERROR_STYLE, HINT_STYLE, apply_theme, apply_window_chrome,
-                             style_text_widget)
+                             center_window, style_text_widget)
 from .utils import beautify_hotkey
 from .voice_commands import entry_to_command, find_entry_problems, find_matching_commands
 
@@ -249,6 +249,7 @@ class _VoiceCommandEditor:
                                       self.window.key_name_for_virtual_key, self._on_capture_changed)
         root.protocol("WM_DELETE_WINDOW", self._close)
         apply_window_chrome(root, theme)
+        center_window(root)
 
     def _selected_entry(self):
         if self.selected_index is None or self.selected_index >= len(self.entries):

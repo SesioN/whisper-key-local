@@ -7,7 +7,7 @@ from tkinter import ttk
 from typing import Callable
 
 from .key_capture import KeyCapture
-from .themed_widgets import ACCENT_BUTTON_STYLE, ERROR_STYLE, HINT_STYLE, apply_theme, apply_window_chrome
+from .themed_widgets import ACCENT_BUTTON_STYLE, ERROR_STYLE, HINT_STYLE, apply_theme, apply_window_chrome, center_window
 from .utils import beautify_hotkey
 
 QUEUE_POLL_INTERVAL_MS = 100
@@ -197,6 +197,7 @@ class _ShortcutEditor:
                                       self.window.key_name_for_virtual_key, self._refresh)
         root.protocol("WM_DELETE_WINDOW", self._close)
         apply_window_chrome(root, theme)
+        center_window(root)
 
     def _refresh(self):
         for (action, slot), binding_button in self.binding_buttons.items():

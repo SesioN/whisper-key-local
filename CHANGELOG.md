@@ -4,6 +4,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Fixed
+- **Settings windows open centered** - Shortcuts, Voice commands, Voice detection sensitivity, the install progress window and dialogs open centered on the monitor under the mouse (work area, excluding the taskbar) instead of at the default Windows position
+
 ## [1.7.1] - 2026-10-10
 
 ### Fixed

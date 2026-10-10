@@ -6,7 +6,7 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable
 
-from .themed_widgets import HINT_STYLE, apply_theme, apply_window_chrome
+from .themed_widgets import HINT_STYLE, apply_theme, apply_window_chrome, center_window
 
 METER_WIDTH = 300
 METER_HEIGHT = 30
@@ -186,6 +186,7 @@ class VadSensitivityWindow:
             root.after(QUEUE_POLL_INTERVAL_MS, process_command_queue)
 
         apply_window_chrome(root, theme)
+        center_window(root)
         show_threshold(self.onset_threshold)
         refresh_meter()
         process_command_queue()

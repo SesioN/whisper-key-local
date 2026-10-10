@@ -52,16 +52,14 @@ class InstallProgressWindow:
         import tkinter as tk
         from tkinter import ttk
 
-        from .themed_widgets import HINT_STYLE, TITLE_STYLE, apply_theme, apply_window_chrome
+        from .themed_widgets import HINT_STYLE, TITLE_STYLE, apply_theme, apply_window_chrome, center_window
 
         root = tk.Tk()
         try:
             root.title(self.title)
             root.resizable(False, False)
             theme = apply_theme(root)
-            x = (root.winfo_screenwidth() - WINDOW_WIDTH) // 2
-            y = (root.winfo_screenheight() - WINDOW_HEIGHT) // 2
-            root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}+{x}+{y}")
+            root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
             root.protocol("WM_DELETE_WINDOW", root.iconify)
 
             ttk.Label(root, text=self.title, style=TITLE_STYLE).pack(pady=(14, 6))
@@ -74,6 +72,7 @@ class InstallProgressWindow:
             cancel_button.pack(pady=8)
 
             apply_window_chrome(root, theme)
+            center_window(root)
             root.attributes("-topmost", True)
             root.update()
             root.attributes("-topmost", False)

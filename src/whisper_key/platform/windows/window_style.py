@@ -11,6 +11,18 @@ SM_XVIRTUALSCREEN = 76
 SM_YVIRTUALSCREEN = 77
 SM_CXVIRTUALSCREEN = 78
 SM_CYVIRTUALSCREEN = 79
+DWMWA_EXTENDED_FRAME_BOUNDS = 9
+MONITOR_DEFAULTTONEAREST = 2
+SWP_NOSIZE = 0x0001
+SWP_NOZORDER = 0x0004
+SWP_NOACTIVATE = 0x0010
+DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = ctypes.c_void_p(-4)
+
+
+class MONITORINFO(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+
 
 user32 = ctypes.WinDLL("user32")
 user32.GetParent.argtypes = [wintypes.HWND]
@@ -26,10 +38,25 @@ user32.IsWindow.argtypes = [wintypes.HWND]
 user32.IsWindow.restype = wintypes.BOOL
 user32.GetSystemMetrics.argtypes = [ctypes.c_int]
 user32.GetSystemMetrics.restype = ctypes.c_int
+user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+user32.GetWindowRect.restype = wintypes.BOOL
+user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+user32.GetCursorPos.restype = wintypes.BOOL
+user32.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
+user32.MonitorFromPoint.restype = wintypes.HMONITOR
+user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(MONITORINFO)]
+user32.GetMonitorInfoW.restype = wintypes.BOOL
+user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                ctypes.c_int, ctypes.c_int, wintypes.UINT]
+user32.SetWindowPos.restype = wintypes.BOOL
+user32.SetThreadDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+user32.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
 
 dwmapi = ctypes.WinDLL("dwmapi")
 dwmapi.DwmSetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
 dwmapi.DwmSetWindowAttribute.restype = ctypes.c_long
+dwmapi.DwmGetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
+dwmapi.DwmGetWindowAttribute.restype = ctypes.c_long
 
 
 def _set_dwm_attribute(window_handle: int, attribute: int, value: int):
@@ -49,6 +76,44 @@ def prevent_focus_steal(tk_window_id: int):
     window_handle = user32.GetParent(tk_window_id) or tk_window_id
     extended_style = user32.GetWindowLongW(window_handle, GWL_EXSTYLE)
     user32.SetWindowLongW(window_handle, GWL_EXSTYLE, extended_style | WS_EX_NOACTIVATE)
+
+
+def _visible_frame(window_handle) -> wintypes.RECT:
+    frame = wintypes.RECT()
+    result = dwmapi.DwmGetWindowAttribute(window_handle, DWMWA_EXTENDED_FRAME_BOUNDS,
+                                          ctypes.byref(frame), ctypes.sizeof(frame))
+    if result != 0:
+        user32.GetWindowRect(window_handle, ctypes.byref(frame))
+    return frame
+
+
+def center_window(tk_window_id: int):
+    window_handle = user32.GetParent(tk_window_id) or tk_window_id
+    previous_context = user32.SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+    try:
+        window_rect = wintypes.RECT()
+        if not user32.GetWindowRect(window_handle, ctypes.byref(window_rect)):
+            return
+        frame = _visible_frame(window_handle)
+        cursor = wintypes.POINT()
+        user32.GetCursorPos(ctypes.byref(cursor))
+        monitor_info = MONITORINFO()
+        monitor_info.cbSize = ctypes.sizeof(MONITORINFO)
+        if not user32.GetMonitorInfoW(user32.MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST),
+                                      ctypes.byref(monitor_info)):
+            return
+        work = monitor_info.rcWork
+        frame_width = frame.right - frame.left
+        frame_height = frame.bottom - frame.top
+        target_left = work.left + max(0, (work.right - work.left - frame_width) // 2)
+        target_top = work.top + max(0, (work.bottom - work.top - frame_height) // 2)
+        user32.SetWindowPos(window_handle, None,
+                            window_rect.left + target_left - frame.left,
+                            window_rect.top + target_top - frame.top,
+                            0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
+    finally:
+        if previous_context:
+            user32.SetThreadDpiAwarenessContext(previous_context)
 
 
 def get_foreground_window() -> int:
