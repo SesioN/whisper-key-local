@@ -8,15 +8,16 @@ TEXT_WRAP_LENGTH = DIALOG_WIDTH - 48
 BUTTON_MIN_WIDTH = 9
 
 
-def show_dialog(title: str, text: str, buttons: list, dismiss_result):
-    root = tk.Tk()
+def show_dialog(title: str, text: str, buttons: list, dismiss_result, parent: tk.Misc = None):
+    window = tk.Toplevel(parent) if parent else tk.Tk()
     result = [dismiss_result]
     try:
-        root.title(title)
-        root.resizable(False, False)
-        theme = apply_theme(root)
+        window.withdraw()
+        window.title(title)
+        window.resizable(False, False)
+        theme = apply_theme(window)
 
-        frame = ttk.Frame(root, padding=24)
+        frame = ttk.Frame(window, padding=24)
         frame.pack(fill=tk.BOTH, expand=True)
         ttk.Label(frame, text=text, wraplength=TEXT_WRAP_LENGTH, justify=tk.LEFT).pack(anchor="w")
 
@@ -25,7 +26,14 @@ def show_dialog(title: str, text: str, buttons: list, dismiss_result):
 
         def finish(value):
             result[0] = value
-            root.quit()
+            window.destroy()
+
+        def activate_focused_button(event):
+            focused = window.focus_get()
+            if isinstance(focused, ttk.Button):
+                focused.invoke()
+            else:
+                finish(buttons[0][1])
 
         primary_button = None
         for index, (label, value) in reversed(list(enumerate(buttons))):
@@ -36,24 +44,32 @@ def show_dialog(title: str, text: str, buttons: list, dismiss_result):
             if index == 0:
                 primary_button = button
 
-        root.protocol("WM_DELETE_WINDOW", lambda: finish(dismiss_result))
-        root.bind("<Escape>", lambda event: finish(dismiss_result))
-        root.bind("<Return>", lambda event: finish(buttons[0][1]))
+        window.protocol("WM_DELETE_WINDOW", lambda: finish(dismiss_result))
+        window.bind("<Escape>", lambda event: finish(dismiss_result))
+        window.bind("<Return>", activate_focused_button)
 
-        apply_window_chrome(root, theme)
-        root.update_idletasks()
-        width = max(DIALOG_WIDTH, root.winfo_reqwidth())
-        height = root.winfo_reqheight()
-        x = (root.winfo_screenwidth() - width) // 2
-        y = (root.winfo_screenheight() - height) // 3
-        root.geometry(f"{width}x{height}+{x}+{y}")
-        root.attributes("-topmost", True)
-        root.focus_force()
+        apply_window_chrome(window, theme)
+        window.update_idletasks()
+        width = max(DIALOG_WIDTH, window.winfo_reqwidth())
+        height = window.winfo_reqheight()
+        x = (window.winfo_screenwidth() - width) // 2
+        y = (window.winfo_screenheight() - height) // 3
+        window.geometry(f"{width}x{height}+{x}+{y}")
+        window.attributes("-topmost", True)
+        window.deiconify()
+        window.lift()
+        window.focus_force()
         primary_button.focus_set()
-        root.mainloop()
+        if parent:
+            window.transient(parent)
+            window.wait_visibility()
+            window.grab_set()
+            parent.wait_window(window)
+        else:
+            window.mainloop()
     finally:
         try:
-            root.destroy()
+            window.destroy()
         except tk.TclError:
             pass
     return result[0]

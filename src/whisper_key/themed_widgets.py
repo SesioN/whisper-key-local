@@ -17,14 +17,15 @@ ACCENT_BUTTON_STYLE = "Accent.TButton"
 
 def text_family(root) -> str:
     available = set(tkfont.families(root))
-    return next((family for family in TEXT_FAMILIES if family in available), "TkDefaultFont")
+    fallback = tkfont.nametofont("TkDefaultFont", root=root).actual("family")
+    return next((family for family in TEXT_FAMILIES if family in available), fallback)
 
 
 def apply_theme(root: tk.Misc):
     theme = load_theme()
     family = text_family(root)
     for font_name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont", "TkCaptionFont"):
-        tkfont.nametofont(font_name).configure(family=family, size=BODY_FONT_SIZE)
+        tkfont.nametofont(font_name, root=root).configure(family=family, size=BODY_FONT_SIZE)
     title_font = (family, TITLE_FONT_SIZE, "bold")
 
     root.configure(bg=theme.bg)

@@ -10,7 +10,7 @@ from typing import Callable, Optional
 
 from PIL import Image, ImageDraw, ImageTk
 
-from .ui_theme import load_theme, rgb_color as _rgb
+from .ui_theme import load_theme, rgb_color
 from .tray_menu_model import Action, Choice, Footer, Header, Section, Slider, Submenu, Toggle, resolve
 
 TOGGLE = "toggle"
@@ -323,7 +323,7 @@ class _FlyoutView:
         result = dwmapi.DwmSetWindowAttribute(self.hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ctypes.byref(corner), ctypes.sizeof(corner))
         self.dwm_frame = result == 0
         if self.dwm_frame:
-            r, g, b = _rgb(self.theme.border)
+            r, g, b = rgb_color(self.theme.border)
             border = wintypes.DWORD(r | (g << 8) | (b << 16))
             dwmapi.DwmSetWindowAttribute(self.hwnd, DWMWA_BORDER_COLOR, ctypes.byref(border), ctypes.sizeof(border))
 
@@ -350,8 +350,8 @@ class _FlyoutView:
             big = Image.new("RGBA", (width * SUPERSAMPLE, height * SUPERSAMPLE), (0, 0, 0, 0))
             draw = ImageDraw.Draw(big)
             draw.rounded_rectangle((0, 0, big.width - 1, big.height - 1), radius=radius * SUPERSAMPLE,
-                                   fill=_rgb(fill) + (255,),
-                                   outline=_rgb(outline) + (255,) if outline else None,
+                                   fill=rgb_color(fill) + (255,),
+                                   outline=rgb_color(outline) + (255,) if outline else None,
                                    width=outline_width * SUPERSAMPLE)
             image = ImageTk.PhotoImage(big.resize((width, height), Image.LANCZOS), master=self.root)
             self.image_cache[key] = image
@@ -369,20 +369,20 @@ class _FlyoutView:
             box = (0, 0, big.width - 1, big.height - 1)
             if on:
                 track = theme.accent if enabled else theme.disabled
-                draw.rounded_rectangle(box, radius=big.height // 2, fill=_rgb(track) + (255,))
+                draw.rounded_rectangle(box, radius=big.height // 2, fill=rgb_color(track) + (255,))
                 knob_radius = height * s * 0.3
                 knob_x = big.width - big.height / 2
                 knob_color = theme.on_accent
             else:
                 stroke = theme.secondary if enabled else theme.disabled
-                draw.rounded_rectangle(box, radius=big.height // 2, fill=_rgb(theme.bg) + (255,),
-                                       outline=_rgb(stroke) + (255,), width=max(1, self.px(1)) * s)
+                draw.rounded_rectangle(box, radius=big.height // 2, fill=rgb_color(theme.bg) + (255,),
+                                       outline=rgb_color(stroke) + (255,), width=max(1, self.px(1)) * s)
                 knob_radius = height * s * 0.24
                 knob_x = big.height / 2
                 knob_color = stroke
             knob_y = big.height / 2
             draw.ellipse((knob_x - knob_radius, knob_y - knob_radius, knob_x + knob_radius, knob_y + knob_radius),
-                         fill=_rgb(knob_color) + (255,))
+                         fill=rgb_color(knob_color) + (255,))
             image = ImageTk.PhotoImage(big.resize((width, height), Image.LANCZOS), master=self.root)
             self.image_cache[key] = image
         return image
@@ -396,12 +396,12 @@ class _FlyoutView:
             s = SUPERSAMPLE
             big = Image.new("RGBA", (size * s, size * s), (0, 0, 0, 0))
             draw = ImageDraw.Draw(big)
-            draw.ellipse((0, 0, big.width - 1, big.height - 1), fill=_rgb(theme.surface_hover) + (255,),
-                         outline=_rgb(theme.border) + (255,), width=max(1, self.px(1)) * s)
+            draw.ellipse((0, 0, big.width - 1, big.height - 1), fill=rgb_color(theme.surface_hover) + (255,),
+                         outline=rgb_color(theme.border) + (255,), width=max(1, self.px(1)) * s)
             inner = big.width * 0.28
             center = big.width / 2
             draw.ellipse((center - inner, center - inner, center + inner, center + inner),
-                         fill=_rgb(theme.accent) + (255,))
+                         fill=rgb_color(theme.accent) + (255,))
             image = ImageTk.PhotoImage(big.resize((size, size), Image.LANCZOS), master=self.root)
             self.image_cache[key] = image
         return image
@@ -413,7 +413,7 @@ class _FlyoutView:
             for stale_key in [cached for cached in self.image_cache if cached[0] == "gradient"]:
                 del self.image_cache[stale_key]
             strip = Image.new("RGB", (len(colors), 1))
-            strip.putdata([_rgb(color) for color in colors])
+            strip.putdata([rgb_color(color) for color in colors])
             stretched = strip.resize((width * SUPERSAMPLE, height * SUPERSAMPLE), Image.BILINEAR).convert("RGBA")
             mask = Image.new("L", stretched.size, 0)
             ImageDraw.Draw(mask).rounded_rectangle((0, 0, mask.width - 1, mask.height - 1),

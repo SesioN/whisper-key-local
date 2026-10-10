@@ -158,7 +158,7 @@ class VadSensitivityWindow:
         slider.pack(pady=(5, 10))
         meter.pack()
 
-        ttk.Label(frame, style=HINT_STYLE, text="Speak: the bar should pass the red line only while you talk").pack(pady=(10, 0))
+        ttk.Label(frame, style=HINT_STYLE, text="Speak: the bar should pass the marker line only while you talk").pack(pady=(10, 0))
 
         drawn_meter = [None]
 

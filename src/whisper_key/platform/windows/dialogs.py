@@ -1,10 +1,10 @@
-def _show(title: str, text: str, buttons: list, dismiss_result):
+def _show(title: str, text: str, buttons: list, dismiss_result, parent=None):
     from ...themed_dialog import show_dialog
-    return show_dialog(title, text, buttons, dismiss_result)
+    return show_dialog(title, text, buttons, dismiss_result, parent)
 
 
-def confirm(title: str, text: str) -> bool:
-    return _show(title, text, [("OK", True), ("Cancel", False)], False)
+def confirm(title: str, text: str, parent=None) -> bool:
+    return _show(title, text, [("OK", True), ("Cancel", False)], False, parent)
 
 
 def choose(title: str, text: str):

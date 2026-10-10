@@ -154,7 +154,7 @@ class _VoiceCommandEditor:
         list_frame.rowconfigure(0, weight=1)
         list_frame.columnconfigure(0, weight=1)
 
-        row_height = tkfont.nametofont("TkDefaultFont").metrics("linespace") + ROW_PADDING
+        row_height = tkfont.nametofont("TkDefaultFont", root=root).metrics("linespace") + ROW_PADDING
         ttk.Style(root).configure("VoiceCommands.Treeview", rowheight=row_height)
         self.command_list = ttk.Treeview(list_frame, style="VoiceCommands.Treeview", columns=("enabled", "trigger", "action", "value"),
                                          show="headings", selectmode="browse", height=16)
@@ -449,7 +449,7 @@ class _VoiceCommandEditor:
         if entry is None or not entry['value'].strip():
             return
         if entry['action'] == 'run' and not dialogs.confirm(
-                "Run command", f"Run this shell command now?\n\n{entry['value']}"):
+                "Run command", f"Run this shell command now?\n\n{entry['value']}", parent=self.root):
             return
         command = entry_to_command(entry)
         self.root.iconify()
