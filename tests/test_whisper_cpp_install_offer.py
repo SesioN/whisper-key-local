@@ -103,3 +103,17 @@ def test_selecting_a_model_needing_whisper_cpp_starts_the_offer(tmp_path, dialog
             break
         __import__('time').sleep(0.01)
     manager._offer_whisper_cpp_install.assert_called_once_with('tiny')
+
+
+def test_unsupported_whisper_cpp_labels_the_model_for_cpu(tmp_path):
+    manager = make_manager(tmp_path, vulkan_state=UNSUPPORTED)
+    assert manager.get_model_download_state('tiny') == "faster_whisper"
+
+
+def test_failing_install_offer_releases_the_engine_switch(tmp_path, dialogs):
+    manager = make_manager(tmp_path)
+    dialogs.confirm.side_effect = RuntimeError("no dialog")
+    manager._begin_engine_switch()
+    manager._offer_whisper_cpp_install('tiny')
+    manager._install_and_switch_runtime.assert_not_called()
+    assert not manager._runtime_install_running

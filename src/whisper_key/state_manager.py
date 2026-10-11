@@ -940,7 +940,8 @@ class StateManager:
             return "ready"
         model_dir = self._ggml_model_dir()
         if not model_dir:
-            return "install"
+            vulkan_runtime = self._vulkan_runtime() if self.runtimes_detected() else None
+            return "faster_whisper" if vulkan_runtime and vulkan_runtime.state == UNSUPPORTED else "install"
         if (Path(model_dir) / f"ggml-{ggml_name}.bin").is_file():
             return "ready"
         return "download"
@@ -993,27 +994,29 @@ class StateManager:
         return model.label if model else model_key
 
     def _offer_whisper_cpp_install(self, model_key: str):
-        from .runtime_installer import install_options
-        vulkan_runtime = next((runtime for runtime in self.get_runtimes() if runtime.key == VULKAN), None)
-        if not vulkan_runtime or vulkan_runtime.state != INSTALLABLE:
-            reason = vulkan_runtime.reason if vulkan_runtime and vulkan_runtime.reason else "it cannot be installed on this PC"
-            self._offer_faster_whisper_fallback(model_key, f"whisper.cpp is not available ({reason}).")
-            return
-        option = install_options(VULKAN)[0]
-        label = self._model_label(model_key)
-        title = f"Install {vulkan_runtime.label}"
-        message = (f"{label} runs on {vulkan_runtime.label}, which is not installed.\n\n"
-                   f"Install it now and download the model?\n{option.description}\nDownload: {option.download_size}\n\n"
-                   "Transcription is paused until the installation completes.")
         try:
-            confirmed = dialogs.confirm(title, message)
+            vulkan_runtime = self._vulkan_runtime()
+            if not vulkan_runtime or vulkan_runtime.state != INSTALLABLE:
+                reason = vulkan_runtime.reason if vulkan_runtime and vulkan_runtime.reason else "it cannot be installed on this PC"
+                self._offer_faster_whisper_fallback(model_key, f"whisper.cpp is not available ({reason}).")
+                return
+            from .runtime_installer import install_options
+            option = install_options(VULKAN)[0]
+            label = self._model_label(model_key)
+            message = (f"{label} runs on {vulkan_runtime.label}, which is not installed.\n\n"
+                       f"Install it now and download the model?\n{option.description}\nDownload: {option.download_size}\n\n"
+                       "Transcription is paused until the installation completes.")
+            confirmed = dialogs.confirm(f"Install {vulkan_runtime.label}", message)
         except Exception as e:
-            self.logger.error(f"Could not ask to install {vulkan_runtime.label}: {e}")
+            self.logger.error(f"Could not offer the whisper.cpp install for {model_key}: {e}")
             confirmed = False
         if not confirmed:
             self._end_engine_switch()
             return
         self._install_and_switch_runtime(vulkan_runtime, model_key=model_key, option=option)
+
+    def _vulkan_runtime(self) -> Optional[Runtime]:
+        return next((runtime for runtime in self.get_runtimes() if runtime.key == VULKAN), None)
 
     def _offer_faster_whisper_fallback(self, model_key: str, reason: Optional[str] = None):
         label = self._model_label(model_key)
