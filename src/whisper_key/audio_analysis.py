@@ -14,7 +14,33 @@ WORKER_JOIN_TIMEOUT_SECONDS = 2.0
 REPORT_INTERVAL_SECONDS = 10.0
 
 _RESET = object()
+_SNAPSHOT = object()
 _STOP = object()
+INCOMPLETE_ANALYSIS = (False, 0.0)
+
+
+class AnalysisSnapshot:
+    def __init__(self):
+        self._ready = threading.Event()
+        self._result = INCOMPLETE_ANALYSIS
+
+    def complete(self, result: tuple):
+        self._result = result
+        self._ready.set()
+
+    def abandon(self):
+        self._ready.set()
+
+    def result(self, timeout: float) -> tuple:
+        if not self._ready.wait(timeout):
+            return INCOMPLETE_ANALYSIS
+        return self._result
+
+
+def abandoned_snapshot() -> AnalysisSnapshot:
+    snapshot = AnalysisSnapshot()
+    snapshot.abandon()
+    return snapshot
 
 
 class VadFramer:
@@ -55,12 +81,11 @@ class AudioAnalysisWorker:
         self._consumer_lock = consumer_lock
         self._max_queued_blocks = max(1, int(MAX_QUEUED_SECONDS * input_rate / block_samples))
         self._queue = queue.SimpleQueue()
+        self._queue_lock = threading.Lock()
         self._stopping = False
         self.submitted_blocks = 0
         self.dropped_blocks = 0
         self._reported_dropped_blocks = 0
-        self._processed_blocks = 0
-        self._processed_condition = threading.Condition()
         self._last_report = time.monotonic()
         self._thread = threading.Thread(target=self._run, daemon=True, name="AudioAnalysis")
 
@@ -68,39 +93,49 @@ class AudioAnalysisWorker:
         self._thread.start()
 
     def stop(self):
-        self._stopping = True
-        while True:
-            try:
-                self._queue.get_nowait()
-            except queue.Empty:
-                break
-        self._queue.put(_STOP)
+        with self._queue_lock:
+            self._stopping = True
+            while True:
+                try:
+                    item = self._queue.get_nowait()
+                except queue.Empty:
+                    break
+                if item[0] is _SNAPSHOT:
+                    item[1].abandon()
+            self._queue.put((_STOP,))
         if self._thread.is_alive() and self._thread is not threading.current_thread():
             self._thread.join(timeout=WORKER_JOIN_TIMEOUT_SECONDS)
-        with self._processed_condition:
-            self._processed_condition.notify_all()
         self._report_dropped_blocks()
 
     def is_accepting(self) -> bool:
         return self._thread.is_alive() and not self._stopping
 
     def submit(self, block: np.ndarray, feed_streaming: bool) -> bool:
-        if self._stopping:
-            return False
-        if self._queue.qsize() >= self._max_queued_blocks:
-            self.dropped_blocks += 1
-            return False
-        self.submitted_blocks += 1
-        self._queue.put((block, feed_streaming))
-        return True
+        with self._queue_lock:
+            if self._stopping:
+                return False
+            if self._queue.qsize() >= self._max_queued_blocks:
+                self.dropped_blocks += 1
+                return False
+            self.submitted_blocks += 1
+            self._queue.put((block, feed_streaming))
+            return True
 
-    def request_reset(self, reset_vad: bool, reset_streaming: bool):
-        self._queue.put((_RESET, reset_vad, reset_streaming))
+    def request_reset(self, reset_vad: bool, reset_streaming: bool) -> bool:
+        with self._queue_lock:
+            if self._stopping:
+                return False
+            self._queue.put((_RESET, reset_vad, reset_streaming))
+            return True
 
-    def wait_until_processed(self, block_count: int, timeout: float) -> bool:
-        with self._processed_condition:
-            self._processed_condition.wait_for(lambda: self._processed_blocks >= block_count or self._stopping, timeout)
-            return self._processed_blocks >= block_count
+    def request_snapshot(self, take_snapshot: Callable[[], tuple]) -> AnalysisSnapshot:
+        snapshot = AnalysisSnapshot()
+        with self._queue_lock:
+            if self._stopping:
+                snapshot.abandon()
+            else:
+                self._queue.put((_SNAPSHOT, snapshot, take_snapshot))
+        return snapshot
 
     def _run(self):
         while True:
@@ -109,7 +144,9 @@ class AudioAnalysisWorker:
             except queue.Empty:
                 self._report_dropped_blocks()
                 continue
-            if item is _STOP or self._stopping:
+            if item[0] is _STOP or self._stopping:
+                if item[0] is _SNAPSHOT:
+                    item[1].abandon()
                 return
             try:
                 with self._consumer_lock:
@@ -118,14 +155,15 @@ class AudioAnalysisWorker:
                         if reset_vad:
                             self._framer.reset()
                         self._reset_consumers(reset_vad, reset_streaming)
+                    elif item[0] is _SNAPSHOT:
+                        _, snapshot, take_snapshot = item
+                        snapshot.complete(take_snapshot())
                     else:
                         self._analyze(*item)
             except Exception as e:
                 self.logger.error(f"Audio analysis failed: {e}")
-            if item[0] is not _RESET:
-                with self._processed_condition:
-                    self._processed_blocks += 1
-                    self._processed_condition.notify_all()
+                if item[0] is _SNAPSHOT:
+                    item[1].abandon()
             if time.monotonic() - self._last_report >= REPORT_INTERVAL_SECONDS:
                 self._report_dropped_blocks()
 

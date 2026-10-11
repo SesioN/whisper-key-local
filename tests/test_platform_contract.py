@@ -18,6 +18,10 @@ def platform_attributes_used_by_shared_code() -> dict:
         for node in ast.walk(tree):
             if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id in aliases:
                 used.setdefault(aliases[node.value.id], set()).add(node.attr)
+            if isinstance(node, ast.ImportFrom) and node.module and node.module.split(".")[-2:-1] == ["platform"]:
+                module_name = node.module.split(".")[-1]
+                if module_name in modules:
+                    used.setdefault(module_name, set()).update(alias.name for alias in node.names)
     return used
 
 

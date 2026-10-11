@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 
+from whisper_key.audio_analysis import AnalysisSnapshot
 from whisper_key.audio_recorder import Recording
 from whisper_key.state_manager import StateManager
 
@@ -37,6 +38,12 @@ def make_state_manager(transcribe=None, precheck_enabled=True, precheck_result=T
     return manager, engine, vad_manager, clipboard_manager
 
 
+def completed_analysis(speech_detected, trailing_silence_seconds):
+    snapshot = AnalysisSnapshot()
+    snapshot.complete((speech_detected, trailing_silence_seconds))
+    return snapshot
+
+
 def wait_for_pipeline(manager, timeout=5.0):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -61,7 +68,7 @@ def test_stop_recording_returns_before_transcription_finishes():
 
 def test_realtime_speech_skips_the_precheck():
     manager, engine, vad_manager, _ = make_state_manager()
-    manager._submit_transcription(Recording(np.ones(16000, dtype=np.float32), realtime_speech_detected=True), False)
+    manager._submit_transcription(Recording(np.ones(16000, dtype=np.float32), completed_analysis(True, 0.0)), False)
     wait_for_pipeline(manager)
     vad_manager.check_audio_for_speech.assert_not_called()
     engine.transcribe_audio.assert_called_once()
@@ -85,7 +92,7 @@ def test_disabled_precheck_is_not_run():
 
 def test_trailing_silence_is_trimmed_before_transcription():
     manager, engine, _, _ = make_state_manager()
-    recording = Recording(np.ones(16000 * 10, dtype=np.float32), realtime_speech_detected=True, trailing_silence_seconds=6.0)
+    recording = Recording(np.ones(16000 * 10, dtype=np.float32), completed_analysis(True, 6.0))
     manager._submit_transcription(recording, False)
     wait_for_pipeline(manager)
     assert len(engine.transcribe_audio.call_args[0][0]) == 16000 * 5
@@ -154,6 +161,8 @@ from whisper_key.state_manager import language_code
 def test_language_code_normalizes_case_and_region():
     assert language_code("EN-us") == "en"
     assert language_code("auto") is None
+    assert language_code(" Auto ") is None
+    assert language_code("  ") is None
     assert language_code(None) is None
 
 
@@ -224,3 +233,43 @@ def test_refreshing_runtimes_never_shows_them_as_undetected(monkeypatch):
     manager.get_runtimes()
     manager.refresh_runtimes()
     assert manager.runtimes_detected() and manager.get_runtimes() == ["runtime"]
+
+
+def test_retry_does_not_play_the_stop_cue_or_touch_output_audio():
+    manager, engine, _, _ = make_state_manager(transcribe=MagicMock(side_effect=[RuntimeError("boom"), "again"]))
+    manager.audio_recorder.get_recording_status.return_value = False
+    manager.audio_feedback = MagicMock()
+    manager.output_audio_control = MagicMock()
+    manager._submit_transcription(Recording(np.ones(16000, dtype=np.float32)), False)
+    wait_for_pipeline(manager)
+    manager.audio_feedback.reset_mock()
+    manager.output_audio_control.reset_mock()
+    assert manager.retry_failed_recording()
+    wait_for_pipeline(manager)
+    manager.audio_feedback.play_stop_sound.assert_not_called()
+    manager.output_audio_control.release.assert_not_called()
+
+
+def test_no_model_switch_or_monitoring_restart_during_shutdown():
+    release = threading.Event()
+    manager, engine, _, _ = make_state_manager(transcribe=lambda audio: release.wait(5) and "hello")
+    manager.audio_recorder.get_recording_status.return_value = False
+    manager._execute_model_change = MagicMock()
+    manager._submit_transcription(Recording(np.ones(16000, dtype=np.float32)), False)
+    manager._pending_model_change = "base"
+    threading.Timer(0.1, release.set).start()
+    manager._apply_auto_trigger.reset_mock()
+    manager.shutdown()
+    manager._execute_model_change.assert_not_called()
+    manager._apply_auto_trigger.assert_not_called()
+
+
+def test_runtime_refresh_detects_outside_the_lock(monkeypatch):
+    from whisper_key import state_manager as state_manager_module
+    manager, _, _, _ = make_state_manager()
+    lock_held = []
+    monkeypatch.setattr(state_manager_module, "detect_runtimes", lambda binary: lock_held.append(manager._runtimes_lock.locked()) or [])
+    monkeypatch.setattr(state_manager_module, "whisper_cpp_runtime_paths", lambda: (None, None))
+    monkeypatch.setattr("whisper_key.whisper_cpp_engine.find_whisper_cli", lambda: None)
+    manager.refresh_runtimes()
+    assert lock_held == [False]

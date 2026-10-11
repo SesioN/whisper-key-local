@@ -1,8 +1,10 @@
+import argparse
 import importlib.util
 import wave
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 BENCH_PATH = Path(__file__).resolve().parents[1] / "tools" / "bench" / "transcribe_bench.py"
 spec = importlib.util.spec_from_file_location("transcribe_bench", BENCH_PATH)
@@ -66,8 +68,32 @@ def test_missing_values_are_formatted_as_dashes():
     assert transcribe_bench.format_optional(0.5, ".1f") == "0.5"
 
 
-def test_runs_must_be_positive():
-    import argparse
-    import pytest
+def test_runs_must_be_positive_and_threads_non_negative():
     with pytest.raises(argparse.ArgumentTypeError):
         transcribe_bench.positive_int("0")
+    with pytest.raises(argparse.ArgumentTypeError):
+        transcribe_bench.non_negative_int("-1")
+    assert transcribe_bench.non_negative_int("0") == 0
+
+
+class FakeEngine:
+    ENGINE_TYPE = "faster_whisper"
+
+    def __init__(self, model_key="tiny", device="cpu"):
+        self.model_key = model_key
+        self.device = device
+
+
+def bench_args(**overrides):
+    values = {"model": "tiny", "runtime": None, "onnx_runtime": None, **overrides}
+    return argparse.Namespace(**values)
+
+
+def test_engine_fallbacks_are_reported_as_mismatches():
+    assert transcribe_bench.engine_mismatches(FakeEngine(), bench_args(), {"engine_type": "faster_whisper", "device": "cpu"}) == []
+    whisper_cpp_fell_back = transcribe_bench.engine_mismatches(FakeEngine(), bench_args(runtime="vulkan"), {"engine_type": "whisper_cpp"})
+    assert any("engine_type" in mismatch for mismatch in whisper_cpp_fell_back)
+    inactive_cuda = transcribe_bench.engine_mismatches(FakeEngine(), bench_args(runtime="cuda"), {"engine_type": "faster_whisper", "device": "cpu"})
+    assert any("not active" in mismatch for mismatch in inactive_cuda)
+    other_model = transcribe_bench.engine_mismatches(FakeEngine(model_key="tiny"), bench_args(model="base"), {"engine_type": "faster_whisper", "device": "cpu"})
+    assert any("model" in mismatch for mismatch in other_model)

@@ -4,7 +4,7 @@ import threading
 import numpy as np
 import pytest
 
-from whisper_key.audio_analysis import AudioAnalysisWorker, VadFramer
+from whisper_key.audio_analysis import INCOMPLETE_ANALYSIS, AudioAnalysisWorker, VadFramer
 
 
 @pytest.mark.parametrize("rate", [8000, 11025, 16000, 22050, 24000, 32000, 44100, 48000, 88200, 96000, 192000])
@@ -43,13 +43,17 @@ def block():
     return np.zeros((256, 1), dtype=np.float32)
 
 
+def drain(worker):
+    return worker.request_snapshot(lambda: (True, 0.0)).result(5) == (True, 0.0)
+
+
 def test_worker_processes_blocks_and_resets_in_submission_order():
     worker, events = make_worker()
     worker.start()
     worker.submit(block(), feed_streaming=False)
-    worker.request_reset(True, True)
+    assert worker.request_reset(True, True)
     worker.submit(block(), feed_streaming=True)
-    assert worker.wait_until_processed(2, timeout=5)
+    assert drain(worker)
     worker.stop()
     assert events == [("vad", 256), ("reset", True, True), ("vad", 256), ("stream", 256)]
 
@@ -91,17 +95,45 @@ def test_stop_discards_backlog_and_rejects_new_blocks():
     assert not worker.is_accepting()
 
 
-def test_wait_until_processed_reports_incomplete_analysis():
+def test_snapshot_is_taken_exactly_after_the_blocks_submitted_before_it():
+    frames_seen = []
+    worker, _ = make_worker(process_vad_frame=lambda frame: frames_seen.append(1))
+    worker.start()
+    worker.submit(block(), feed_streaming=False)
+    worker.submit(block(), feed_streaming=False)
+    snapshot = worker.request_snapshot(lambda: (True, float(len(frames_seen))))
+    worker.submit(block(), feed_streaming=False)
+    assert snapshot.result(5) == (True, 2.0)
+    assert drain(worker)
+    worker.stop()
+    assert len(frames_seen) == 3
+
+
+def test_snapshot_times_out_as_incomplete_while_the_worker_lags():
     gate = threading.Event()
     worker, _ = make_worker(process_vad_frame=lambda frame: gate.wait(5))
     worker.start()
     try:
         worker.submit(block(), feed_streaming=False)
-        assert not worker.wait_until_processed(1, timeout=0)
+        assert worker.request_snapshot(lambda: (True, 1.0)).result(0) == INCOMPLETE_ANALYSIS
     finally:
         gate.set()
-    assert worker.wait_until_processed(1, timeout=5)
     worker.stop()
+
+
+def test_stop_abandons_pending_snapshots_and_refuses_new_requests():
+    gate = threading.Event()
+    worker, _ = make_worker(process_vad_frame=lambda frame: gate.wait(5))
+    worker.start()
+    worker.submit(block(), feed_streaming=False)
+    pending = worker.request_snapshot(lambda: (True, 1.0))
+    stopper = threading.Thread(target=worker.stop)
+    stopper.start()
+    gate.set()
+    stopper.join(timeout=5)
+    assert pending.result(1) == INCOMPLETE_ANALYSIS
+    assert worker.request_snapshot(lambda: (True, 1.0)).result(0) == INCOMPLETE_ANALYSIS
+    assert not worker.request_reset(True, True)
 
 
 def test_streaming_only_worker_skips_audio_until_a_recognizer_is_attached():
@@ -111,10 +143,10 @@ def test_streaming_only_worker_skips_audio_until_a_recognizer_is_attached():
                                  lambda: attached["value"], lambda vad, streaming: None, threading.Lock())
     worker.start()
     worker.submit(block(), feed_streaming=True)
-    assert worker.wait_until_processed(1, timeout=5)
+    assert drain(worker)
     attached["value"] = True
     worker.submit(block(), feed_streaming=True)
-    assert worker.wait_until_processed(2, timeout=5)
+    assert drain(worker)
     worker.stop()
     assert streamed == [256]
 
@@ -125,7 +157,7 @@ def test_consumers_run_under_the_shared_lock():
     worker, _ = make_worker(process_vad_frame=lambda frame: held.append(consumer_lock.locked()), consumer_lock=consumer_lock)
     worker.start()
     worker.submit(block(), feed_streaming=False)
-    assert worker.wait_until_processed(1, timeout=5)
+    assert drain(worker)
     worker.stop()
     assert held == [True]
 
@@ -141,6 +173,6 @@ def test_worker_survives_consumer_errors():
     worker.start()
     worker.submit(block(), False)
     worker.submit(block(), False)
-    assert worker.wait_until_processed(2, timeout=5)
+    assert drain(worker)
     worker.stop()
     assert len(calls) == 2

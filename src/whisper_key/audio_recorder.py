@@ -2,22 +2,21 @@ import logging
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Callable
 
 import numpy as np
 import sounddevice as sd
 import soxr
 
-from .audio_analysis import AudioAnalysisWorker
+from .audio_analysis import AnalysisSnapshot, AudioAnalysisWorker, abandoned_snapshot
 from .voice_activity_detection import VadEvent, VAD_CHUNK_SIZE
 
 
 @dataclass
 class Recording:
     audio: np.ndarray
-    realtime_speech_detected: bool = False
-    trailing_silence_seconds: float = 0.0
+    realtime_analysis: AnalysisSnapshot = field(default_factory=abandoned_snapshot)
 
     @property
     def duration_seconds(self) -> float:
@@ -44,7 +43,6 @@ class AudioRecorder:
     RECORDING_SLEEP_INTERVAL = 100
     STREAM_DTYPE = np.float32
     WASAPI_REOPEN_DELAY = 0.05
-    ANALYSIS_CATCH_UP_SECONDS = 0.5
     OVERFLOW_REPORT_INTERVAL_SECONDS = 10.0
 
     def __init__(self,
@@ -211,27 +209,24 @@ class AudioRecorder:
         with self._pre_roll_lock:
             self._clear_pre_roll()
 
-    def _take_recorded_chunks(self, analysis_wait_seconds: float) -> Optional[tuple]:
+    def _take_recorded_chunks(self, request_analysis: bool = True) -> Optional[tuple]:
         with self._pre_roll_lock:
             if not self.is_recording:
                 return None
             self.is_recording = False
             recorded_chunks, self.audio_data = self.audio_data, []
-            worker = self._analysis_worker
-            submitted_blocks = worker.submitted_blocks if worker else 0
-        return recorded_chunks, self._realtime_analysis(worker, submitted_blocks, analysis_wait_seconds)
+            analysis = self._request_recording_analysis() if request_analysis else abandoned_snapshot()
+        return recorded_chunks, analysis
 
-    def _realtime_analysis(self, worker, submitted_blocks: int, wait_seconds: float) -> tuple:
+    def _request_recording_analysis(self) -> AnalysisSnapshot:
+        worker = self._analysis_worker
         if not self.continuous_vad or worker is None:
-            return False, 0.0
+            return abandoned_snapshot()
         start_worker, start_dropped_blocks = self._recording_analysis_start
-        dropped_at_start = start_dropped_blocks if start_worker is worker else 0
-        analysis_complete = (worker.dropped_blocks == dropped_at_start
-                             and worker.wait_until_processed(submitted_blocks, wait_seconds))
-        if not analysis_complete:
-            self.logger.info("Real-time VAD had not analyzed the whole recording, using the pre-check and no silence trim")
-            return False, 0.0
-        return self.continuous_vad.get_recording_analysis()
+        if start_worker is not worker or worker.dropped_blocks != start_dropped_blocks:
+            self.logger.info("Real-time VAD skipped part of the recording, using the pre-check and no silence trim")
+            return abandoned_snapshot()
+        return worker.request_snapshot(self.continuous_vad.get_recording_analysis)
 
     def _test_audio_source(self):
         try:
@@ -309,11 +304,10 @@ class AudioRecorder:
 
     def _reset_realtime_analysis(self, stream_is_running: bool, reset_vad: bool, reset_streaming: bool):
         worker = self._analysis_worker
-        if stream_is_running and worker and worker.is_accepting():
-            worker.request_reset(reset_vad, reset_streaming)
-        else:
-            with self._analysis_consumers_lock:
-                self._reset_analysis_consumers(reset_vad, reset_streaming)
+        if stream_is_running and worker and worker.is_accepting() and worker.request_reset(reset_vad, reset_streaming):
+            return
+        with self._analysis_consumers_lock:
+            self._reset_analysis_consumers(reset_vad, reset_streaming)
 
     def _reset_analysis_consumers(self, reset_vad: bool, reset_streaming: bool):
         if reset_vad and self.continuous_vad:
@@ -364,7 +358,9 @@ class AudioRecorder:
 
                 if not stream_is_running:
                     self._start_stream_thread()
-                    self._recording_analysis_start = (self._analysis_worker, 0)
+                    with self._pre_roll_lock:
+                        worker = self._analysis_worker
+                        self._recording_analysis_start = (worker, worker.dropped_blocks if worker else 0)
 
                 return True
 
@@ -379,7 +375,7 @@ class AudioRecorder:
             if not self.is_recording:
                 return None
 
-            recorded = self._take_recorded_chunks(self.ANALYSIS_CATCH_UP_SECONDS)
+            recorded = self._take_recorded_chunks()
             stream_no_longer_needed = not (self.is_monitoring or self.is_buffering)
             stream_thread = self.recording_thread
 
@@ -389,7 +385,7 @@ class AudioRecorder:
         return self._process_audio_data(recorded)
 
     def _process_audio_data(self, recorded: Optional[tuple]) -> Optional[Recording]:
-        recorded_chunks, (realtime_speech_detected, trailing_silence_seconds) = recorded or ([], (False, 0.0))
+        recorded_chunks, realtime_analysis = recorded or ([], None)
         if not recorded_chunks:
             print("   ✗ No audio data recorded!")
             return None
@@ -401,7 +397,7 @@ class AudioRecorder:
             self.logger.info(f"Resampling from {recording_rate} Hz to {self.WHISPER_SAMPLE_RATE} Hz")
             audio_array = self._resample_audio(audio_array, recording_rate, self.WHISPER_SAMPLE_RATE)
 
-        recording = Recording(audio_array, realtime_speech_detected, trailing_silence_seconds)
+        recording = Recording(audio_array, realtime_analysis)
         self.logger.info(f"Recorded {recording.duration_seconds:.2f} seconds of audio")
         return recording
 
@@ -410,7 +406,7 @@ class AudioRecorder:
             if not self.is_recording:
                 return
 
-            self._take_recorded_chunks(analysis_wait_seconds=0)
+            self._take_recorded_chunks(request_analysis=False)
             self.recording_start_time = None
             stream_no_longer_needed = not (self.is_monitoring or self.is_buffering)
             stream_thread = self.recording_thread
@@ -524,7 +520,7 @@ class AudioRecorder:
                 self.logger.info(f"Maximum recording duration of {self.max_duration}s reached")
                 print(f"⏰ Maximum recording duration of {self.max_duration}s reached - stopping recording")
 
-                recorded = self._take_recorded_chunks(analysis_wait_seconds=0)
+                recorded = self._take_recorded_chunks()
                 if recorded is None:
                     return False
                 recording = self._process_audio_data(recorded)

@@ -135,7 +135,7 @@ def test_recording_through_the_analysis_worker_at_22050_hz(monkeypatch):
     assert wait_until(lambda: delivered_blocks() >= 30)
     recording = recorder.stop_recording()
     assert recording is not None and recording.audio.ndim == 1
-    assert recording.realtime_speech_detected
+    assert recording.realtime_analysis.result(5)[0]
     assert ten_vad.frame_lengths == {256}
     assert recording.duration_seconds > 0.2
 
@@ -175,14 +175,32 @@ def test_restarting_the_stream_never_runs_two_workers_on_the_detector(monkeypatc
     assert not concurrent
 
 
-def test_incomplete_analysis_disables_trim_and_realtime_speech(monkeypatch):
-    recorder, _ = make_recorder(monkeypatch, 16000, ten_vad=ScriptedSpeech(delay=0.05))
+def test_dropped_analysis_blocks_disable_trim_and_realtime_speech(monkeypatch):
+    recorder, _ = make_recorder(monkeypatch, 16000)
     assert recorder.start_recording()
-    assert wait_until(lambda: delivered_blocks() >= 20)
-    recorder.ANALYSIS_CATCH_UP_SECONDS = 0.0
+    assert wait_until(lambda: delivered_blocks() >= 5)
+    with recorder._pre_roll_lock:
+        recorder._analysis_worker.dropped_blocks += 1
     recording = recorder.stop_recording()
-    assert not recording.realtime_speech_detected
-    assert recording.trailing_silence_seconds == 0.0
+    assert recording.realtime_analysis.result(1) == (False, 0.0)
+
+
+def test_analysis_ignores_audio_after_the_stop(monkeypatch):
+    ten_vad = ScriptedSpeech(probability=0.0)
+    recorder, _ = make_recorder(monkeypatch, 16000, ten_vad=ten_vad)
+    assert recorder.start_monitoring()
+    assert recorder.start_recording()
+    assert wait_until(lambda: delivered_blocks() >= 5)
+    ten_vad.probability = 0.95
+    assert wait_until(lambda: recorder.continuous_vad.speech_detected_since_reset)
+    ten_vad.probability = 0.0
+    recording = recorder.stop_recording()
+    speech_detected, trailing_silence = recording.realtime_analysis.result(5)
+    blocks_at_stop = delivered_blocks()
+    assert wait_until(lambda: delivered_blocks() >= blocks_at_stop + 30)
+    assert speech_detected
+    assert trailing_silence < recorder.continuous_vad.get_silence_duration()
+    recorder.stop_monitoring()
 
 
 def test_streaming_without_vad_feeds_the_recognizer_once_attached(monkeypatch):

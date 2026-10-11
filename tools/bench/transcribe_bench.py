@@ -42,11 +42,14 @@ def word_edits(reference: str, hypothesis: str) -> tuple:
     return previous_row[-1], len(reference_words)
 
 
-def word_error_rate(reference: str, hypothesis: str) -> float:
-    edits, reference_word_count = word_edits(reference, hypothesis)
+def error_rate(edits: int, reference_word_count: int) -> float:
     if not reference_word_count:
         return 0.0 if not edits else 1.0
     return edits / reference_word_count
+
+
+def word_error_rate(reference: str, hypothesis: str) -> float:
+    return error_rate(*word_edits(reference, hypothesis))
 
 
 def _pcm_to_float(frames: bytes, sample_width: int) -> np.ndarray:
@@ -108,6 +111,35 @@ def download_public_samples(sample_dir: Path):
         wav_path.with_suffix(".txt").write_text(reference, encoding="utf-8")
 
 
+def expected_engine(whisper_config: dict, registry) -> dict:
+    from whisper_key.model_registry import ONNX_FAMILY
+    from whisper_key.runtime_options import ONNX_ASR, apply_onnx_runtime_selection, apply_runtime_selection
+
+    if registry.get_engine_family(whisper_config["model"]) == ONNX_FAMILY:
+        selected = apply_onnx_runtime_selection(whisper_config)
+        return {"engine_type": ONNX_ASR, "onnx_runtime": selected["onnx_runtime"]}
+    selected = apply_runtime_selection(whisper_config)
+    expected = {"engine_type": selected["engine_type"]}
+    if selected["engine_type"] == "faster_whisper":
+        expected["device"] = selected["device"]
+    return expected
+
+
+def engine_mismatches(engine, args, expected: dict) -> list:
+    mismatches = []
+    if engine.model_key != args.model:
+        mismatches.append(f"model [{engine.model_key}] instead of [{args.model}]")
+    for attribute, value in expected.items():
+        actual = engine.ENGINE_TYPE if attribute == "engine_type" else getattr(engine, attribute, None)
+        if actual != value:
+            mismatches.append(f"{attribute} [{actual}] instead of [{value}]")
+    if args.runtime in ("cuda", "rocm") and expected.get("device") != "cuda":
+        mismatches.append(f"runtime [{args.runtime}] is not active, select it in Whisper Key first")
+    if args.onnx_runtime and expected.get("onnx_runtime", args.onnx_runtime) != args.onnx_runtime:
+        mismatches.append(f"ONNX runtime [{args.onnx_runtime}] is not active, select it in Whisper Key first")
+    return mismatches
+
+
 def build_engine(args):
     from whisper_key.config_manager import ConfigManager
     from whisper_key.main import setup_whisper_engine
@@ -127,10 +159,12 @@ def build_engine(args):
     registry = ModelRegistry(whisper_models_config=whisper_config.get("models", {}))
     if not registry.is_known_model(args.model):
         raise SystemExit(f"Unknown model [{args.model}]; use a key from whisper.models in config.defaults.yaml")
+    expected = expected_engine(whisper_config, registry)
     engine = setup_whisper_engine(whisper_config, None, registry)
-    if engine.model_key != args.model:
+    mismatches = engine_mismatches(engine, args, expected)
+    if mismatches:
         engine.close()
-        raise SystemExit(f"[{args.model}] could not be loaded, the app would fall back to [{engine.model_key}]")
+        raise SystemExit(f"The requested setup could not be benchmarked, the app would use {describe_engine(engine)}: " + "; ".join(mismatches))
     return engine
 
 
@@ -158,7 +192,7 @@ def run_benchmark(engine, samples: list, runs: int) -> dict:
             edits, reference_word_count = word_edits(reference, text)
             total_edits += edits
             total_reference_words += reference_word_count
-            wer = round(word_error_rate(reference, text), 4)
+            wer = round(error_rate(edits, reference_word_count), 4)
         rows.append({
             "sample": name,
             "audio_seconds": round(audio_seconds, 2),
@@ -187,6 +221,13 @@ def positive_int(value: str) -> int:
     return number
 
 
+def non_negative_int(value: str) -> int:
+    number = int(value)
+    if number < 0:
+        raise argparse.ArgumentTypeError("must be 0 (automatic) or more")
+    return number
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Benchmark Whisper Key transcription the way the app runs it: WAV files plus matching .txt references. "
@@ -200,7 +241,7 @@ def main():
     parser.add_argument("--beam-size", type=positive_int)
     parser.add_argument("--language")
     parser.add_argument("--onnx-runtime", choices=("onnx-cpu", "onnx-directml", "onnx-cuda"))
-    parser.add_argument("--cpu-threads", type=int)
+    parser.add_argument("--cpu-threads", type=non_negative_int)
     parser.add_argument("--runs", type=positive_int, default=3)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
