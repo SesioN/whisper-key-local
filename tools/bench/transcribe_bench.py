@@ -113,11 +113,13 @@ def download_public_samples(sample_dir: Path):
 
 def expected_engine(whisper_config: dict, registry) -> dict:
     from whisper_key.model_registry import ONNX_FAMILY
+    from whisper_key.runtime_loader import ONNX_CPU
     from whisper_key.runtime_options import ONNX_ASR, apply_onnx_runtime_selection, apply_runtime_selection
 
     if registry.get_engine_family(whisper_config["model"]) == ONNX_FAMILY:
         selected = apply_onnx_runtime_selection(whisper_config)
-        return {"engine_type": ONNX_ASR, "onnx_runtime": selected["onnx_runtime"]}
+        device = "cpu" if selected["onnx_runtime"] == ONNX_CPU else "gpu"
+        return {"engine_type": ONNX_ASR, "onnx_runtime": selected["onnx_runtime"], "device": device}
     selected = apply_runtime_selection(whisper_config)
     expected = {"engine_type": selected["engine_type"]}
     if selected["engine_type"] == "faster_whisper":
@@ -169,7 +171,7 @@ def build_engine(args):
 
 
 def describe_engine(engine) -> str:
-    runtime = getattr(engine, "onnx_runtime", None) or getattr(engine, "device", "")
+    runtime = " / ".join(str(value) for value in (getattr(engine, "onnx_runtime", None), getattr(engine, "device", None)) if value)
     return f"{engine.ENGINE_TYPE} [{engine.model_key}] on {runtime}"
 
 

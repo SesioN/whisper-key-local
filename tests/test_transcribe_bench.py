@@ -97,3 +97,17 @@ def test_engine_fallbacks_are_reported_as_mismatches():
     assert any("not active" in mismatch for mismatch in inactive_cuda)
     other_model = transcribe_bench.engine_mismatches(FakeEngine(model_key="tiny"), bench_args(model="base"), {"engine_type": "faster_whisper", "device": "cpu"})
     assert any("model" in mismatch for mismatch in other_model)
+
+
+class FakeOnnxEngine:
+    ENGINE_TYPE = "onnx_asr"
+    model_key = "qwen3-asr-1.7b-int8"
+    onnx_runtime = "onnx-directml"
+    device = "cpu"
+
+
+def test_onnx_gpu_request_that_runs_on_the_cpu_is_a_mismatch():
+    expected = {"engine_type": "onnx_asr", "onnx_runtime": "onnx-directml", "device": "gpu"}
+    mismatches = transcribe_bench.engine_mismatches(FakeOnnxEngine(), bench_args(model="qwen3-asr-1.7b-int8", onnx_runtime="onnx-directml"), expected)
+    assert any("device [cpu] instead of [gpu]" in mismatch for mismatch in mismatches)
+    assert transcribe_bench.describe_engine(FakeOnnxEngine()) == "onnx_asr [qwen3-asr-1.7b-int8] on onnx-directml / cpu"
