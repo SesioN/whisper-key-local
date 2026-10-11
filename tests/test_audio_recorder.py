@@ -245,3 +245,13 @@ def test_resets_are_queued_while_streaming_and_direct_when_stopped(monkeypatch):
     recorder._reset_realtime_analysis(stream_is_running=True, reset_vad=True, reset_streaming=True)
     assert queued == [(True, True)]
     recorder.stop_monitoring()
+
+
+def test_snapshot_survives_the_stream_closing_after_the_stop(monkeypatch):
+    recorder, _ = make_recorder(monkeypatch, 48000, ten_vad=ScriptedSpeech(delay=0.008))
+    assert not recorder.is_monitoring and not recorder.is_buffering
+    assert recorder.start_recording()
+    assert wait_until(lambda: delivered_blocks() >= 40)
+    recording = recorder.stop_recording()
+    assert not recorder._stream_is_running()
+    assert recording.realtime_analysis.result(1)[0]

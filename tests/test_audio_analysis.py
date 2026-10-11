@@ -121,19 +121,34 @@ def test_snapshot_times_out_as_incomplete_while_the_worker_lags():
     worker.stop()
 
 
-def test_stop_abandons_pending_snapshots_and_refuses_new_requests():
+def test_stop_still_completes_snapshots_queued_before_it_and_refuses_new_requests():
     gate = threading.Event()
-    worker, _ = make_worker(process_vad_frame=lambda frame: gate.wait(5))
+    frames_seen = []
+
+    def slow_frame(frame):
+        gate.wait(5)
+        frames_seen.append(1)
+
+    worker, _ = make_worker(process_vad_frame=slow_frame)
     worker.start()
     worker.submit(block(), feed_streaming=False)
-    pending = worker.request_snapshot(lambda: (True, 1.0))
+    worker.submit(block(), feed_streaming=False)
+    pending = worker.request_snapshot(lambda: (True, float(len(frames_seen))))
+    worker.submit(block(), feed_streaming=False)
     stopper = threading.Thread(target=worker.stop)
     stopper.start()
     gate.set()
     stopper.join(timeout=5)
-    assert pending.result(1) == INCOMPLETE_ANALYSIS
+    assert pending.result(1) == (True, 2.0)
     assert worker.request_snapshot(lambda: (True, 1.0)).result(0) == INCOMPLETE_ANALYSIS
     assert not worker.request_reset(True, True)
+
+
+def test_snapshots_of_a_worker_that_never_ran_are_abandoned():
+    worker, _ = make_worker()
+    pending = worker.request_snapshot(lambda: (True, 1.0))
+    worker.stop()
+    assert pending.result(1) == INCOMPLETE_ANALYSIS
 
 
 def test_streaming_only_worker_skips_audio_until_a_recognizer_is_attached():

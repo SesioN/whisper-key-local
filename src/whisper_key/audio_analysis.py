@@ -95,17 +95,34 @@ class AudioAnalysisWorker:
     def stop(self):
         with self._queue_lock:
             self._stopping = True
+            pending_items = []
             while True:
                 try:
-                    item = self._queue.get_nowait()
+                    pending_items.append(self._queue.get_nowait())
                 except queue.Empty:
                     break
-                if item[0] is _SNAPSHOT:
-                    item[1].abandon()
+            for item in self._items_needed_for_snapshots(pending_items):
+                self._queue.put(item)
             self._queue.put((_STOP,))
         if self._thread.is_alive() and self._thread is not threading.current_thread():
             self._thread.join(timeout=WORKER_JOIN_TIMEOUT_SECONDS)
+        if not self._thread.is_alive():
+            self._abandon_queued_snapshots()
         self._report_dropped_blocks()
+
+    def _abandon_queued_snapshots(self):
+        while True:
+            try:
+                item = self._queue.get_nowait()
+            except queue.Empty:
+                return
+            if item[0] is _SNAPSHOT:
+                item[1].abandon()
+
+    @staticmethod
+    def _items_needed_for_snapshots(pending_items: list) -> list:
+        last_snapshot_index = max((index for index, item in enumerate(pending_items) if item[0] is _SNAPSHOT), default=-1)
+        return pending_items[:last_snapshot_index + 1]
 
     def is_accepting(self) -> bool:
         return self._thread.is_alive() and not self._stopping
@@ -144,9 +161,7 @@ class AudioAnalysisWorker:
             except queue.Empty:
                 self._report_dropped_blocks()
                 continue
-            if item[0] is _STOP or self._stopping:
-                if item[0] is _SNAPSHOT:
-                    item[1].abandon()
+            if item[0] is _STOP:
                 return
             try:
                 with self._consumer_lock:
