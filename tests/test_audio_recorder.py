@@ -255,3 +255,14 @@ def test_snapshot_survives_the_stream_closing_after_the_stop(monkeypatch):
     recording = recorder.stop_recording()
     assert not recorder._stream_is_running()
     assert recording.realtime_analysis.result(1)[0]
+
+
+def test_new_stream_supersedes_the_previous_worker(monkeypatch):
+    recorder, _ = make_recorder(monkeypatch, 16000)
+    assert recorder.start_monitoring()
+    first_worker = recorder._analysis_worker
+    recorder.stop_monitoring()
+    assert recorder.start_monitoring()
+    assert recorder._analysis_worker is not first_worker
+    assert first_worker._superseded
+    recorder.stop_monitoring()

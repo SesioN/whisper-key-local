@@ -191,3 +191,26 @@ def test_worker_survives_consumer_errors():
     assert drain(worker)
     worker.stop()
     assert len(calls) == 2
+
+
+def test_superseded_worker_stops_touching_consumers():
+    consumer_lock = threading.Lock()
+    gate = threading.Event()
+    frames_seen = []
+
+    def slow_frame(frame):
+        gate.wait(5)
+        frames_seen.append(1)
+
+    worker, _ = make_worker(process_vad_frame=slow_frame, consumer_lock=consumer_lock)
+    worker.start()
+    for _ in range(5):
+        worker.submit(block(), feed_streaming=False)
+    pending = worker.request_snapshot(lambda: (True, 1.0))
+    gate.set()
+    with consumer_lock:
+        worker.supersede()
+        seen_when_superseded = len(frames_seen)
+    worker.stop()
+    assert len(frames_seen) == seen_when_superseded
+    assert pending.result(1) == INCOMPLETE_ANALYSIS

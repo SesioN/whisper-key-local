@@ -83,6 +83,7 @@ class AudioAnalysisWorker:
         self._queue = queue.SimpleQueue()
         self._queue_lock = threading.Lock()
         self._stopping = False
+        self._superseded = False
         self.submitted_blocks = 0
         self.dropped_blocks = 0
         self._reported_dropped_blocks = 0
@@ -123,6 +124,9 @@ class AudioAnalysisWorker:
     def _items_needed_for_snapshots(pending_items: list) -> list:
         last_snapshot_index = max((index for index, item in enumerate(pending_items) if item[0] is _SNAPSHOT), default=-1)
         return pending_items[:last_snapshot_index + 1]
+
+    def supersede(self):
+        self._superseded = True
 
     def is_accepting(self) -> bool:
         return self._thread.is_alive() and not self._stopping
@@ -165,7 +169,10 @@ class AudioAnalysisWorker:
                 return
             try:
                 with self._consumer_lock:
-                    if item[0] is _RESET:
+                    if self._superseded:
+                        if item[0] is _SNAPSHOT:
+                            item[1].abandon()
+                    elif item[0] is _RESET:
                         _, reset_vad, reset_streaming = item
                         if reset_vad:
                             self._framer.reset()

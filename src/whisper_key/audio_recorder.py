@@ -9,7 +9,7 @@ import numpy as np
 import sounddevice as sd
 import soxr
 
-from .audio_analysis import AnalysisSnapshot, AudioAnalysisWorker, abandoned_snapshot
+from .audio_analysis import WORKER_JOIN_TIMEOUT_SECONDS, AnalysisSnapshot, AudioAnalysisWorker, abandoned_snapshot
 from .voice_activity_detection import VadEvent, VAD_CHUNK_SIZE
 
 
@@ -39,7 +39,7 @@ def to_mono_block(input_block: np.ndarray) -> np.ndarray:
 
 class AudioRecorder:
     WHISPER_SAMPLE_RATE = 16000
-    THREAD_JOIN_TIMEOUT = 2.0
+    THREAD_JOIN_TIMEOUT = WORKER_JOIN_TIMEOUT_SECONDS + 2.0
     RECORDING_SLEEP_INTERVAL = 100
     STREAM_DTYPE = np.float32
     WASAPI_REOPEN_DELAY = 0.05
@@ -307,6 +307,8 @@ class AudioRecorder:
         if stream_is_running and worker and worker.is_accepting() and worker.request_reset(reset_vad, reset_streaming):
             return
         with self._analysis_consumers_lock:
+            if worker:
+                worker.supersede()
             self._reset_analysis_consumers(reset_vad, reset_streaming)
 
     def _reset_analysis_consumers(self, reset_vad: bool, reset_streaming: bool):
@@ -327,6 +329,10 @@ class AudioRecorder:
         return self._stream_is_wanted() and self.recording_thread is not None and self.recording_thread.is_alive()
 
     def _start_stream_thread(self):
+        previous_worker = self._analysis_worker
+        if previous_worker:
+            with self._analysis_consumers_lock:
+                previous_worker.supersede()
         recording_rate = self._get_recording_sample_rate()
         blocksize = int(VAD_CHUNK_SIZE * recording_rate / self.WHISPER_SAMPLE_RATE)
         analysis_worker = self._create_analysis_worker(recording_rate, blocksize)
