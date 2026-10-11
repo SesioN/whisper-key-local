@@ -4,6 +4,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-10-11
+
+### Added
+- **App version in the tray** - the tray menu header shows the running version
+- **whisper.cpp install offer** - picking a model that only runs on whisper.cpp while it is not installed offers to install whisper.cpp (Vulkan) and download the model; when whisper.cpp cannot be installed on the PC, or the model has no whisper.cpp version, it offers to run the model with faster-whisper on the CPU instead. Such models are no longer greyed out
+
+### Changed
+- **Orb fully opaque at maximum opacity** - translucent orb skins get a solid body as the orb opacity goes from the idle default to 100%
+
 ## [1.9.0b1] - 2026-10-11
 
 ### Added
