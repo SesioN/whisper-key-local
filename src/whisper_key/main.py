@@ -20,7 +20,7 @@ from .config_manager import ConfigManager
 from .audio_recorder import AudioRecorder
 from .hotkey_listener import HotkeyListener
 from .whisper_engine import create_whisper_engine
-from .runtime_options import ONNX_ASR, apply_onnx_runtime_selection, apply_runtime_selection
+from .runtime_options import ONNX_ASR, apply_onnx_runtime_selection, apply_runtime_selection, resolve_cpu_threads
 from .voice_activity_detection import VadManager
 from .clipboard_manager import ClipboardManager
 from .state_manager import StateManager
@@ -34,7 +34,7 @@ from .model_registry import ONNX_FAMILY, ModelRegistry
 from .streaming_manager import StreamingManager
 from .voice_commands import VoiceCommandManager
 from .hardware_detection import detect_and_print as detect_hardware
-from .onboarding import check_gpu
+from .onboarding import check_gpu, run_model_onboarding, uses_gpu_runtime
 from .update_checker import check_for_updates
 from .utils import get_user_app_data_path, get_version, OptionalComponent, prune_stale_pyapp_envs, open_file
 
@@ -79,7 +79,6 @@ def setup_exception_handler():
 def setup_audio_recorder(audio_config, state_manager, vad_manager, streaming_manager):
     return AudioRecorder(
         channels=audio_config['channels'],
-        dtype=audio_config['dtype'],
         max_duration=audio_config['max_duration'],
         on_max_duration_reached=state_manager.handle_max_recording_duration_reached,
         on_vad_event=state_manager.handle_vad_event,
@@ -98,6 +97,8 @@ def setup_vad(vad_config):
         vad_realtime_enabled=vad_config['vad_realtime_enabled'],
         vad_onset_threshold=vad_config['vad_onset_threshold'],
         vad_offset_threshold=vad_config['vad_offset_threshold'],
+        vad_precheck_onset_threshold=vad_config['vad_precheck_onset_threshold'],
+        vad_precheck_offset_threshold=vad_config['vad_precheck_offset_threshold'],
         vad_min_speech_duration=vad_config['vad_min_speech_duration'],
         vad_silence_timeout_seconds=vad_config['vad_silence_timeout_seconds'],
         auto_trigger_silence_seconds=vad_config['auto_trigger_silence_seconds']
@@ -269,7 +270,7 @@ def setup_floating_widget(config_manager, state_manager):
 def run_gpu_onboarding(config_manager, whisper_config):
     gpu_status = config_manager.config.get('onboarding', {}).get('gpu', 'pending')
     if gpu_status != 'pending' or whisper_config.get('runtime') == VULKAN:
-        return whisper_config, None
+        return whisper_config, None, False
 
     gpu_class, gpu_name, ct2_works = detect_hardware(whisper_config['device'])
 
@@ -295,13 +296,13 @@ def run_gpu_onboarding(config_manager, whisper_config):
         if choice == INSTALL_ROCM and gpu_class == 'amd_rdna1':
             from .onboarding import install_gpu_runtime
             install_gpu_runtime(gpu_class, gpu_name, config_manager)
-            return config_manager.get_whisper_config(), None
+            return config_manager.get_whisper_config(), None, True
 
         if choice in (INSTALL_ROCM, USE_WHISPER_CPP):
             config_manager.update_user_setting('onboarding', 'gpu_class', gpu_class)
             config_manager.update_user_setting('onboarding', 'gpu', 'complete')
             print(f"{BOLD_GREEN}The runtime is set up after startup. You can change it later in the tray Runtime menu.{RESET}\n")
-            return whisper_config, ROCM if choice == INSTALL_ROCM else VULKAN
+            return whisper_config, ROCM if choice == INSTALL_ROCM else VULKAN, True
 
         if choice == CPU_ONLY:
             config_manager.update_user_setting('whisper', 'device', 'cpu')
@@ -310,7 +311,7 @@ def run_gpu_onboarding(config_manager, whisper_config):
             config_manager.update_user_setting('onboarding', 'gpu_class', gpu_class)
             config_manager.update_user_setting('onboarding', 'gpu', 'skipped')
 
-        return whisper_config, None
+        return whisper_config, None, False
 
     if gpu_class == 'nvidia' and not ct2_works:
         from .terminal_ui import BOLD_GREEN, RESET, prompt_choice
@@ -333,7 +334,7 @@ def run_gpu_onboarding(config_manager, whisper_config):
         if choice == INSTALL_CUDA:
             config_manager.update_user_setting('onboarding', 'gpu', 'complete')
             print(f"{BOLD_GREEN}The runtime is set up after startup. You can change it later in the tray Runtime menu.{RESET}\n")
-            return whisper_config, CUDA
+            return whisper_config, CUDA, True
 
         if choice == CPU_ONLY:
             config_manager.update_user_setting('whisper', 'device', 'cpu')
@@ -341,10 +342,10 @@ def run_gpu_onboarding(config_manager, whisper_config):
             config_manager.update_user_setting('whisper', 'runtime', 'cpu')
             config_manager.update_user_setting('onboarding', 'gpu', 'skipped')
 
-        return whisper_config, None
+        return whisper_config, None, False
 
     check_gpu(gpu_class, gpu_name, ct2_works, whisper_config['device'], config_manager)
-    return config_manager.get_whisper_config(), None
+    return config_manager.get_whisper_config(), None, False
 
 
 def _setup_onnx_engine(whisper_config, vad_manager, model_registry):
@@ -529,7 +530,12 @@ def main():
             logger.warning(activation_warning)
             print(f"⚠ {activation_warning}")
 
-        whisper_config, onboarding_runtime = run_gpu_onboarding(config_manager, whisper_config)
+        whisper_config, onboarding_runtime, gpu_selected = run_gpu_onboarding(config_manager, whisper_config)
+        whisper_config = run_model_onboarding(
+            config_manager, whisper_config,
+            uses_gpu=uses_gpu_runtime(whisper_config, onboarding_runtime, gpu_selected),
+            physical_cores=resolve_cpu_threads(0),
+        )
 
         loading_screen = OptionalComponent(setup_loading_screen(config_manager.get_loading_screen_config()))
         loading_screen.show()
@@ -542,8 +548,6 @@ def main():
         streaming_manager = setup_streaming(streaming_config, model_registry)
         loading_screen.set_status("Starting whisper.cpp server..." if whisper_config.get('runtime') == VULKAN else "Loading Whisper model...")
         whisper_engine = setup_whisper_engine(whisper_config, vad_manager, model_registry, config_manager, loading_screen)
-        loading_screen.set_status("Loading streaming model...")
-        streaming_manager.initialize()
         loading_screen.set_status("Finishing startup...")
         clipboard_manager = setup_clipboard_manager(clipboard_config)
         audio_feedback = setup_audio_feedback(audio_feedback_config)
@@ -585,7 +589,8 @@ def main():
         system_tray.attach_voice_command_manager_window(
             setup_voice_command_manager_window(voice_command_manager, hotkey_listener, system_tray))
 
-        state_manager.get_runtimes()
+        state_manager.start_runtime_detection()
+        streaming_manager.start_background_initialize(on_ready=state_manager.handle_streaming_ready)
         system_tray.start()
         loading_screen.close()
         if floating_widget and floating_widget_config['enabled']:

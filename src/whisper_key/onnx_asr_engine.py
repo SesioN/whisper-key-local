@@ -7,27 +7,20 @@ from typing import Callable, Optional
 
 import numpy as np
 
+from .audio_chunking import split_at_quiet_points
+from .languages import QWEN_LANGUAGE_NAMES
 from .runtime_loader import ONNX_CPU, ONNX_CUDA, ONNX_DIRECTML
 
 SPEECH_LLM = "speech-llm"
 SAMPLE_RATE = 16000
 SPEECH_LLM_MAX_CHUNK_SECONDS = 28
+DEFAULT_MAX_CHUNK_SECONDS = 60
 
 PROVIDERS = {
     ONNX_CPU: ["CPUExecutionProvider"],
     ONNX_DIRECTML: ["DmlExecutionProvider", "CPUExecutionProvider"],
     ONNX_CUDA: ["CUDAExecutionProvider", "CPUExecutionProvider"],
 }
-
-QWEN_LANGUAGE_NAMES = {
-    "ar": "Arabic", "yue": "Cantonese", "zh": "Chinese", "cs": "Czech", "da": "Danish", "nl": "Dutch",
-    "en": "English", "fil": "Filipino", "tl": "Filipino", "fi": "Finnish", "fr": "French", "de": "German",
-    "el": "Greek", "hi": "Hindi", "hu": "Hungarian", "id": "Indonesian", "it": "Italian", "ja": "Japanese",
-    "ko": "Korean", "mk": "Macedonian", "ms": "Malay", "fa": "Persian", "pl": "Polish", "pt": "Portuguese",
-    "ro": "Romanian", "ru": "Russian", "es": "Spanish", "sv": "Swedish", "th": "Thai", "tr": "Turkish",
-    "vi": "Vietnamese",
-}
-
 
 def onnx_model_class(onnx_model_type: str):
     if onnx_model_type == SPEECH_LLM:
@@ -56,21 +49,6 @@ def onnx_required_file_patterns(onnx_model_type: str, quantization: Optional[str
     return groups
 
 
-def split_at_quiet_points(audio: np.ndarray, max_seconds: float = SPEECH_LLM_MAX_CHUNK_SECONDS) -> list:
-    chunks = []
-    frame = SAMPLE_RATE // 50
-    max_samples = int(max_seconds * SAMPLE_RATE)
-    search_start = max_samples * 2 // 3
-    while len(audio) > max_samples:
-        search = audio[search_start:max_samples]
-        frame_energy = np.square(search[:len(search) // frame * frame].reshape(-1, frame)).mean(axis=1)
-        split = search_start + int(frame_energy.argmin()) * frame + frame // 2
-        chunks.append(audio[:split])
-        audio = audio[split:]
-    chunks.append(audio)
-    return chunks
-
-
 def matches_any_pattern(file_path: str, patterns: list) -> bool:
     return any(fnmatch.fnmatchcase(file_path, pattern) for pattern in patterns)
 
@@ -89,13 +67,11 @@ class OnnxAsrEngine:
     def __init__(self,
                  model_key: str,
                  onnx_runtime: str = ONNX_CPU,
-                 language: str = None,
                  vad_manager=None,
                  model_registry=None):
         self.model_key = model_key
         self.onnx_runtime = onnx_runtime
         self.device = "cpu"
-        self.language = None if language == "auto" else language
         self.vad_manager = vad_manager
         self.registry = model_registry
         self.model = None
@@ -141,7 +117,10 @@ class OnnxAsrEngine:
         return manager._create_asr_adapter(asr), definition.onnx_model_type, device
 
     def _chunk_seconds(self, model_key: str) -> float:
-        return self.registry.get_model(model_key).max_chunk_seconds or SPEECH_LLM_MAX_CHUNK_SECONDS
+        definition = self.registry.get_model(model_key)
+        if definition.max_chunk_seconds:
+            return definition.max_chunk_seconds
+        return SPEECH_LLM_MAX_CHUNK_SECONDS if definition.onnx_model_type == SPEECH_LLM else DEFAULT_MAX_CHUNK_SECONDS
 
     def _load_model(self):
         print(f"🧠 Loading ONNX model [{self.model_key}] on [{self.onnx_runtime}]...")
@@ -167,23 +146,22 @@ class OnnxAsrEngine:
     def warm_up(self):
         self._recognize(np.zeros(SAMPLE_RATE, dtype=np.float32))
 
-    def _recognize_kwargs(self) -> dict:
-        if self._model_type != SPEECH_LLM or not self.language:
+    def _recognize_kwargs(self, requested_language: Optional[str]) -> dict:
+        language_code = self.registry.transcription_language(self.model_key, requested_language)
+        if self._model_type != SPEECH_LLM or not language_code:
             return {}
-        language = QWEN_LANGUAGE_NAMES.get(self.language.lower().split("-")[0])
-        if not language:
-            self.logger.warning(f"Language [{self.language}] is not supported by [{self.model_key}], using auto-detect")
+        language_name = QWEN_LANGUAGE_NAMES.get(language_code)
+        if language_name is None:
+            self.logger.warning(f"Language [{language_code}] is not supported by [{self.model_key}], using auto-detect")
             return {}
-        return {"language": language}
+        return {"language": language_name}
 
-    def _recognize(self, audio: np.ndarray) -> str:
+    def _recognize(self, audio: np.ndarray, language: Optional[str] = None) -> str:
         with self._model_lock:
             model = self.model
             if model is None:
                 raise RuntimeError("No ONNX model loaded")
-            if self._model_type != SPEECH_LLM:
-                return model.recognize(audio, sample_rate=SAMPLE_RATE)
-            kwargs = self._recognize_kwargs()
+            kwargs = self._recognize_kwargs(language)
             texts = []
             for chunk in split_at_quiet_points(audio, self._max_chunk_seconds):
                 text = model.recognize(chunk, sample_rate=SAMPLE_RATE, **kwargs).strip()
@@ -237,18 +215,13 @@ class OnnxAsrEngine:
     def is_loading(self) -> bool:
         return self._loading_thread is not None and self._loading_thread.is_alive()
 
-    def transcribe_audio(self, audio_data: np.ndarray) -> Optional[str]:
+    def transcribe_audio(self, audio_data: np.ndarray, language: Optional[str] = None) -> Optional[str]:
         if audio_data is None or len(audio_data) == 0:
             self.logger.warning("No audio data to transcribe")
             return None
 
-        if self.vad_manager and self.vad_manager.is_available():
-            if not self.vad_manager.check_audio_for_speech(audio_data):
-                print("   ✗ No speech detected, skipping transcription")
-                return None
-
         start_time = time.time()
-        text = self._recognize(np.ascontiguousarray(audio_data.flatten(), dtype=np.float32)).strip()
+        text = self._recognize(np.ascontiguousarray(audio_data.flatten(), dtype=np.float32), language).strip()
         elapsed = time.time() - start_time
         print(f"   ✓ Transcription completed in {elapsed:.1f} seconds")
         self.logger.info(f"Transcription complete ({self.model_key}, {self.onnx_runtime}) - Time: {elapsed:.2f}s")

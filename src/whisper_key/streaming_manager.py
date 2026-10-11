@@ -47,9 +47,6 @@ class ContinuousStreamingRecognizer:
             self.last_text = ""
             self.recognizer.reset()
 
-    def set_recording_rate(self, rate: int) -> None:
-        self.recognizer.set_recording_rate(rate)
-
 
 class StreamingManager:
     def __init__(self,
@@ -63,12 +60,27 @@ class StreamingManager:
         self._model_loaded = False
         self.logger = logging.getLogger(__name__)
 
-    def initialize(self) -> None:
+    def initialize(self) -> bool:
         if not self.streaming_enabled:
-            return
+            return False
 
         if self._load_model():
             print(f"   ✓ Real-time speech recognition [{self.streaming_model}] enabled...")
+            return True
+        return False
+
+    def start_background_initialize(self, on_ready: Callable[[], None]) -> None:
+        if not self.streaming_enabled:
+            return
+
+        def initialize_and_notify():
+            try:
+                if self.initialize():
+                    on_ready()
+            except Exception as e:
+                self.logger.error(f"Streaming STT model failed to load: {e}")
+
+        threading.Thread(target=initialize_and_notify, daemon=True, name="StreamingModelLoader").start()
 
     def _load_model(self) -> bool:
         if self._model_loaded:

@@ -803,6 +803,10 @@ class _HeaderRow(_Row):
         x, y, width, height = self.button_box()
         self.canvas.create_text(left, view.px(26), anchor="w", text=self.data.title, font=view.font_title,
                                 fill=theme.text)
+        if self.data.version:
+            version_left = left + view.font_title.measure(self.data.title) + view.px(8)
+            self.canvas.create_text(version_left, view.px(27), anchor="w", font=view.font_small, fill=theme.secondary,
+                                    text=view.fit_text(view.font_small, self.data.version, x - version_left - view.px(8)))
         self.canvas.create_text(left, view.px(46), anchor="w", font=view.font_small, fill=theme.secondary,
                                 text=view.fit_text(view.font_small, self.data.subtitle(), x - left - view.px(8)))
         muted = self.muted()

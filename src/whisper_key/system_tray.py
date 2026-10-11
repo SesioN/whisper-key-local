@@ -4,8 +4,10 @@ import signal
 import threading
 from typing import Optional, TYPE_CHECKING
 
-from .utils import beautify_hotkey_bindings, open_file
+from .utils import beautify_hotkey_bindings, get_version, open_file
 from .platform import IS_WINDOWS, permissions, icons, autostart
+from .languages import AUTO_LANGUAGE, language_name, sorted_by_name
+from .model_registry import AUTOMATIC_LANGUAGE, FIXED_LANGUAGE
 from .runtime_options import COMPUTE_TYPES
 from .orb_skins import SKINS as ORB_SKINS
 from .orb_skins.base import DEFAULT_IDLE_OPACITY, appearance_matrix, apply_color_matrix
@@ -24,6 +26,7 @@ except ImportError:
     pystray = None
     Image = None
 
+MODEL_STATE_SUFFIXES = {"download": " (download)", "install": " (install whisper.cpp)", "faster_whisper": " (CPU)"}
 RECORDING_MODES = (("toggle", "Toggle"), ("push_to_talk", "Push to talk"))
 FLOATING_WIDGET_STYLES = (("button", "Button"), ("orb", "Voice orb"))
 ORB_APPEARANCE_DEFAULTS = {"opacity": DEFAULT_IDLE_OPACITY, "vibrancy": 1.0, "hue": 0}
@@ -40,6 +43,7 @@ ICON_FOLDER = ""
 ICON_DOCUMENT = ""
 ICON_EXIT = ""
 ICON_SLIDERS = ""
+ICON_RETRY = ""
 
 if TYPE_CHECKING:
     from .state_manager import StateManager
@@ -56,6 +60,7 @@ class SystemTray:
         self.tray_config = tray_config or {}
         self.config_manager = config_manager
         self.model_registry = model_registry
+        self._version_label = None
         self.shortcut_manager_window = None
         self.voice_command_manager_window = None
         self.logger = logging.getLogger(__name__)
@@ -109,9 +114,12 @@ class SystemTray:
     def build_menu(self) -> list:
         voice_commands_enabled = self.config_manager.get_setting('voice_commands', 'enabled')
         return [
-            Header("Whisper Key", self._status_text, lambda: self.state_manager.is_muted, self._toggle_mute),
+            Header("Whisper Key", self._status_text, lambda: self.state_manager.is_muted, self._toggle_mute,
+                   version=self._app_version()),
             Section("Recording"),
             Info("Shortcut", self._recording_shortcut_text),
+            Action("Retry last recording", self.state_manager.retry_failed_recording, icon=ICON_RETRY,
+                   enabled=self.state_manager.can_start_recording) if self.state_manager.has_failed_recording() else None,
             Choice("Recording mode", [Option(mode, label) for mode, label in RECORDING_MODES],
                    self._current_recording_mode, self._set_recording_mode, style="segmented") if self.recording_mode_changer else None,
             Toggle("Voice-activated recording", lambda: self.state_manager.auto_trigger_enabled, self._set_auto_trigger) if self.state_manager.is_auto_trigger_available() else None,
@@ -148,20 +156,82 @@ class SystemTray:
             status = STATUS_TEXTS.get(self.current_state, "Ready")
         return f"{status} · {self._model_detail()}"
 
+    def _app_version(self) -> str:
+        if self._version_label is None:
+            try:
+                self._version_label = f"v{get_version()}"
+            except Exception as e:
+                self.logger.warning(f"Could not read the app version: {e}")
+                self._version_label = ""
+        return self._version_label
+
     def _model_label(self, model_key: str) -> str:
         model = self.model_registry.get_model(model_key) if self.model_registry else None
         return model.label if model else model_key.title()
 
     def _model_detail(self) -> str:
-        return self._model_label(self.config_manager.get_setting('whisper', 'model'))
+        return self._model_label(self._selected_model_key())
+
+    def _selected_model_key(self) -> str:
+        return self.config_manager.get_setting('whisper', 'model')
+
+    def _language_detail(self) -> str:
+        model_key = self._selected_model_key()
+        language_choice = self.model_registry.language_choice(model_key)
+        if language_choice == FIXED_LANGUAGE:
+            return f"{language_name(self.model_registry.forced_language(model_key))} (fixed)"
+        if language_choice == AUTOMATIC_LANGUAGE:
+            return "Automatic"
+        return language_name(self.state_manager.get_effective_language(model_key))
+
+    def _build_language_page(self) -> list:
+        model_key = self._selected_model_key()
+        language_choice = self.model_registry.language_choice(model_key)
+        if language_choice == FIXED_LANGUAGE:
+            fixed_language = language_name(self.model_registry.forced_language(model_key))
+            return [Info("Language", lambda: f"{fixed_language}, fixed by this model")]
+        if language_choice == AUTOMATIC_LANGUAGE:
+            return [Info("Language", lambda: "detected automatically by this model")]
+        def current_language():
+            return self.state_manager.get_effective_language(model_key) or AUTO_LANGUAGE
+
+        def select_language(language):
+            self._select_language(model_key, language)
+
+        return [
+            Choice("Language", lambda: self._quick_language_options(model_key), current_language, select_language),
+            Submenu("All languages", lambda: [Choice("All languages", lambda: self._all_language_options(model_key),
+                                                     current_language, select_language)],
+                    detail=lambda: self._all_languages_detail(model_key)),
+        ]
+
+    def _quick_language_options(self, model_key: str) -> list:
+        recent_languages = self.state_manager.get_recent_languages(model_key)
+        return ([Option(AUTO_LANGUAGE, language_name(None))]
+                + [Option(code, language_name(code), starts_group=index == 0) for index, code in enumerate(recent_languages)])
+
+    def _all_language_options(self, model_key: str) -> list:
+        return [Option(code, language_name(code)) for code in sorted_by_name(self.state_manager.get_selectable_languages(model_key))]
+
+    def _all_languages_detail(self, model_key: str) -> str:
+        effective_language = self.state_manager.get_effective_language(model_key)
+        if effective_language is None or effective_language in self.state_manager.get_recent_languages(model_key):
+            return ""
+        return language_name(effective_language)
+
+    def _select_language(self, model_key: str, language: str):
+        try:
+            self.state_manager.set_model_language(model_key, None if language == AUTO_LANGUAGE else language)
+        except Exception as e:
+            self.logger.error(f"Error selecting language {language} for {model_key}: {e}")
 
     def _build_model_page(self) -> list:
         app_state = self.state_manager.get_application_state()
         is_model_loading = app_state.get('model_loading', False)
         is_busy = is_model_loading or app_state.get('processing', False)
         return [
-            Choice("Model", self._model_options(is_model_loading),
-                   lambda: self.config_manager.get_setting('whisper', 'model'), self._select_model),
+            Choice("Model", self._model_options(is_model_loading), self._selected_model_key, self._select_model),
+            Submenu("Language", self._build_language_page, detail=self._language_detail) if self.model_registry else None,
             *self._build_runtime_items(is_busy),
         ]
 
@@ -175,19 +245,24 @@ class SystemTray:
                 download_state = self.state_manager.get_model_download_state(model.key)
                 options.append(Option(
                     model.key,
-                    f"{model.label} (download)" if download_state == "download" else model.label,
+                    f"{model.label}{MODEL_STATE_SUFFIXES.get(download_state, '')}",
                     enabled=download_state != "unavailable" and not is_model_loading,
                     starts_group=index == 0,
                 ))
         return options
 
     def _build_runtime_items(self, is_busy: bool) -> list:
-        current_runtime = self.state_manager.get_current_runtime()
+        if self.state_manager.runtimes_detected():
+            current_runtime = self.state_manager.get_current_runtime()
+            runtime_options = [Option(runtime.key, runtime.menu_label, enabled=runtime.selectable and not is_busy)
+                               for runtime in self.state_manager.get_menu_runtimes()]
+        else:
+            current_runtime = None
+            runtime_options = [Option("detecting", "Detecting runtimes...", enabled=False)]
         runtime_choice = Choice(
             "Runtime",
-            [Option(runtime.key, runtime.menu_label, enabled=runtime.selectable and not is_busy)
-             for runtime in self.state_manager.get_menu_runtimes()],
-            lambda: getattr(self.state_manager.get_current_runtime(), 'key', None),
+            runtime_options,
+            lambda: getattr(self.state_manager.get_current_runtime(wait=False), 'key', None),
             self.state_manager.request_runtime_change,
         )
         if current_runtime and current_runtime.compute_types:

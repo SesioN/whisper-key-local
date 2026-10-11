@@ -1,10 +1,12 @@
+import functools
 import logging
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from .platform import gpu
+from .platform import cpu, gpu
 from .runtime_loader import (CPU, CUDA, ONNX_CPU, ONNX_CUDA, ONNX_DIRECTML, ONNX_RUNTIME_KEYS, ROCM, VULKAN, active_ct2_runtime,
                              active_ort_runtime, is_runtime_installed, whisper_cpp_runtime_paths)
 
@@ -13,6 +15,8 @@ PREFERRED_COMPUTE_TYPES = {
     "cpu": ("int8", "int8_float32", "float32"),
     "cuda": ("float16", "int8_float16", "int8", "float32"),
 }
+
+MAX_AUTO_CPU_THREADS = 16
 
 FASTER_WHISPER = "faster_whisper"
 WHISPER_CPP = "whisper_cpp"
@@ -227,3 +231,15 @@ def choose_compute_type(runtime: Runtime, requested: Optional[str]) -> Optional[
         if compute_type in runtime.compute_types:
             return compute_type
     return next(compute_type for compute_type in COMPUTE_TYPES + tuple(sorted(runtime.compute_types)) if compute_type in runtime.compute_types)
+
+
+@functools.lru_cache(maxsize=1)
+def _auto_cpu_threads() -> int:
+    physical_cores = cpu.physical_core_count() or max(1, (os.cpu_count() or 2) // 2)
+    return max(1, min(physical_cores, MAX_AUTO_CPU_THREADS))
+
+
+def resolve_cpu_threads(configured) -> int:
+    if isinstance(configured, int) and not isinstance(configured, bool) and configured > 0:
+        return configured
+    return _auto_cpu_threads()

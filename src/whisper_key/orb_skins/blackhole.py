@@ -16,6 +16,7 @@ COLOR_WHITE = (255, 250, 240)
 class BlackHoleSkin(OrbSkin):
 
     LABEL = "Black hole"
+    TRANSLUCENT_BODY = True
 
     CANVAS_FACTOR = 2.1
     VISUAL_SCALE = 1.4

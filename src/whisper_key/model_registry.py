@@ -4,8 +4,14 @@ from typing import Optional
 
 from faster_whisper.utils import _MODELS
 
+from .languages import QWEN_LANGUAGE_CODES, WHISPER_LANGUAGE_NAMES, language_code
+
 WHISPER_FAMILY = "whisper"
 ONNX_FAMILY = "onnx_asr"
+SPEECH_LLM_MODEL_TYPE = "speech-llm"
+FIXED_LANGUAGE = "fixed"
+AUTOMATIC_LANGUAGE = "automatic"
+SELECTABLE_LANGUAGE = "selectable"
 
 
 class ModelRegistry:
@@ -14,17 +20,30 @@ class ModelRegistry:
     def __init__(self, whisper_models_config: dict = None, streaming_models_config: dict = None):
         self.whisper_models = {}
         self.streaming_models = {}
+        self._unsupported_language_warnings = set()
         self.logger = logging.getLogger(__name__)
 
         if whisper_models_config:
             for key, config in whisper_models_config.items():
                 if isinstance(config, dict):
                     self.whisper_models[key] = ModelDefinition(key, config, model_type="whisper")
+                    self._warn_about_unusable_languages(self.whisper_models[key])
 
         if streaming_models_config:
             for key, config in streaming_models_config.items():
                 if isinstance(config, dict):
                     self.streaming_models[key] = ModelDefinition(key, config, model_type="streaming")
+
+    def _warn_about_unusable_languages(self, model):
+        if model.languages is None:
+            return
+        if model.engine == ONNX_FAMILY and model.onnx_model_type != SPEECH_LLM_MODEL_TYPE:
+            self.logger.warning(f"Model {model.key}: this model type detects the language itself, languages is ignored")
+            return
+        family_languages = QWEN_LANGUAGE_CODES if model.engine == ONNX_FAMILY else WHISPER_LANGUAGE_NAMES
+        unsupported = [code for code in model.languages if code not in family_languages]
+        if unsupported:
+            self.logger.warning(f"Model {model.key}: languages {unsupported} are not supported by this model type, skipped")
 
     def get_model(self, key: str):
         return self.whisper_models.get(key)
@@ -53,6 +72,42 @@ class ModelRegistry:
 
     def is_english_only(self, key: str) -> bool:
         return key.endswith(".en") or self.get_source(key).endswith(".en")
+
+    def forced_language(self, key: str) -> Optional[str]:
+        model = self.get_model(key)
+        if model and model.language:
+            return model.language
+        return "en" if self.is_english_only(key) else None
+
+    def selectable_languages(self, key: str) -> list:
+        if self.forced_language(key):
+            return []
+        model = self.get_model(key)
+        if model and model.engine == ONNX_FAMILY and model.onnx_model_type != SPEECH_LLM_MODEL_TYPE:
+            return []
+        family_languages = QWEN_LANGUAGE_CODES if model and model.engine == ONNX_FAMILY else WHISPER_LANGUAGE_NAMES
+        if model and model.languages is not None:
+            return [code for code in model.languages if code in family_languages]
+        return list(family_languages)
+
+    def language_choice(self, key: str) -> str:
+        if self.forced_language(key):
+            return FIXED_LANGUAGE
+        return SELECTABLE_LANGUAGE if self.selectable_languages(key) else AUTOMATIC_LANGUAGE
+
+    def transcription_language(self, key: str, chosen_language) -> Optional[str]:
+        forced_language = self.forced_language(key)
+        if forced_language:
+            return forced_language
+        code = language_code(chosen_language)
+        if code is None:
+            return None
+        if code in self.selectable_languages(key):
+            return code
+        if key not in self._unsupported_language_warnings:
+            self._unsupported_language_warnings.add(key)
+            self.logger.warning(f"Model {key} does not support language [{chosen_language}], detecting the language instead")
+        return None
 
     def is_known_model(self, key: str) -> bool:
         return key in self.whisper_models or key in _MODELS
@@ -216,12 +271,35 @@ class ModelDefinition:
         if not isinstance(self.supports_prompt, bool):
             logging.getLogger(__name__).warning(f"Model {key}: supports_prompt must be true or false, got {self.supports_prompt!r}; using true")
             self.supports_prompt = True
+        self.language = config.get("language")
+        if self.language is not None and (not isinstance(self.language, str) or language_code(self.language) is None):
+            logging.getLogger(__name__).warning(f"Model {key}: language must be a language code, got {self.language!r}; using the language setting")
+            self.language = None
+        if self.language is not None:
+            self.language = language_code(self.language)
+        self.languages = self._parse_languages(key, config.get("languages"))
         self.max_chunk_seconds = config.get("max_chunk_seconds")
         if self.max_chunk_seconds is not None and (isinstance(self.max_chunk_seconds, bool) or not isinstance(self.max_chunk_seconds, (int, float)) or self.max_chunk_seconds <= 0):
             logging.getLogger(__name__).warning(f"Model {key}: max_chunk_seconds must be a positive number, got {self.max_chunk_seconds!r}; using the default")
             self.max_chunk_seconds = None
         self.is_local_path = self._check_is_local_path()
         self.cache_folder = self._derive_cache_folder()
+
+    @staticmethod
+    def _parse_languages(key: str, languages) -> Optional[list]:
+        if languages is None:
+            return None
+        if not isinstance(languages, list):
+            logging.getLogger(__name__).warning(f"Model {key}: languages must be a list of language codes, got {languages!r}; using the default list")
+            return None
+        codes = []
+        for language in languages:
+            code = language_code(language) if isinstance(language, str) else None
+            if code in WHISPER_LANGUAGE_NAMES and code not in codes:
+                codes.append(code)
+            else:
+                logging.getLogger(__name__).warning(f"Model {key}: unknown language {language!r} in languages, skipped")
+        return codes
 
     def _check_is_local_path(self) -> bool:
         if self.source.startswith("\\\\") or (len(self.source) > 2 and self.source[1] == ":"):

@@ -13,6 +13,7 @@ COLOR_VEIL = (222, 255, 240)
 class AuroraSkin(OrbSkin):
 
     LABEL = "Aurora"
+    TRANSLUCENT_BODY = True
 
     CANVAS_FACTOR = 2.2
     VISUAL_SCALE = 1.35

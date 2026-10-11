@@ -96,6 +96,8 @@
 - As a *user*, I want **parakeet models** so I can get transcriptions faster wit more accuracy
 - As a *user*, I want **automatic punctuation and text formatting** so the output is human-friendly (not just LLM)
 - As a *user*, I want to see my **transcription history** so I can search through it
+- As a *Qwen3-ASR user* I want **hotwords and initial prompt as context** so names and jargon are recognized; needs the export's system-message slot in `prompt_prefix_ids` and its tokenizer (`tokenizer.json` or `merges.txt`) added to the download
+- As a *GPU user of ONNX models* I want **KV cache kept on the GPU (ORT IOBinding)** so Qwen3-ASR on DirectML/CUDA stops copying the cache to the CPU every token; measure with `tools/bench/transcribe_bench.py` before shipping
 
 ### Recording
 - As a *user* I want **hotkey-per-audio-source bindings** so I can quickly switch between microphone input and speaker/system audio capture

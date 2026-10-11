@@ -46,10 +46,23 @@ whisper: # Whisper AI Model Settings
     # Language detection
     # Options: auto (auto-detect), en, es, fr, de, etc.
     # Set to specific language code to force language, or auto for auto-detection
+    # Default for models without their own choice in model_languages
     language: auto
 
+    # Language per model, chosen in the tray "Model > Language" page (overrides "language" above)
+    # Example: {large-v3-turbo: de, qwen3-asr-1.7b: auto}
+    model_languages: {}
+
+    # Languages picked most recently in the tray, listed first there (managed automatically)
+    recent_languages: []
+
     # Transcription quality settings
-    beam_size: 5 # Higher = more accurate but slower (1-10)
+    # Higher = more accurate but slower (1-10); 1 (greedy) is noticeably faster on CPU with a small accuracy cost
+    beam_size: 5
+
+    # CPU threads for transcription (faster_whisper on CPU and whisper.cpp)
+    # 0 = one per physical core (performance cores on Apple Silicon), up to 16
+    cpu_threads: 0
 
     # Initial prompt to guide transcription style, language variant, or script
     initial_prompt: ""
@@ -63,6 +76,8 @@ whisper: # Whisper AI Model Settings
     # To add custom models (CTranslate2 format), add entry with source (HuggingFace or local path)
     # Example: my-model: {source: "username/repo-ct2", label: "My Model", group: custom}
     # supports_prompt: false skips initial_prompt and hotwords for models that repeat or derail with them
+    # language: <code> always transcribes in that language for models trained on a single language (overrides "language" above)
+    # languages: [<code>, ...] limits the languages offered in the tray for a custom model ([] = automatic detection only)
     models:
         # Official whisper models
         tiny:
@@ -124,6 +139,7 @@ whisper: # Whisper AI Model Settings
             label: "Distil-Large-V3.5 (English, 1.4GB)"
             group: custom
             enabled: true
+            language: en
 
         # Language-specific fine-tunes
         large-v3-turbo-german: # primeline/whisper-large-v3-turbo-german, fine-tuned for German
@@ -131,6 +147,7 @@ whisper: # Whisper AI Model Settings
             label: "Large-V3-Turbo German (German, 1.6GB)"
             group: custom
             enabled: true
+            language: de
 
         # ONNX models — run on CPU, DirectML (any DirectX 12 GPU) or NVIDIA CUDA, see the tray "Model > Runtime" page
         # Only the selected variant is downloaded, into %LOCALAPPDATA%\whisperkey\models
@@ -246,7 +263,12 @@ vad: # Voice Activity Detection (VAD)
     # NOTE: This is separate from faster-whisper's built-in VAD
     vad_precheck_enabled: true
 
-    # TEN VAD Hysteresis Thresholds (prevent flickering on borderline audio)
+    # Pre-check thresholds: lower values let quiet speech through, higher values skip more noise
+    vad_precheck_onset_threshold: 0.5 # Probability to START detecting speech (0.0-1.0)
+    vad_precheck_offset_threshold: 0.35 # Probability to STOP detecting speech (0.0-1.0)
+
+    # Real-time TEN VAD Hysteresis Thresholds for silence timeout and voice-activated recording
+    # (prevent flickering on borderline audio; adjust with the tray "Voice detection sensitivity" window)
     vad_onset_threshold: 0.7 # Probability to START detecting speech (0.0-1.0)
     vad_offset_threshold: 0.55 # Probability to STOP detecting speech (0.0-1.0)
 
@@ -273,15 +295,10 @@ audio: # Audio Recording Settings
     # e.g., "WASAPI", "MME", "DirectSound", "Core Audio"
     host: null
 
-    # Audio channels
+    # Audio channels captured from the microphone, always averaged to mono for transcription
     # 1 = mono (recommended for speech)
-    # 2 = stereo
+    # 2 = both channels of a stereo microphone; an interface with the mic on one channel only is 6 dB quieter, use 1 there
     channels: 1
-
-    # Recording format
-    # Options: "float32", "int16", "int24", "int32"
-    # float32 recommended for best quality
-    dtype: float32
 
     # Maximum recording duration (seconds)
     # Set to 0 for unlimited recording

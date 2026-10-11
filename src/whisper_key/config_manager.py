@@ -6,6 +6,7 @@ from io import StringIO
 
 from ruamel.yaml import YAML
 
+from .languages import AUTO_LANGUAGE, WHISPER_LANGUAGE_NAMES, language_code
 from .utils import resolve_asset_path, beautify_hotkey_bindings, get_user_app_data_path, get_version
 from .platform import IS_MACOS
 from .orb_skins import SKINS as ORB_SKINS
@@ -30,7 +31,8 @@ HOTKEY_BINDING_SLOTS = 2
 FLOATING_WIDGET_STYLES = ('button', 'orb')
 ORB_SKIN_NAMES = tuple(ORB_SKINS)
 
-EXTENSIBLE_PATHS = {'whisper.models', 'streaming.models', 'post_processing.corrections'}
+EXTENSIBLE_PATHS = {'whisper.models', 'whisper.model_languages', 'streaming.models', 'post_processing.corrections'}
+MAX_RECENT_LANGUAGES = 3
 
 def deep_merge_config(default_config: Dict[str, Any],
                       user_config: Dict[str, Any]) -> Dict[str, Any]:
@@ -114,7 +116,8 @@ class ConfigManager:
         self.use_user_settings = use_user_settings
         self.config = {}
         self.logger = logging.getLogger(__name__)
-        
+        self.created_user_settings = False
+
         self.config_path = self._determine_config_path(use_user_settings, config_path)
         
         self.config = self._load_config()
@@ -140,6 +143,7 @@ class ConfigManager:
         if not os.path.exists(self.user_settings_path):
             with open(self.user_settings_path, 'w', encoding='utf-8') as f:
                 f.write(_build_settings_header())
+            self.created_user_settings = True
             self.logger.info(f"Created user settings at {self.user_settings_path}")
     
     def _remove_unused_keys_from_user_config(self, user_config: Dict[str, Any], default_config: Dict[str, Any]):
@@ -481,15 +485,55 @@ def _assign_free_bindings(action, bindings, owners_by_binding, logger):
             owners_by_binding[binding] = action
 
 
+def _validate_language_settings(config, logger):
+    whisper_section = config['whisper']
+    model_languages = whisper_section.get('model_languages')
+    if not isinstance(model_languages, dict):
+        if model_languages is not None:
+            logger.warning(f"whisper.model_languages must be a mapping of model to language, got {model_languages!r}")
+        model_languages = {}
+    valid_model_languages = {}
+    for model_key, language in model_languages.items():
+        code = language_code(language) if isinstance(language, str) else None
+        if isinstance(model_key, str) and isinstance(language, str) and (code in WHISPER_LANGUAGE_NAMES or (language.strip() and code is None)):
+            valid_model_languages[model_key] = code or AUTO_LANGUAGE
+        else:
+            logger.warning(f"Ignoring whisper.model_languages entry {model_key!r}: {language!r}")
+    whisper_section['model_languages'] = valid_model_languages
+
+    recent_languages = whisper_section.get('recent_languages')
+    if not isinstance(recent_languages, list):
+        recent_languages = []
+    valid_recent_languages = []
+    for language in recent_languages:
+        code = language_code(language) if isinstance(language, str) else None
+        if code in WHISPER_LANGUAGE_NAMES and code not in valid_recent_languages:
+            valid_recent_languages.append(code)
+    whisper_section['recent_languages'] = valid_recent_languages[:MAX_RECENT_LANGUAGES]
+
+
 def validate_config(config, default_config, logger):
     _validate_numeric_range(config, default_config, 'audio.max_duration', logger, min_val=0)
+    _validate_numeric_range(config, default_config, 'audio.channels', logger, min_val=1, max_val=2)
     _validate_numeric_range(config, default_config, 'audio.pre_roll_seconds', logger, min_val=0, max_val=10)
 
-    _validate_numeric_range(config, default_config, 'vad.vad_onset_threshold', logger, min_val=0.0, max_val=1.0)
-    _validate_numeric_range(config, default_config, 'vad.vad_offset_threshold', logger, min_val=0.0, max_val=1.0)
+    for onset_path, offset_path in (('vad.vad_onset_threshold', 'vad.vad_offset_threshold'),
+                                    ('vad.vad_precheck_onset_threshold', 'vad.vad_precheck_offset_threshold')):
+        _validate_numeric_range(config, default_config, onset_path, logger, min_val=0.0, max_val=1.0)
+        _validate_numeric_range(config, default_config, offset_path, logger, min_val=0.0, max_val=1.0)
+        if _get_config_value_at_path(config, offset_path) > _get_config_value_at_path(config, onset_path):
+            logger.warning(f"{offset_path} must not be above {onset_path}")
+            _set_to_default(config, default_config, onset_path, _get_config_value_at_path(config, onset_path), logger)
+            _set_to_default(config, default_config, offset_path, _get_config_value_at_path(config, offset_path), logger)
     _validate_numeric_range(config, default_config, 'vad.vad_min_speech_duration', logger, min_val=0.001, max_val=5.0)
     _validate_numeric_range(config, default_config, 'vad.vad_silence_timeout_seconds', logger, min_val=1.0, max_val=36000.0)
     _validate_numeric_range(config, default_config, 'vad.auto_trigger_silence_seconds', logger, min_val=0.2, max_val=60.0)
+
+    _validate_language_settings(config, logger)
+
+    _validate_numeric_range(config, default_config, 'whisper.cpu_threads', logger, min_val=0, max_val=256)
+    if not isinstance(_get_config_value_at_path(config, 'whisper.cpu_threads'), int):
+        _set_to_default(config, default_config, 'whisper.cpu_threads', _get_config_value_at_path(config, 'whisper.cpu_threads'), logger)
 
     runtime = _get_config_value_at_path(config, 'whisper.runtime')
     if runtime not in ('cpu', 'cuda', 'rocm', 'vulkan'):
