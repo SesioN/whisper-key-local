@@ -93,8 +93,8 @@ def test_transcription_errors_propagate(fake_model):
 def test_forced_model_language_overrides_auto_detect(fake_model):
     registry = ModelRegistry({"distil": {"source": "distil", "language": "en"}})
     registry.get_load_source = lambda key: registry.get_source(key)
-    engine = whisper_engine.WhisperEngine(model_key="distil", language="auto", model_registry=registry)
-    engine.transcribe_audio(np.ones(16000, dtype=np.float32))
+    engine = whisper_engine.WhisperEngine(model_key="distil", model_registry=registry)
+    engine.transcribe_audio(np.ones(16000, dtype=np.float32), language="fr")
     assert engine.model.calls[-1]["language"] == "en"
 
 

@@ -30,7 +30,8 @@ HOTKEY_BINDING_SLOTS = 2
 FLOATING_WIDGET_STYLES = ('button', 'orb')
 ORB_SKIN_NAMES = tuple(ORB_SKINS)
 
-EXTENSIBLE_PATHS = {'whisper.models', 'streaming.models', 'post_processing.corrections'}
+EXTENSIBLE_PATHS = {'whisper.models', 'whisper.model_languages', 'streaming.models', 'post_processing.corrections'}
+MAX_RECENT_LANGUAGES = 3
 
 def deep_merge_config(default_config: Dict[str, Any],
                       user_config: Dict[str, Any]) -> Dict[str, Any]:
@@ -483,6 +484,28 @@ def _assign_free_bindings(action, bindings, owners_by_binding, logger):
             owners_by_binding[binding] = action
 
 
+def _validate_language_settings(config, logger):
+    whisper_section = config['whisper']
+    model_languages = whisper_section.get('model_languages')
+    if not isinstance(model_languages, dict):
+        if model_languages is not None:
+            logger.warning(f"whisper.model_languages must be a mapping of model to language, got {model_languages!r}")
+        model_languages = {}
+    valid_model_languages = {}
+    for model_key, language in model_languages.items():
+        if isinstance(model_key, str) and isinstance(language, str) and language.strip():
+            valid_model_languages[model_key] = language.strip()
+        else:
+            logger.warning(f"Ignoring whisper.model_languages entry {model_key!r}: {language!r}")
+    whisper_section['model_languages'] = valid_model_languages
+
+    recent_languages = whisper_section.get('recent_languages')
+    if not isinstance(recent_languages, list):
+        recent_languages = []
+    whisper_section['recent_languages'] = [language for language in recent_languages
+                                           if isinstance(language, str) and language.strip()][:MAX_RECENT_LANGUAGES]
+
+
 def validate_config(config, default_config, logger):
     _validate_numeric_range(config, default_config, 'audio.max_duration', logger, min_val=0)
     _validate_numeric_range(config, default_config, 'audio.channels', logger, min_val=1, max_val=2)
@@ -499,6 +522,8 @@ def validate_config(config, default_config, logger):
     _validate_numeric_range(config, default_config, 'vad.vad_min_speech_duration', logger, min_val=0.001, max_val=5.0)
     _validate_numeric_range(config, default_config, 'vad.vad_silence_timeout_seconds', logger, min_val=1.0, max_val=36000.0)
     _validate_numeric_range(config, default_config, 'vad.auto_trigger_silence_seconds', logger, min_val=0.2, max_val=60.0)
+
+    _validate_language_settings(config, logger)
 
     _validate_numeric_range(config, default_config, 'whisper.cpu_threads', logger, min_val=0, max_val=256)
     if not isinstance(_get_config_value_at_path(config, 'whisper.cpu_threads'), int):

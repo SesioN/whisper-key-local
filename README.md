@@ -62,7 +62,7 @@ Click the system tray icon (Windows: left or right click opens a Windows 11 styl
 - See the status and current model, and mute the microphone (microphone button at the top)
 - **Recording**: switch the recording mode between toggle and push-to-talk, toggle voice-activated recording and audio feedback, open the voice detection sensitivity window
 - **Output**: toggle auto-paste, copy to clipboard and voice commands in normal recordings
-- **Model**: change the transcription model, runtime (CPU / CUDA / ROCm / Vulkan / ONNX) and precision
+- **Model**: change the transcription model, its **Language** (Auto-detect, your recently used languages, then every language the model supports; remembered per model, takes effect with the next recording), runtime (CPU / CUDA / ROCm / Vulkan / ONNX) and precision
 - **Microphone**: select the input device and audio host
 - **Floating button** (Windows): show it, button or animated voice orb style, size (smooth slider that snaps to Small, Medium and Big), lock, hide in fullscreen apps. **Orb skin** lists every skin with a preview; clicking one applies it right away and keeps the menu open, so you can click through them. **Appearance** has sliders for the orb's opacity (20-100%; starts at the skin's own 70%, higher is more solid, lower more see-through), vibrancy and color (shifts the skin's whole palette); the orb follows while you drag, and **Reset appearance** puts all three back to the skin's own look
 - Manage shortcuts: record a primary and secondary binding per action, or unset one (Windows, **Shortcuts...**)
@@ -129,12 +129,14 @@ Delete this file and restart app to reset to defaults.
 | `whisper.compute_type` | `int8` | int8, int8_float32, int8_float16, int8_bfloat16, int16, float16, bfloat16, float32 (faster-whisper only) |
 | `whisper.cpp_binary` | `""` | Custom whisper-cli.exe path (auto-detected if empty) |
 | `whisper.cpp_model_dir` | `""` | Custom ggml model directory (auto-detected if empty) |
-| `whisper.language` | `auto` | auto or language code (en, es, fr, etc.) |
+| `whisper.language` | `auto` | auto or language code (en, es, fr, etc.); default for models without their own choice in `whisper.model_languages` |
+| `whisper.model_languages` | `{}` | Language per model, e.g. `{large-v3-turbo: de, qwen3-asr-1.7b: auto}`; set from the tray **Model > Language** page. Whisper models offer all 100 Whisper languages, Qwen3-ASR its 30 languages; English-only and single-language models are fixed, Parakeet always detects the language itself |
+| `whisper.recent_languages` | `[]` | Languages picked most recently in the tray, listed first there (managed automatically, up to 3) |
 | `whisper.beam_size` | `5` | Higher = more accurate but slower (1-10); 1 is noticeably faster on CPU |
 | `whisper.cpu_threads` | `0` | CPU threads for faster-whisper on CPU and whisper.cpp; 0 = one per physical core (performance cores on Apple Silicon), up to 16 |
 | `whisper.initial_prompt` | `""` | Guide transcription style, language variant, or script; applied to the whole recording, also beyond 30 s |
 | `whisper.hotwords` | `[]` | Words the model should favor (names, technical terms); with whisper.cpp they are added to the prompt |
-| `whisper.models` | (see config) | Add custom HuggingFace or local models; `supports_prompt: false` on a model skips `initial_prompt` and `hotwords` for models that repeat or derail with them; `language: <code>` always transcribes a single-language model in that language (set for Distil-Large-V3.5 and the German Turbo); `max_chunk_seconds` splits long recordings for ONNX models at quiet points (default 28 s for Qwen3-ASR, 60 s for Parakeet) |
+| `whisper.models` | (see config) | Add custom HuggingFace or local models; `supports_prompt: false` on a model skips `initial_prompt` and `hotwords` for models that repeat or derail with them; `language: <code>` always transcribes a single-language model in that language (set for Distil-Large-V3.5 and the German Turbo); `languages: [codes]` limits the languages offered in the tray for a custom model (`[]` = automatic detection only); `max_chunk_seconds` splits long recordings for ONNX models at quiet points (default 28 s for Qwen3-ASR, 60 s for Parakeet) |
 | **Post-Processing** |||
 | `post_processing.strip_trailing_period` | `false` | Strip trailing period from output |
 | `post_processing.corrections` | `{}` | Fix recurring misheard words, e.g. `CAPEX: [cap x]` |

@@ -130,7 +130,6 @@ class WhisperCppEngine:
                  model_key: str = "base",
                  device: str = "cpu",
                  compute_type: str = "int8",
-                 language: str = None,
                  beam_size: int = 5,
                  initial_prompt: str = "",
                  hotwords: list = None,
@@ -140,7 +139,6 @@ class WhisperCppEngine:
                  cpu_threads: int = 0):
 
         self.model_key = model_key
-        self.language = None if language == 'auto' else language
         self.beam_size = beam_size
         self.initial_prompt = initial_prompt or None
         self.hotwords = ", ".join(hotwords) if hotwords else None
@@ -269,11 +267,10 @@ class WhisperCppEngine:
                 return
         print("   ⚠ whisper-server could not be restarted, using whisper-cli (slower)")
 
-    def _language(self, model_key: str = None) -> str:
-        model_key = model_key or self.model_key
+    def _language(self, model_key: str, requested_language: Optional[str] = None) -> str:
         if self.registry:
-            return self.registry.transcription_language(model_key, self.language) or "auto"
-        return self.language or "auto"
+            return self.registry.transcription_language(model_key, requested_language) or "auto"
+        return requested_language or "auto"
 
     def _active_prompt(self) -> Optional[str]:
         prompt = " ".join(part for part in (self.initial_prompt, self.hotwords) if part) or None
@@ -297,13 +294,13 @@ class WhisperCppEngine:
         self._cli_flags = {flag for flag in (CARRY_INITIAL_PROMPT_FLAG, SUPPRESS_NON_SPEECH_FLAG) if flag in help_text}
         return self._cli_flags
 
-    def _transcribe_with_server(self, wav_bytes: bytes, timeout: float) -> Optional[str]:
+    def _transcribe_with_server(self, wav_bytes: bytes, timeout: float, language: Optional[str] = None) -> Optional[str]:
         with self._server_lock:
             server_url = self._server_url
             process = self._server_process
         if not server_url:
             return None
-        fields = {"response_format": "json", "language": self._language(), "suppress_nst": "true"}
+        fields = {"response_format": "json", "language": self._language(self.model_key, language), "suppress_nst": "true"}
         prompt = self._active_prompt()
         if prompt:
             fields["prompt"] = prompt
@@ -436,7 +433,7 @@ class WhisperCppEngine:
     def is_loading(self) -> bool:
         return self._loading_thread is not None and self._loading_thread.is_alive()
 
-    def transcribe_audio(self, audio_data: np.ndarray) -> Optional[str]:
+    def transcribe_audio(self, audio_data: np.ndarray, language: Optional[str] = None) -> Optional[str]:
         if audio_data is None or len(audio_data) == 0:
             self.logger.warning("No audio data to transcribe")
             return None
@@ -445,7 +442,7 @@ class WhisperCppEngine:
         audio_seconds = len(audio_data) / AudioRecorder.WHISPER_SAMPLE_RATE
         timeout = max(120, audio_seconds * 4)
         wav_bytes = self._wav_bytes(audio_data)
-        server_text = self._transcribe_with_server(wav_bytes, timeout)
+        server_text = self._transcribe_with_server(wav_bytes, timeout, language)
         if server_text is not None:
             self.logger.info(f"Transcription completed in {time.time() - start_time:.2f}s (whisper-server)")
             return server_text or None
@@ -461,7 +458,7 @@ class WhisperCppEngine:
                 self.logger.error("whisper.cpp model [%s] not found", self.model_key)
                 return None
 
-            cmd = self._build_command(model_path, tmp_path)
+            cmd = self._build_command(model_path, tmp_path, language)
             self.logger.debug("Running: %s", " ".join(cmd))
             result = subprocess.run(
                 cmd,
@@ -511,13 +508,13 @@ class WhisperCppEngine:
             return
         self._load_model_async(new_model_key, progress_callback)
 
-    def _build_command(self, model_path: str, audio_path: str) -> list:
+    def _build_command(self, model_path: str, audio_path: str, language: Optional[str] = None) -> list:
         cmd = [
             self._binary,
             "-m", model_path,
             "-f", audio_path,
             "-nt",
-            "-l", self._language(),
+            "-l", self._language(self.model_key, language),
             "-t", str(self.cpu_threads),
         ]
         if self.beam_size:

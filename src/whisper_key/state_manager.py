@@ -16,7 +16,9 @@ from .runtime_options import (FASTER_WHISPER, INSTALLABLE, ONNX_ASR, UNSUPPORTED
                               choose_compute_type, current_runtime_key, detect_runtimes, runtimes_for_engine_family,
                               with_whisper_cpp_paths)
 from .runtime_loader import CPU, ONNX_CUDA, ONNX_DIRECTML, VULKAN, whisper_cpp_runtime_paths
-from .model_registry import ONNX_FAMILY
+from .config_manager import MAX_RECENT_LANGUAGES
+from .languages import AUTO_LANGUAGE, language_code, language_name
+from .model_registry import ONNX_FAMILY, SELECTABLE_LANGUAGE
 from .platform import dialogs
 from .clipboard_manager import ClipboardManager
 from .system_tray import SystemTray
@@ -39,13 +41,7 @@ class TranscriptionRequest:
     command_mode: bool = False
     auto_triggered: bool = False
     is_retry: bool = False
-
-
-def language_code(language: Optional[str]) -> Optional[str]:
-    code = str(language or '').strip().lower()
-    if not code or code == 'auto':
-        return None
-    return code.split('-')[0]
+    language: Optional[str] = None
 
 
 class StateManager:
@@ -193,7 +189,8 @@ class StateManager:
 
     def _submit_transcription(self, recording: Optional[Recording], use_auto_enter: bool):
         with self._state_lock:
-            request = TranscriptionRequest(recording, use_auto_enter, self._command_mode, self._auto_triggered_recording)
+            request = TranscriptionRequest(recording, use_auto_enter, self._command_mode, self._auto_triggered_recording,
+                                           language=self.get_effective_language(self.whisper_engine.model_key))
             self._command_mode = False
             self._auto_triggered_recording = False
         self._enqueue_transcription(request)
@@ -483,7 +480,8 @@ class StateManager:
                 print("⏳ Cannot retry right now, wait until Whisper Key is idle")
                 return False
             print(f"\n↻ Retrying the last failed recording ({failed_recording.recording.duration_seconds:.1f} seconds)...")
-            self._enqueue_transcription(replace(failed_recording, is_retry=True))
+            self._enqueue_transcription(replace(failed_recording, is_retry=True,
+                                                language=self.get_effective_language(self.whisper_engine.model_key)))
             return True
 
     def _prepare_audio(self, recording: Recording, trailing_silence_seconds: float):
@@ -538,7 +536,7 @@ class StateManager:
                 return
 
             try:
-                transcribed_text = engine.transcribe_audio(audio_data)
+                transcribed_text = engine.transcribe_audio(audio_data, language=request.language)
             except Exception:
                 self._keep_failed_recording(request)
                 fallback = self._fallback_runtime
@@ -667,7 +665,7 @@ class StateManager:
             time.sleep(duration_seconds)
 
             recording = self.audio_recorder.stop_recording()
-            self._transcription_pipeline(TranscriptionRequest(recording))
+            self._transcription_pipeline(TranscriptionRequest(recording, language=self.get_effective_language(self.whisper_engine.model_key)))
 
         except Exception as e:
             self.logger.error(f"Manual test failed: {e}")
@@ -733,9 +731,9 @@ class StateManager:
         if new_model_key == self.whisper_engine.model_key:
             return True
 
-        language = self.config_manager.get_setting('whisper', 'language')
+        language = self.get_language_setting(new_model_key)
         forced_language = self.whisper_engine.registry.forced_language(new_model_key)
-        if forced_language and language_code(language) not in (None, language_code(forced_language)):
+        if forced_language and language not in (None, forced_language):
             self.logger.warning(f"Model {new_model_key} only transcribes [{forced_language}], the configured language [{language}] is ignored")
             print(f"⚠️ [{new_model_key}] only transcribes [{forced_language}], the configured language [{language}] is ignored")
 
@@ -769,6 +767,43 @@ class StateManager:
 
         self._update_ui_state("processing")
         self._execute_model_change(new_model_key)
+        return True
+
+    def get_language_setting(self, model_key: str) -> Optional[str]:
+        model_languages = self.config_manager.get_setting('whisper', 'model_languages')
+        return language_code(model_languages.get(model_key, self.config_manager.get_setting('whisper', 'language')))
+
+    def get_effective_language(self, model_key: str) -> Optional[str]:
+        return self.whisper_engine.registry.transcription_language(model_key, self.get_language_setting(model_key))
+
+    def get_selectable_languages(self, model_key: str) -> list:
+        return self.whisper_engine.registry.selectable_languages(model_key)
+
+    def get_recent_languages(self, model_key: str) -> list:
+        selectable_languages = self.get_selectable_languages(model_key)
+        return [code for code in map(language_code, self.config_manager.get_setting('whisper', 'recent_languages'))
+                if code in selectable_languages]
+
+    def set_model_language(self, model_key: str, language: Optional[str]) -> bool:
+        registry = self.whisper_engine.registry
+        code = language_code(language)
+        if registry.language_choice(model_key) != SELECTABLE_LANGUAGE:
+            self.logger.warning(f"Model {model_key} does not offer a language choice")
+            return False
+        if code is not None and code not in registry.selectable_languages(model_key):
+            self.logger.warning(f"Model {model_key} does not support language [{language}]")
+            return False
+        model_languages = dict(self.config_manager.get_setting('whisper', 'model_languages'))
+        model_languages[model_key] = code or AUTO_LANGUAGE
+        self.config_manager.update_user_setting('whisper', 'model_languages', model_languages)
+        if code is not None:
+            recent_languages = [recent for recent in map(language_code, self.config_manager.get_setting('whisper', 'recent_languages'))
+                                if recent and recent != code]
+            self.config_manager.update_user_setting('whisper', 'recent_languages', [code] + recent_languages[:MAX_RECENT_LANGUAGES - 1])
+            print(f"🌐 [{model_key}] now transcribes {language_name(code)}")
+        else:
+            print(f"🌐 [{model_key}] now detects the language automatically")
+        self.system_tray.refresh_menu()
         return True
 
     def toggle_mute(self):

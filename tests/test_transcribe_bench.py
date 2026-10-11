@@ -41,7 +41,7 @@ class CountingEngine:
     def __init__(self):
         self.calls = 0
 
-    def transcribe_audio(self, audio_data):
+    def transcribe_audio(self, audio_data, language=None):
         self.calls += 1
         return "hello there world"
 

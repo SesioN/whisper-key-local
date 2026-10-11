@@ -16,10 +16,9 @@ class RecordingModel:
         return f"part{len(self.calls)}"
 
 
-def make_engine(model_key, models, language=None):
+def make_engine(model_key, models):
     engine = OnnxAsrEngine.__new__(OnnxAsrEngine)
     engine.model_key = model_key
-    engine.language = language
     engine.registry = ModelRegistry(models)
     engine.vad_manager = None
     engine.logger = logging.getLogger("test")
@@ -48,7 +47,7 @@ def test_nemo_models_are_chunked_for_long_recordings():
 
 def test_speech_llm_chunk_limits_and_language():
     assert make_engine("qwen", QWEN)._max_chunk_seconds == 28
-    engine = make_engine("qwen-int8", QWEN, language="de")
+    engine = make_engine("qwen-int8", QWEN)
     assert engine._max_chunk_seconds == 14
-    engine._recognize(np.ones(SAMPLE_RATE * 10, dtype=np.float32))
+    engine._recognize(np.ones(SAMPLE_RATE * 10, dtype=np.float32), "de")
     assert engine.model.calls[0][1] == {"language": "German"}

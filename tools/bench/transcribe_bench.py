@@ -167,7 +167,8 @@ def build_engine(args):
     if mismatches:
         engine.close()
         raise SystemExit(f"The requested setup could not be benchmarked, the app would use {describe_engine(engine)}: " + "; ".join(mismatches))
-    return engine
+    language = registry.transcription_language(args.model, whisper_config.get("model_languages", {}).get(args.model, whisper_config["language"]))
+    return engine, language
 
 
 def describe_engine(engine) -> str:
@@ -175,17 +176,17 @@ def describe_engine(engine) -> str:
     return f"{engine.ENGINE_TYPE} [{engine.model_key}] on {runtime}"
 
 
-def run_benchmark(engine, samples: list, runs: int) -> dict:
+def run_benchmark(engine, samples: list, runs: int, language=None) -> dict:
     rows = []
     total_edits = 0
     total_reference_words = 0
     for name, audio, reference in samples:
-        engine.transcribe_audio(audio)
+        engine.transcribe_audio(audio, language=language)
         timings = []
         text = ""
         for _ in range(runs):
             start = time.perf_counter()
-            text = engine.transcribe_audio(audio) or ""
+            text = engine.transcribe_audio(audio, language=language) or ""
             timings.append(time.perf_counter() - start)
         audio_seconds = len(audio) / SAMPLE_RATE
         latency = statistics.median(timings)
@@ -254,12 +255,12 @@ def main():
     if not samples:
         parser.error(f"No WAV files found in {args.samples}")
 
-    engine = build_engine(args)
+    engine, language = build_engine(args)
     try:
-        result = run_benchmark(engine, samples, args.runs)
+        result = run_benchmark(engine, samples, args.runs, language)
     finally:
         engine.close()
-    result["engine"] = describe_engine(engine)
+    result["engine"] = f"{describe_engine(engine)}, language {language or 'auto'}"
     if args.json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return
