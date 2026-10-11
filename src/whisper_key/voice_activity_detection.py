@@ -138,7 +138,7 @@ class VadManager:
         return self.ten_vad is not None
 
     def is_precheck_enabled(self) -> bool:
-        return self.vad_precheck_enabled and self.ten_vad is not None
+        return self.vad_precheck_enabled and HAS_TEN_VAD
 
 class Hysteresis:
     def __init__(self, high_threshold, low_threshold, frame_duration_sec):
@@ -235,7 +235,7 @@ class ContinuousVoiceDetector:
         if self._consecutive_errors >= self.MAX_CONSECUTIVE_ERRORS:
             self.ten_vad = None
             self.logger.error(f"Real-time VAD turned off after {self._consecutive_errors} failed chunks in a row: {error}")
-            print("❌ Real-time voice detection stopped working (see log); silence timeout and voice activation are off until restart")
+            print("❌ Real-time voice detection stopped working (see log); silence timeout and voice activation are off until you switch the microphone or restart")
 
     def _update_state(self, speech_detected: bool) -> VadEvent:
         with self._lock:

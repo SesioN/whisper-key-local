@@ -30,3 +30,8 @@ def test_duplicate_triggers_are_detected_after_normalization():
 
 def test_trigger_without_words_is_a_problem():
     assert any('no words' in problem for problem in find_entry_problems([entry('!!!')]))
+
+
+def test_hyphenated_triggers_match_spaced_speech():
+    assert find_matching_commands(commands('follow-up'), 'Send a follow up now')
+    assert find_matching_commands(commands('follow up'), 'Send a follow-up now')

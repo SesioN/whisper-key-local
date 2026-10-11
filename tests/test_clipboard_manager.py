@@ -10,9 +10,11 @@ from whisper_key import clipboard_manager as clipboard_module
 @pytest.fixture
 def manager(monkeypatch):
     clipboard_contents = {"text": "original"}
+    clipboard_contents["changes"] = 0
     platform_clipboard = MagicMock()
     platform_clipboard.snapshot.side_effect = lambda: [("snapshot", clipboard_contents["text"])]
-    platform_clipboard.restore.side_effect = lambda snapshot: clipboard_contents.update(text=snapshot[0][1])
+    platform_clipboard.restore.side_effect = lambda snapshot: clipboard_contents.update(text=snapshot[0][1]) or True
+    platform_clipboard.change_count.side_effect = lambda: clipboard_contents["changes"]
     monkeypatch.setattr(clipboard_module, "clipboard", platform_clipboard)
     monkeypatch.setattr(clipboard_module.pyperclip, "copy", lambda text: clipboard_contents.update(text=text))
     monkeypatch.setattr(clipboard_module.pyperclip, "paste", lambda: clipboard_contents["text"])
@@ -51,3 +53,45 @@ def test_empty_snapshot_is_never_restored(manager):
     time.sleep(0.35)
     platform_clipboard.restore.assert_not_called()
     assert contents["text"] == "dictated"
+
+
+def test_restore_that_already_fired_does_not_run_early_after_a_new_paste(manager):
+    manager, contents, platform_clipboard = manager
+    manager._clipboard_paste("first")
+    first_pending = manager._pending_restore
+    with manager._clipboard_lock:
+        first_pending.timer.cancel()
+        waiting_restore = threading.Thread(target=manager._restore_clipboard, args=(first_pending,))
+        waiting_restore.start()
+        manager._clipboard_paste("second")
+    waiting_restore.join(timeout=2)
+    assert contents["text"] == "second"
+    time.sleep(0.35)
+    assert contents["text"] == "original"
+
+
+def test_content_copied_during_the_delay_is_kept(manager):
+    manager, contents, platform_clipboard = manager
+    manager._clipboard_paste("dictated")
+    contents["text"] = "copied by the user"
+    contents["changes"] += 1
+    time.sleep(0.35)
+    platform_clipboard.restore.assert_not_called()
+    assert contents["text"] == "copied by the user"
+
+
+def test_paste_still_happens_when_the_clipboard_cannot_be_saved(manager):
+    manager, contents, platform_clipboard = manager
+    platform_clipboard.snapshot.side_effect = OSError("clipboard busy")
+    assert manager._clipboard_paste("dictated")
+    assert contents["text"] == "dictated"
+
+
+def test_failed_restore_is_logged(manager, caplog):
+    import logging
+    manager, contents, platform_clipboard = manager
+    platform_clipboard.restore.side_effect = lambda snapshot: False
+    with caplog.at_level(logging.WARNING):
+        manager._clipboard_paste("dictated")
+        time.sleep(0.35)
+    assert "could not be restored" in caplog.text

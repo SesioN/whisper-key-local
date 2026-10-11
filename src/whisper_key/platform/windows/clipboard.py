@@ -66,16 +66,24 @@ def snapshot():
     return formats or None
 
 
+def change_count():
+    return win32clipboard.GetClipboardSequenceNumber()
+
+
 def restore(formats) -> bool:
     if not formats or not _open_clipboard():
         return False
+    restored_formats = 0
     try:
         win32clipboard.EmptyClipboard()
         for clipboard_format, data in formats:
             try:
                 win32clipboard.SetClipboardData(clipboard_format, data)
+                restored_formats += 1
             except Exception as e:
                 logger.debug(f"Could not restore clipboard format {clipboard_format}: {e}")
-        return True
     finally:
         win32clipboard.CloseClipboard()
+    if not restored_formats:
+        logger.warning("None of the saved clipboard formats could be restored")
+    return restored_formats > 0

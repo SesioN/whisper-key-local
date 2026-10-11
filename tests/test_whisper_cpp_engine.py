@@ -1,4 +1,3 @@
-import json
 import logging
 from unittest.mock import MagicMock
 
@@ -78,3 +77,18 @@ def test_server_request_carries_prompt_and_suppresses_non_speech(monkeypatch):
     assert sent["language"] == "fr"
     assert sent["prompt"] == "Bonjour. Kubernetes"
     assert sent["carry_initial_prompt"] == "true" and sent["suppress_nst"] == "true"
+
+
+def test_failed_help_probe_is_retried(monkeypatch):
+    results = iter([OSError("busy"), MagicMock(stdout="--suppress-nst", stderr="")])
+
+    def run(*args, **kwargs):
+        result = next(results)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(whisper_cpp_engine.subprocess, "run", run)
+    engine = make_engine()
+    assert engine._supported_cli_flags() == set()
+    assert engine._supported_cli_flags() == {"--suppress-nst"}

@@ -34,7 +34,7 @@ from .model_registry import ONNX_FAMILY, ModelRegistry
 from .streaming_manager import StreamingManager
 from .voice_commands import VoiceCommandManager
 from .hardware_detection import detect_and_print as detect_hardware
-from .onboarding import check_gpu, run_model_onboarding
+from .onboarding import check_gpu, run_model_onboarding, uses_gpu_runtime
 from .update_checker import check_for_updates
 from .utils import get_user_app_data_path, get_version, OptionalComponent, prune_stale_pyapp_envs, open_file
 
@@ -270,7 +270,7 @@ def setup_floating_widget(config_manager, state_manager):
 def run_gpu_onboarding(config_manager, whisper_config):
     gpu_status = config_manager.config.get('onboarding', {}).get('gpu', 'pending')
     if gpu_status != 'pending' or whisper_config.get('runtime') == VULKAN:
-        return whisper_config, None
+        return whisper_config, None, False
 
     gpu_class, gpu_name, ct2_works = detect_hardware(whisper_config['device'])
 
@@ -296,13 +296,13 @@ def run_gpu_onboarding(config_manager, whisper_config):
         if choice == INSTALL_ROCM and gpu_class == 'amd_rdna1':
             from .onboarding import install_gpu_runtime
             install_gpu_runtime(gpu_class, gpu_name, config_manager)
-            return config_manager.get_whisper_config(), None
+            return config_manager.get_whisper_config(), None, True
 
         if choice in (INSTALL_ROCM, USE_WHISPER_CPP):
             config_manager.update_user_setting('onboarding', 'gpu_class', gpu_class)
             config_manager.update_user_setting('onboarding', 'gpu', 'complete')
             print(f"{BOLD_GREEN}The runtime is set up after startup. You can change it later in the tray Runtime menu.{RESET}\n")
-            return whisper_config, ROCM if choice == INSTALL_ROCM else VULKAN
+            return whisper_config, ROCM if choice == INSTALL_ROCM else VULKAN, True
 
         if choice == CPU_ONLY:
             config_manager.update_user_setting('whisper', 'device', 'cpu')
@@ -311,7 +311,7 @@ def run_gpu_onboarding(config_manager, whisper_config):
             config_manager.update_user_setting('onboarding', 'gpu_class', gpu_class)
             config_manager.update_user_setting('onboarding', 'gpu', 'skipped')
 
-        return whisper_config, None
+        return whisper_config, None, False
 
     if gpu_class == 'nvidia' and not ct2_works:
         from .terminal_ui import BOLD_GREEN, RESET, prompt_choice
@@ -334,7 +334,7 @@ def run_gpu_onboarding(config_manager, whisper_config):
         if choice == INSTALL_CUDA:
             config_manager.update_user_setting('onboarding', 'gpu', 'complete')
             print(f"{BOLD_GREEN}The runtime is set up after startup. You can change it later in the tray Runtime menu.{RESET}\n")
-            return whisper_config, CUDA
+            return whisper_config, CUDA, True
 
         if choice == CPU_ONLY:
             config_manager.update_user_setting('whisper', 'device', 'cpu')
@@ -342,10 +342,10 @@ def run_gpu_onboarding(config_manager, whisper_config):
             config_manager.update_user_setting('whisper', 'runtime', 'cpu')
             config_manager.update_user_setting('onboarding', 'gpu', 'skipped')
 
-        return whisper_config, None
+        return whisper_config, None, False
 
     check_gpu(gpu_class, gpu_name, ct2_works, whisper_config['device'], config_manager)
-    return config_manager.get_whisper_config(), None
+    return config_manager.get_whisper_config(), None, False
 
 
 def _setup_onnx_engine(whisper_config, vad_manager, model_registry):
@@ -530,10 +530,10 @@ def main():
             logger.warning(activation_warning)
             print(f"⚠ {activation_warning}")
 
-        whisper_config, onboarding_runtime = run_gpu_onboarding(config_manager, whisper_config)
+        whisper_config, onboarding_runtime, gpu_selected = run_gpu_onboarding(config_manager, whisper_config)
         whisper_config = run_model_onboarding(
             config_manager, whisper_config,
-            uses_gpu=bool(onboarding_runtime) or whisper_config.get('runtime') in (CUDA, ROCM, VULKAN),
+            uses_gpu=uses_gpu_runtime(whisper_config, onboarding_runtime, gpu_selected),
             physical_cores=resolve_cpu_threads(0),
         )
 

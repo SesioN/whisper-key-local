@@ -285,15 +285,16 @@ class WhisperCppEngine:
         return None
 
     def _supported_cli_flags(self) -> set:
-        if self._cli_flags is None:
-            try:
-                result = subprocess.run([self._binary, "--help"], capture_output=True, text=True, encoding="utf-8",
-                                        errors="replace", timeout=CLI_HELP_TIMEOUT_SECONDS, creationflags=_NO_WINDOW)
-                help_text = result.stdout + result.stderr
-            except (OSError, subprocess.SubprocessError) as e:
-                self.logger.warning(f"Could not read whisper-cli options: {e}")
-                help_text = ""
-            self._cli_flags = {flag for flag in (CARRY_INITIAL_PROMPT_FLAG, SUPPRESS_NON_SPEECH_FLAG) if flag in help_text}
+        if self._cli_flags is not None:
+            return self._cli_flags
+        try:
+            result = subprocess.run([self._binary, "--help"], capture_output=True, text=True, encoding="utf-8",
+                                    errors="replace", timeout=CLI_HELP_TIMEOUT_SECONDS, creationflags=_NO_WINDOW)
+        except (OSError, subprocess.SubprocessError) as e:
+            self.logger.warning(f"Could not read whisper-cli options, trying again next time: {e}")
+            return set()
+        help_text = result.stdout + result.stderr
+        self._cli_flags = {flag for flag in (CARRY_INITIAL_PROMPT_FLAG, SUPPRESS_NON_SPEECH_FLAG) if flag in help_text}
         return self._cli_flags
 
     def _transcribe_with_server(self, wav_bytes: bytes, timeout: float) -> Optional[str]:

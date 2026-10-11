@@ -3,6 +3,7 @@ import logging
 import queue
 import time
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 import platform
 from typing import Optional, TYPE_CHECKING
@@ -31,6 +32,20 @@ from .terminal_title import TerminalTitle
 if TYPE_CHECKING:
     from .floating_widget import FloatingWidget
 
+@dataclass(frozen=True)
+class TranscriptionRequest:
+    recording: Optional[Recording]
+    use_auto_enter: bool = False
+    command_mode: bool = False
+    auto_triggered: bool = False
+
+
+def language_code(language: Optional[str]) -> Optional[str]:
+    if not language or str(language).lower() == 'auto':
+        return None
+    return str(language).strip().lower().split('-')[0]
+
+
 class StateManager:
     MIN_VAD_HYSTERESIS_GAP = 0.05
     MIN_VAD_OFFSET_THRESHOLD = 0.05
@@ -38,6 +53,8 @@ class StateManager:
     AUTO_TRIGGER_COOLDOWN_SECONDS = 1.0  # Lets feedback sounds die out before the VAD may start a recording
     TRAILING_SILENCE_KEEP_SECONDS = 1.0
     MIN_TRIMMED_RECORDING_SECONDS = 0.5
+    PIPELINE_SHUTDOWN_TIMEOUT_SECONDS = 5.0
+    PIPELINE_STUCK_WARNING_SECONDS = 120.0
 
     def __init__(self,
                  audio_recorder: AudioRecorder,
@@ -91,7 +108,9 @@ class StateManager:
         self._auto_trigger_lock = threading.Lock()
         self._start_lock = threading.Lock()
         self._pipeline_jobs = queue.SimpleQueue()
-        threading.Thread(target=self._run_pipeline_jobs, daemon=True, name="Transcription").start()
+        self._pipeline_job_started_at = None
+        self._pipeline_thread = threading.Thread(target=self._run_pipeline_jobs, daemon=True, name="Transcription")
+        self._pipeline_thread.start()
 
         self._runtimes = None
         self._runtime_install_running = False
@@ -170,18 +189,35 @@ class StateManager:
 
     def _submit_transcription(self, recording: Optional[Recording], use_auto_enter: bool):
         with self._state_lock:
+            request = TranscriptionRequest(recording, use_auto_enter, self._command_mode, self._auto_triggered_recording)
+            self._command_mode = False
+            self._auto_triggered_recording = False
+        self._enqueue_transcription(request)
+
+    def _enqueue_transcription(self, request: TranscriptionRequest):
+        with self._state_lock:
             self.is_processing = True
-        self._pipeline_jobs.put(lambda: self._transcription_pipeline(recording, use_auto_enter))
+        self._pipeline_jobs.put(request)
 
     def _run_pipeline_jobs(self):
         while True:
-            job = self._pipeline_jobs.get()
-            if job is None:
+            request = self._pipeline_jobs.get()
+            if request is None:
                 return
+            self._pipeline_job_started_at = time.monotonic()
+            self.logger.debug("Transcription job started")
             try:
-                job()
-            except Exception:
+                self._transcription_pipeline(request)
+            except BaseException:
                 self.logger.exception("Transcription pipeline failed")
+            finally:
+                self.logger.debug(f"Transcription job finished after {time.monotonic() - self._pipeline_job_started_at:.2f}s")
+                self._pipeline_job_started_at = None
+
+    def _warn_if_pipeline_stuck(self):
+        started_at = self._pipeline_job_started_at
+        if started_at is not None and time.monotonic() - started_at > self.PIPELINE_STUCK_WARNING_SECONDS:
+            self.logger.warning(f"Transcription has been running for {time.monotonic() - started_at:.0f}s; new recordings wait until it finishes")
 
     def handle_vad_event(self, event: VadEvent):
         if event == VadEvent.SILENCE_TIMEOUT:
@@ -347,6 +383,7 @@ class StateManager:
         if self.is_muted:
             print("🔇 Microphone is muted - unmute to record")
         elif self.is_processing:
+            self._warn_if_pipeline_stuck()
             print("⏳ Still processing previous recording...")
         elif self.is_engine_unavailable():
             print("⏳ Transcription is unavailable until the model is ready...")
@@ -399,7 +436,6 @@ class StateManager:
         self.output_audio_control.engage(lambda: self.audio_recorder.get_recording_status())
 
     def _begin_recording(self, auto_triggered: bool = False):
-        # Set before starting so a quick SPEECH_END on another thread already sees it
         self._auto_triggered_recording = auto_triggered
         success = self.audio_recorder.start_recording(voice_activated=auto_triggered)
 
@@ -420,8 +456,8 @@ class StateManager:
     def has_failed_recording(self) -> bool:
         return self._failed_recording is not None
 
-    def _keep_failed_recording(self, recording: Recording, command_mode: bool, use_auto_enter: bool):
-        self._failed_recording = (recording, command_mode, use_auto_enter)
+    def _keep_failed_recording(self, request: TranscriptionRequest):
+        self._failed_recording = request
         print("   ↻ The recording is kept: use \"Retry last recording\" in the tray menu to transcribe it again")
         self.system_tray.refresh_menu()
 
@@ -438,12 +474,8 @@ class StateManager:
             if not self.can_start_recording():
                 print("⏳ Cannot retry right now, wait until Whisper Key is idle")
                 return False
-            recording, command_mode, use_auto_enter = failed_recording
-            with self._state_lock:
-                self._command_mode = command_mode
-                self._auto_triggered_recording = False
-            print(f"\n↻ Retrying the last failed recording ({recording.duration_seconds:.1f} seconds)...")
-            self._submit_transcription(recording, use_auto_enter)
+            print(f"\n↻ Retrying the last failed recording ({failed_recording.recording.duration_seconds:.1f} seconds)...")
+            self._enqueue_transcription(failed_recording)
             return True
 
     def _prepare_audio(self, recording: Recording):
@@ -463,26 +495,24 @@ class StateManager:
             return True
         return self.vad_manager.check_audio_for_speech(audio)
 
-    def _transcription_pipeline(self, recording: Optional[Recording], use_auto_enter: bool = False):
+    def _transcription_pipeline(self, request: TranscriptionRequest):
         fallback_to = None
+        recording = request.recording
+        use_auto_enter = request.use_auto_enter
+        command_mode = request.command_mode
+        auto_triggered = request.auto_triggered
         self.output_audio_control.release()
         try:
+            self.audio_feedback.play_stop_sound()
             with self._state_lock:
-                command_mode = self._command_mode
-                self._command_mode = False
                 engine_unavailable = self.is_engine_unavailable()
-                if not engine_unavailable:
-                    self.is_processing = True
                 engine = self.whisper_engine
-                auto_triggered = self._auto_triggered_recording
 
             if engine_unavailable:
                 print("⏳ Runtime is switching, the recording was not transcribed")
                 if recording is not None:
-                    self._keep_failed_recording(recording, command_mode, use_auto_enter)
+                    self._keep_failed_recording(request)
                 return
-
-            self.audio_feedback.play_stop_sound()
 
             if recording is None:
                 return
@@ -499,7 +529,7 @@ class StateManager:
             try:
                 transcribed_text = engine.transcribe_audio(audio_data)
             except Exception:
-                self._keep_failed_recording(recording, command_mode, use_auto_enter)
+                self._keep_failed_recording(request)
                 fallback = self._fallback_runtime
                 if fallback and engine is self.whisper_engine:
                     self._fallback_runtime = None
@@ -548,7 +578,6 @@ class StateManager:
         finally:
             with self._state_lock:
                 self.is_processing = False
-                self._auto_triggered_recording = False
                 self._start_auto_trigger_cooldown()
                 pending_model = self._pending_model_change
                 pending_device = self._pending_device_change
@@ -623,7 +652,7 @@ class StateManager:
             time.sleep(duration_seconds)
             
             recording = self.audio_recorder.stop_recording()
-            self._transcription_pipeline(recording)
+            self._transcription_pipeline(TranscriptionRequest(recording))
             
         except Exception as e:
             self.logger.error(f"Manual test failed: {e}")
@@ -644,6 +673,9 @@ class StateManager:
             installer.cancel()
 
         self._pipeline_jobs.put(None)
+        self._pipeline_thread.join(timeout=self.PIPELINE_SHUTDOWN_TIMEOUT_SECONDS)
+        if self._pipeline_thread.is_alive():
+            self.logger.warning("Transcription still running at shutdown, closing the engine anyway")
         self.system_tray.stop()
         self.terminal_title.stop()
         self.floating_widget.stop()
@@ -684,7 +716,7 @@ class StateManager:
 
         language = self.config_manager.get_setting('whisper', 'language')
         forced_language = self.whisper_engine.registry.forced_language(new_model_key)
-        if forced_language and language not in (None, 'auto', forced_language):
+        if forced_language and language_code(language) not in (None, language_code(forced_language)):
             self.logger.warning(f"Model {new_model_key} only transcribes [{forced_language}], the configured language [{language}] is ignored")
             print(f"⚠️ [{new_model_key}] only transcribes [{forced_language}], the configured language [{language}] is ignored")
 
@@ -935,23 +967,26 @@ class StateManager:
     def runtimes_detected(self) -> bool:
         return self._runtimes is not None
 
+    def _detect_runtimes(self) -> list:
+        from .whisper_cpp_engine import find_whisper_cli
+        installed_binary, _ = whisper_cpp_runtime_paths()
+        whisper_cpp_binary = (self.config_manager.get_setting('whisper', 'cpp_binary')
+                              or installed_binary or find_whisper_cli())
+        try:
+            return detect_runtimes(whisper_cpp_binary)
+        except Exception as e:
+            self.logger.error(f"Runtime detection failed: {e}")
+            return []
+
     def get_runtimes(self) -> list:
         with self._runtimes_lock:
             if self._runtimes is None:
-                from .whisper_cpp_engine import find_whisper_cli
-                installed_binary, _ = whisper_cpp_runtime_paths()
-                whisper_cpp_binary = (self.config_manager.get_setting('whisper', 'cpp_binary')
-                                      or installed_binary or find_whisper_cli())
-                try:
-                    self._runtimes = detect_runtimes(whisper_cpp_binary)
-                except Exception as e:
-                    self.logger.error(f"Runtime detection failed: {e}")
-                    self._runtimes = []
+                self._runtimes = self._detect_runtimes()
             return self._runtimes
 
     def refresh_runtimes(self):
         with self._runtimes_lock:
-            self._runtimes = None
+            self._runtimes = self._detect_runtimes()
 
     def get_current_runtime(self, wait: bool = True) -> Optional[Runtime]:
         if not wait and not self.runtimes_detected():

@@ -1,6 +1,5 @@
 import logging
 import threading
-import time
 
 import numpy as np
 import pytest
@@ -26,51 +25,109 @@ def test_framer_passes_16k_audio_through_unchanged():
     assert np.array_equal(audio_16k, block.reshape(-1)) and np.array_equal(frames[0], block.reshape(-1))
 
 
-def make_worker(rate=16000):
+def make_worker(process_vad_frame=None, process_streaming_audio=None, streaming_attached=lambda: True,
+                rate=16000, block_samples=256, consumer_lock=None):
     events = []
     worker = AudioAnalysisWorker(
-        input_rate=rate, block_samples=256,
-        process_vad_frame=lambda frame: events.append(("vad", len(frame))),
-        process_streaming_audio=lambda audio: events.append(("stream", len(audio))),
+        input_rate=rate, block_samples=block_samples,
+        process_vad_frame=process_vad_frame or (lambda frame: events.append(("vad", len(frame)))),
+        process_streaming_audio=process_streaming_audio or (lambda audio: events.append(("stream", len(audio)))),
+        streaming_attached=streaming_attached,
         reset_consumers=lambda vad, streaming: events.append(("reset", vad, streaming)),
+        consumer_lock=consumer_lock or threading.Lock(),
     )
     return worker, events
+
+
+def block():
+    return np.zeros((256, 1), dtype=np.float32)
 
 
 def test_worker_processes_blocks_and_resets_in_submission_order():
     worker, events = make_worker()
     worker.start()
-    block = np.zeros((256, 1), dtype=np.float32)
-    worker.submit(block, feed_streaming=False)
+    worker.submit(block(), feed_streaming=False)
     worker.request_reset(True, True)
-    worker.submit(block, feed_streaming=True)
+    worker.submit(block(), feed_streaming=True)
+    assert worker.wait_until_processed(2, timeout=5)
     worker.stop()
     assert events == [("vad", 256), ("reset", True, True), ("vad", 256), ("stream", 256)]
 
 
 def test_worker_drops_blocks_when_it_falls_behind(caplog):
     gate = threading.Event()
-    worker = AudioAnalysisWorker(input_rate=16000, block_samples=16000, process_vad_frame=lambda frame: gate.wait(5),
-                                 process_streaming_audio=None, reset_consumers=lambda vad, streaming: None)
+    worker, _ = make_worker(process_vad_frame=lambda frame: gate.wait(5), block_samples=16000)
     worker.start()
-    block = np.zeros((256, 1), dtype=np.float32)
-    for _ in range(10):
-        worker.submit(block, feed_streaming=False)
-    assert worker._dropped_blocks > 0
-    gate.set()
+    try:
+        for _ in range(10):
+            worker.submit(block(), feed_streaming=False)
+        assert worker.dropped_blocks > 0
+    finally:
+        gate.set()
     with caplog.at_level(logging.WARNING):
         worker.stop()
     assert "skipped" in caplog.text
 
 
-def test_worker_reports_input_overflows(caplog):
-    worker, _ = make_worker()
+def test_stop_discards_backlog_and_rejects_new_blocks():
+    gate = threading.Event()
+    processed = []
+
+    def slow_frame(frame):
+        processed.append(1)
+        gate.wait(5)
+
+    worker, _ = make_worker(process_vad_frame=slow_frame, block_samples=64)
     worker.start()
-    worker.record_overflow()
-    worker.record_overflow()
-    with caplog.at_level(logging.WARNING):
-        worker.stop()
-    assert "overflowed 2 times" in caplog.text
+    for _ in range(20):
+        worker.submit(block(), feed_streaming=False)
+    stopper = threading.Thread(target=worker.stop)
+    stopper.start()
+    gate.set()
+    stopper.join(timeout=5)
+    assert not stopper.is_alive()
+    assert len(processed) < 20
+    assert not worker.submit(block(), feed_streaming=False)
+    assert not worker.is_accepting()
+
+
+def test_wait_until_processed_reports_incomplete_analysis():
+    gate = threading.Event()
+    worker, _ = make_worker(process_vad_frame=lambda frame: gate.wait(5))
+    worker.start()
+    try:
+        worker.submit(block(), feed_streaming=False)
+        assert not worker.wait_until_processed(1, timeout=0)
+    finally:
+        gate.set()
+    assert worker.wait_until_processed(1, timeout=5)
+    worker.stop()
+
+
+def test_streaming_only_worker_skips_audio_until_a_recognizer_is_attached():
+    attached = {"value": False}
+    streamed = []
+    worker = AudioAnalysisWorker(16000, 256, None, lambda audio: streamed.append(len(audio)),
+                                 lambda: attached["value"], lambda vad, streaming: None, threading.Lock())
+    worker.start()
+    worker.submit(block(), feed_streaming=True)
+    assert worker.wait_until_processed(1, timeout=5)
+    attached["value"] = True
+    worker.submit(block(), feed_streaming=True)
+    assert worker.wait_until_processed(2, timeout=5)
+    worker.stop()
+    assert streamed == [256]
+
+
+def test_consumers_run_under_the_shared_lock():
+    consumer_lock = threading.Lock()
+    held = []
+    worker, _ = make_worker(process_vad_frame=lambda frame: held.append(consumer_lock.locked()), consumer_lock=consumer_lock)
+    worker.start()
+    worker.submit(block(), feed_streaming=False)
+    assert worker.wait_until_processed(1, timeout=5)
+    worker.stop()
+    assert held == [True]
 
 
 def test_worker_survives_consumer_errors():
@@ -80,9 +137,10 @@ def test_worker_survives_consumer_errors():
         calls.append(1)
         raise RuntimeError("bad frame")
 
-    worker = AudioAnalysisWorker(16000, 256, failing, None, lambda vad, streaming: None)
+    worker, _ = make_worker(process_vad_frame=failing)
     worker.start()
-    worker.submit(np.zeros((256, 1), dtype=np.float32), False)
-    worker.submit(np.zeros((256, 1), dtype=np.float32), False)
+    worker.submit(block(), False)
+    worker.submit(block(), False)
+    assert worker.wait_until_processed(2, timeout=5)
     worker.stop()
     assert len(calls) == 2

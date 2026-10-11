@@ -29,7 +29,8 @@ def _create_round_trip_yaml() -> YAML:
 
 
 def normalize_spoken_text(text: str) -> str:
-    return " ".join(re.sub(r'[^\w\s]', '', text.lower()).split())
+    without_apostrophes = re.sub(r"['\u2019]", "", text.lower())
+    return " ".join(re.sub(r'[^\w\s]', ' ', without_apostrophes).split())
 
 
 def _contains_phrase(normalized_text: str, normalized_phrase: str) -> bool:

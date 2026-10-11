@@ -286,9 +286,9 @@ audio: # Audio Recording Settings
     # e.g., "WASAPI", "MME", "DirectSound", "Core Audio"
     host: null
 
-    # Audio channels captured from the microphone, always mixed down to mono for transcription
+    # Audio channels captured from the microphone, always averaged to mono for transcription
     # 1 = mono (recommended for speech)
-    # 2 = both channels of a stereo microphone
+    # 2 = both channels of a stereo microphone; an interface with the mic on one channel only is 6 dB quieter, use 1 there
     channels: 1
 
     # Maximum recording duration (seconds)

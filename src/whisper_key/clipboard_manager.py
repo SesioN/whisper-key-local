@@ -1,12 +1,20 @@
 import logging
 import threading
 import time
-from typing import Optional
+from dataclasses import dataclass
+from typing import Any, Optional
 
 import pyperclip
 
 from .platform import clipboard, keyboard
 from .utils import parse_hotkey
+
+@dataclass(eq=False)
+class PendingRestore:
+    original_clipboard: Any
+    clipboard_change_count: Optional[int]
+    timer: Optional[threading.Timer] = None
+
 
 class ClipboardManager:
     def __init__(self, auto_paste, delivery_method, paste_hotkey,
@@ -117,24 +125,39 @@ class ClipboardManager:
         pending = self._pending_restore
         self._pending_restore = None
         if pending:
-            timer, original_clipboard = pending
-            timer.cancel()
-            return original_clipboard
-        return clipboard.snapshot()
+            pending.timer.cancel()
+            return pending.original_clipboard
+        try:
+            return clipboard.snapshot()
+        except Exception as e:
+            self.logger.warning(f"Could not save the clipboard, it is not restored after this paste: {e}")
+            return None
 
     def _schedule_restore(self, original_clipboard):
-        timer = threading.Timer(self.paste_clipboard_restore_delay, self._restore_clipboard, args=(original_clipboard,))
-        timer.daemon = True
-        self._pending_restore = (timer, original_clipboard)
-        timer.start()
+        pending = PendingRestore(original_clipboard, self._clipboard_change_count())
+        pending.timer = threading.Timer(self.paste_clipboard_restore_delay, self._restore_clipboard, args=(pending,))
+        pending.timer.daemon = True
+        self._pending_restore = pending
+        pending.timer.start()
 
-    def _restore_clipboard(self, original_clipboard):
+    def _clipboard_change_count(self) -> Optional[int]:
+        try:
+            return clipboard.change_count()
+        except Exception as e:
+            self.logger.debug(f"Could not read the clipboard change count: {e}")
+            return None
+
+    def _restore_clipboard(self, pending: PendingRestore):
         with self._clipboard_lock:
-            if not self._pending_restore or self._pending_restore[1] is not original_clipboard:
+            if self._pending_restore is not pending:
                 return
             self._pending_restore = None
+            if self._clipboard_change_count() != pending.clipboard_change_count:
+                self.logger.info("Clipboard changed after the paste, keeping the new content instead of restoring")
+                return
             try:
-                clipboard.restore(original_clipboard)
+                if not clipboard.restore(pending.original_clipboard):
+                    self.logger.warning("The previous clipboard content could not be restored")
             except Exception as e:
                 self.logger.error(f"Failed to restore the clipboard: {e}")
 

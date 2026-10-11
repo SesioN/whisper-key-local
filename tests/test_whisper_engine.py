@@ -33,6 +33,7 @@ def fake_model(monkeypatch):
     FakeWhisperModel.fail_sources = set()
     FakeWhisperModel.transcribe_error = None
     monkeypatch.setattr(whisper_engine, "WhisperModel", FakeWhisperModel)
+    monkeypatch.setattr(whisper_engine, "download_model", lambda source: source)
     return FakeWhisperModel
 
 
@@ -55,9 +56,9 @@ def test_gpu_model_change_releases_old_model_before_loading(fake_model, monkeypa
     model_at_creation = []
     original_create = engine._create_model
 
-    def tracking_create(model_key):
+    def tracking_create(model_key, model_source=None):
         model_at_creation.append(engine.model)
-        return original_create(model_key)
+        return original_create(model_key, model_source)
 
     monkeypatch.setattr(engine, "_create_model", tracking_create)
     messages = run_model_change(engine, "base")
@@ -141,3 +142,47 @@ def test_timestamps_are_skipped_only_for_single_window_audio(fake_model):
     engine.transcribe_audio(np.ones(16000 * 10, dtype=np.float32))
     engine.transcribe_audio(np.ones(16000 * 45, dtype=np.float32))
     assert seen == [(16000 * 10, True), (16000 * 45, False)]
+
+
+def test_gpu_model_change_downloads_before_releasing_the_old_model(fake_model, monkeypatch):
+    engine = make_engine(device="cuda")
+    order = []
+    monkeypatch.setattr(whisper_engine, "download_model", lambda source: order.append(("download", engine.model is not None)) or source)
+    run_model_change(engine, "base")
+    assert order == [("download", True)]
+
+
+def test_failed_restore_reports_that_no_model_is_loaded(fake_model):
+    engine = make_engine(device="cuda")
+    fake_model.fail_sources = {"broken", "tiny"}
+    messages = run_model_change(engine, "broken")
+    assert engine.model is None
+    assert "no model loaded" in messages[-1]
+
+
+def test_transcription_keeps_using_the_model_it_started_with(fake_model):
+    engine = make_engine(initial_prompt="Prompt")
+    original_model = engine.model
+    calls = []
+
+    def transcribe(audio, **kwargs):
+        calls.append(1)
+        engine.model = None
+        return iter([types.SimpleNamespace(text=" part")]), types.SimpleNamespace(language="en", language_probability=0.9)
+
+    original_model.transcribe = transcribe
+    assert engine.transcribe_audio(np.ones(16000 * 70, dtype=np.float32)).startswith("part")
+    assert len(calls) >= 3
+
+
+def test_uncertain_language_is_detected_per_chunk(fake_model):
+    engine = make_engine(initial_prompt="Prompt")
+    languages = []
+
+    def transcribe(audio, **kwargs):
+        languages.append(kwargs["language"])
+        return iter([types.SimpleNamespace(text=" x")]), types.SimpleNamespace(language="de", language_probability=0.3)
+
+    engine.model.transcribe = transcribe
+    engine.transcribe_audio(np.ones(16000 * 70, dtype=np.float32))
+    assert set(languages) == {None}
