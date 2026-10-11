@@ -4,6 +4,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [1.9.0b1] - 2026-10-11
+
 ### Added
 - **Language per model in the tray** - the Model page has a **Language** page: Auto-detect and your last used languages, with every language the selected model supports under **All languages** (100 for Whisper models, 30 for Qwen3-ASR). The choice is remembered per model (`whisper.model_languages`), switching models applies that model's language, and a change takes effect with the next recording without reloading the model. English-only and single-language models show their fixed language, Parakeet shows that it detects the language itself; `whisper.language` stays the default for models without their own choice
 - **Retry last recording** - when a transcription fails (or the recording arrives while the runtime is switching) the audio is kept, and the tray Recording section offers "Retry last recording" until a transcription succeeds; the kept audio stays in memory until then (up to `audio.max_duration` of audio)

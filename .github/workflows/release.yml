@@ -16,6 +16,7 @@ jobs:
     runs-on: windows-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,16 +28,18 @@ jobs:
         run: |
           $Version = (Select-String -Path pyproject.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
           "version=$Version" >> $env:GITHUB_OUTPUT
+          "prerelease=$($Version -match '(a|b|rc)\d+$')".ToLower() >> $env:GITHUB_OUTPUT
 
-      - name: Check tag is a release on master
+      - name: Check tag is a release on master (or a pre-release on dev)
         if: github.ref_type == 'tag'
         shell: pwsh
         run: |
           if ("${{ github.ref_name }}" -ne "v${{ steps.version.outputs.version }}") {
             throw "Tag ${{ github.ref_name }} does not match pyproject version ${{ steps.version.outputs.version }}"
           }
-          git merge-base --is-ancestor $env:GITHUB_SHA origin/master
-          if ($LASTEXITCODE -ne 0) { throw "Tagged commit is not on master" }
+          $Branch = if ("${{ steps.version.outputs.prerelease }}" -eq "true") { "dev" } else { "master" }
+          git merge-base --is-ancestor $env:GITHUB_SHA origin/$Branch
+          if ($LASTEXITCODE -ne 0) { throw "Tagged commit is not on $Branch" }
 
       - uses: actions/setup-python@v5
         with:
@@ -109,4 +112,5 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           body_path: release-notes.md
+          prerelease: ${{ needs.build-windows.outputs.prerelease == 'true' }}
           files: release/*
