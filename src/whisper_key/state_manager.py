@@ -745,6 +745,13 @@ class StateManager:
                 return False
             threading.Thread(target=self._download_model_and_switch, args=(new_model_key,), daemon=True).start()
             return True
+        if download_state in ("install", "faster_whisper"):
+            if not self._begin_engine_switch():
+                print("⏳ A runtime is already being installed...")
+                return False
+            target = self._offer_whisper_cpp_install if download_state == "install" else self._offer_faster_whisper_fallback
+            threading.Thread(target=target, args=(new_model_key,), daemon=True).start()
+            return True
         if download_state == "unavailable":
             print(f"⚠️ The [{new_model_key}] model is not available for the current runtime")
             return False
@@ -924,17 +931,19 @@ class StateManager:
             if registry.is_model_cached(model_key):
                 return "ready"
             return "download" if registry.get_hf_repo(model_key) else "unavailable"
+        from .runtime_installer import ggml_model_name
+        ggml_name = ggml_model_name(model_key)
+        if not ggml_name:
+            return "faster_whisper" if registry.get_hf_repo(model_key) or registry.is_model_cached(model_key) else "unavailable"
         engine = self.whisper_engine
         if engine.ENGINE_TYPE == WHISPER_CPP and engine._is_model_cached(model_key):
             return "ready"
-        from .runtime_installer import ggml_model_name
         model_dir = self._ggml_model_dir()
-        ggml_name = ggml_model_name(model_key)
-        if model_dir and ggml_name and (Path(model_dir) / f"ggml-{ggml_name}.bin").is_file():
+        if not model_dir:
+            return "install"
+        if (Path(model_dir) / f"ggml-{ggml_name}.bin").is_file():
             return "ready"
-        if model_dir and ggml_name:
-            return "download"
-        return "unavailable"
+        return "download"
 
     def _download_model_and_switch(self, model_key: str):
         from .runtime_installer import RuntimeInstaller
@@ -978,6 +987,53 @@ class StateManager:
         self.system_tray.refresh_menu()
         self.request_model_change(model_key)
         self._update_ui_state(self.get_current_state())
+
+    def _model_label(self, model_key: str) -> str:
+        model = self.whisper_engine.registry.get_model(model_key)
+        return model.label if model else model_key
+
+    def _offer_whisper_cpp_install(self, model_key: str):
+        from .runtime_installer import install_options
+        vulkan_runtime = next((runtime for runtime in self.get_runtimes() if runtime.key == VULKAN), None)
+        if not vulkan_runtime or vulkan_runtime.state != INSTALLABLE:
+            reason = vulkan_runtime.reason if vulkan_runtime and vulkan_runtime.reason else "it cannot be installed on this PC"
+            self._offer_faster_whisper_fallback(model_key, f"whisper.cpp is not available ({reason}).")
+            return
+        option = install_options(VULKAN)[0]
+        label = self._model_label(model_key)
+        title = f"Install {vulkan_runtime.label}"
+        message = (f"{label} runs on {vulkan_runtime.label}, which is not installed.\n\n"
+                   f"Install it now and download the model?\n{option.description}\nDownload: {option.download_size}\n\n"
+                   "Transcription is paused until the installation completes.")
+        try:
+            confirmed = dialogs.confirm(title, message)
+        except Exception as e:
+            self.logger.error(f"Could not ask to install {vulkan_runtime.label}: {e}")
+            confirmed = False
+        if not confirmed:
+            self._end_engine_switch()
+            return
+        self._install_and_switch_runtime(vulkan_runtime, model_key=model_key, option=option)
+
+    def _offer_faster_whisper_fallback(self, model_key: str, reason: Optional[str] = None):
+        label = self._model_label(model_key)
+        reason = reason or f"{label} has no whisper.cpp version."
+        cpu_runtime = next((runtime for runtime in self.get_runtimes() if runtime.key == CPU and runtime.available), None)
+        try:
+            if cpu_runtime is None:
+                print(f"❌ No runtime can run the [{model_key}] model")
+                dialogs.show_error(f"Switch to {label}", f"{reason}\n\nNo other runtime can run this model.")
+                return
+            confirmed = dialogs.confirm(f"Switch to {label}",
+                                        f"{reason}\n\nRun it with {cpu_runtime.label} (faster-whisper) instead? "
+                                        "The model is downloaded if needed.")
+        except Exception as e:
+            self.logger.error(f"Could not offer the faster-whisper fallback for {model_key}: {e}")
+            return
+        finally:
+            self._end_engine_switch()
+        if confirmed:
+            self.request_runtime_change(cpu_runtime.key, model_key=model_key)
 
     def _switch_engine_family(self, model_key: str) -> bool:
         runtimes = self.get_runtimes()
@@ -1254,7 +1310,7 @@ class StateManager:
                 return False
             print(f"📦 Installing [{runtime.label}]: {option.description}")
             self._show_install_progress(f"Installing {runtime.label}")
-            self._runtime_installer.install(runtime.key, option, model_key=self.whisper_engine.model_key)
+            self._runtime_installer.install(runtime.key, option, model_key=model_key or self.whisper_engine.model_key)
             installed = True
         except Exception as e:
             self._close_install_progress()

@@ -26,6 +26,7 @@ except ImportError:
     pystray = None
     Image = None
 
+MODEL_STATE_SUFFIXES = {"download": " (download)", "install": " (install whisper.cpp)", "faster_whisper": " (CPU)"}
 RECORDING_MODES = (("toggle", "Toggle"), ("push_to_talk", "Push to talk"))
 FLOATING_WIDGET_STYLES = (("button", "Button"), ("orb", "Voice orb"))
 ORB_APPEARANCE_DEFAULTS = {"opacity": DEFAULT_IDLE_OPACITY, "vibrancy": 1.0, "hue": 0}
@@ -244,7 +245,7 @@ class SystemTray:
                 download_state = self.state_manager.get_model_download_state(model.key)
                 options.append(Option(
                     model.key,
-                    f"{model.label} (download)" if download_state == "download" else model.label,
+                    f"{model.label}{MODEL_STATE_SUFFIXES.get(download_state, '')}",
                     enabled=download_state != "unavailable" and not is_model_loading,
                     starts_group=index == 0,
                 ))
