@@ -40,6 +40,7 @@ ICON_FOLDER = ""
 ICON_DOCUMENT = ""
 ICON_EXIT = ""
 ICON_SLIDERS = ""
+ICON_RETRY = ""
 
 if TYPE_CHECKING:
     from .state_manager import StateManager
@@ -112,6 +113,8 @@ class SystemTray:
             Header("Whisper Key", self._status_text, lambda: self.state_manager.is_muted, self._toggle_mute),
             Section("Recording"),
             Info("Shortcut", self._recording_shortcut_text),
+            Action("Retry last recording", self.state_manager.retry_failed_recording, icon=ICON_RETRY,
+                   enabled=self.state_manager.can_start_recording) if self.state_manager.has_failed_recording() else None,
             Choice("Recording mode", [Option(mode, label) for mode, label in RECORDING_MODES],
                    self._current_recording_mode, self._set_recording_mode, style="segmented") if self.recording_mode_changer else None,
             Toggle("Voice-activated recording", lambda: self.state_manager.auto_trigger_enabled, self._set_auto_trigger) if self.state_manager.is_auto_trigger_available() else None,
@@ -182,12 +185,17 @@ class SystemTray:
         return options
 
     def _build_runtime_items(self, is_busy: bool) -> list:
-        current_runtime = self.state_manager.get_current_runtime()
+        if self.state_manager.runtimes_detected():
+            current_runtime = self.state_manager.get_current_runtime()
+            runtime_options = [Option(runtime.key, runtime.menu_label, enabled=runtime.selectable and not is_busy)
+                               for runtime in self.state_manager.get_menu_runtimes()]
+        else:
+            current_runtime = None
+            runtime_options = [Option("detecting", "Detecting runtimes...", enabled=False)]
         runtime_choice = Choice(
             "Runtime",
-            [Option(runtime.key, runtime.menu_label, enabled=runtime.selectable and not is_busy)
-             for runtime in self.state_manager.get_menu_runtimes()],
-            lambda: getattr(self.state_manager.get_current_runtime(), 'key', None),
+            runtime_options,
+            lambda: getattr(self.state_manager.get_current_runtime(wait=False), 'key', None),
             self.state_manager.request_runtime_change,
         )
         if current_runtime and current_runtime.compute_types:

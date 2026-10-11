@@ -130,10 +130,11 @@ Delete this file and restart app to reset to defaults.
 | `whisper.cpp_binary` | `""` | Custom whisper-cli.exe path (auto-detected if empty) |
 | `whisper.cpp_model_dir` | `""` | Custom ggml model directory (auto-detected if empty) |
 | `whisper.language` | `auto` | auto or language code (en, es, fr, etc.) |
-| `whisper.beam_size` | `5` | Higher = more accurate but slower (1-10) |
-| `whisper.initial_prompt` | `""` | Guide transcription style, language variant, or script |
-| `whisper.hotwords` | `[]` | Words the model should favor (names, technical terms) |
-| `whisper.models` | (see config) | Add custom HuggingFace or local models; `supports_prompt: false` on a model skips `initial_prompt` and `hotwords` for models that repeat or derail with them |
+| `whisper.beam_size` | `5` | Higher = more accurate but slower (1-10); 1 is noticeably faster on CPU |
+| `whisper.cpu_threads` | `0` | CPU threads for faster-whisper on CPU and whisper.cpp; 0 = one per physical core (performance cores on Apple Silicon), up to 16 |
+| `whisper.initial_prompt` | `""` | Guide transcription style, language variant, or script; applied to the whole recording, also beyond 30 s |
+| `whisper.hotwords` | `[]` | Words the model should favor (names, technical terms); with whisper.cpp they are added to the prompt |
+| `whisper.models` | (see config) | Add custom HuggingFace or local models; `supports_prompt: false` on a model skips `initial_prompt` and `hotwords` for models that repeat or derail with them; `language: <code>` always transcribes a single-language model in that language (set for Distil-Large-V3.5 and the German Turbo); `max_chunk_seconds` splits long recordings for ONNX models at quiet points (default 28 s for Qwen3-ASR, 60 s for Parakeet) |
 | **Post-Processing** |||
 | `post_processing.strip_trailing_period` | `false` | Strip trailing period from output |
 | `post_processing.corrections` | `{}` | Fix recurring misheard words, e.g. `CAPEX: [cap x]` |
@@ -146,7 +147,9 @@ Delete this file and restart app to reset to defaults.
 | `hotkey.command_hotkey` | `[alt+win, ""]` / `[fn+command, ""]` | Voice command mode |
 | **Voice Activity Detection** |||
 | `vad.vad_precheck_enabled` | `true` | Prevent hallucinations on silence |
-| `vad.vad_onset_threshold` | `0.7` | Speech detection start (0.0-1.0) |
+| `vad.vad_precheck_onset_threshold` | `0.5` | Pre-check speech start (0.0-1.0); lower lets quiet speech through |
+| `vad.vad_precheck_offset_threshold` | `0.35` | Pre-check speech end (0.0-1.0) |
+| `vad.vad_onset_threshold` | `0.7` | Real-time speech detection start (0.0-1.0), for silence timeout and voice-activated recording |
 | `vad.vad_offset_threshold` | `0.55` | Speech detection end (0.0-1.0) |
 | `vad.vad_min_speech_duration` | `0.1` | Min speech segment (seconds); also how long speech must last to start a voice-activated recording |
 | `vad.vad_realtime_enabled` | `true` | Auto-stop on silence |
@@ -156,8 +159,7 @@ Delete this file and restart app to reset to defaults.
 | `vad.auto_trigger_paste` | `true` | false = voice-activated recordings are only copied to the clipboard |
 | **Audio** |||
 | `audio.host` | `null` | Audio API (WASAPI, Core Audio, etc.) |
-| `audio.channels` | `1` | 1 = mono, 2 = stereo |
-| `audio.dtype` | `float32` | float32/int16/int24/int32 |
+| `audio.channels` | `1` | Channels captured from the microphone (1 or 2); always mixed down to mono for transcription |
 | `audio.max_duration` | `900` | Max recording seconds (0 = unlimited) |
 | `audio.pre_roll_seconds` | `1.0` | Seconds of audio from before the recording starts (hotkey, voice command and voice-activated), so the first word is not cut off. Keeps the microphone open while the app runs, paused while muted. Range 0-10, `0` turns it off |
 | `audio.input_device` | `default` | Device ID or "default" |

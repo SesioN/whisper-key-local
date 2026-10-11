@@ -4,6 +4,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+- **Retry last recording** - when a transcription fails (or the recording arrives while the runtime is switching) the audio is kept, and the tray Recording section offers "Retry last recording" until a transcription succeeds; the kept audio stays in memory until then (up to `audio.max_duration` of audio)
+- **Model suggestion on first run** - a new install that still uses Tiny offers a model that fits the PC: Large-V3-Turbo when a GPU runtime is chosen, Small with 4+ physical CPU cores (performance cores on Apple Silicon), Base otherwise (`.en` variants when the language is English)
+- **CPU thread setting** - `whisper.cpu_threads` (default 0 = one thread per physical core, performance cores on Apple Silicon, up to 16) for faster-whisper on CPU and whisper.cpp; faster-whisper used to be limited to 4 threads
+
+### Changed
+- **Faster short transcriptions with faster-whisper** - recordings that fit in one 30 s window are decoded without timestamp tokens
+- **Faster startup** - GPU/runtime detection (nvidia-smi and a PowerShell query on non-NVIDIA PCs) and the experimental streaming model load in the background instead of delaying the tray; the tray Runtime menu shows "Detecting runtimes..." until detection finishes, and GPU detection runs once per session
+- **Faster hand-off after you stop recording** - the speech pre-check stops at the first detected speech instead of scanning the whole recording (it cost about 0.4 s per minute of audio), and is skipped entirely when the real-time VAD already heard speech during the recording
+- **Hotkeys stay responsive while transcribing** - transcription and delivery run on their own worker thread instead of the hotkey thread, so cancel, mute and push-to-talk keys keep working during long transcriptions
+- **Next recording can start 0.5 s sooner** - the clipboard is restored in the background after auto-paste instead of blocking for `clipboard.paste_clipboard_restore_delay`; a second paste within that delay restores the original content, not the first transcription, and anything you copy during the delay is kept
+- **Single-language models always use their language** - Distil-Large-V3.5 (English) and Large-V3-Turbo German no longer auto-detect the language, which produced garbage when detection picked another language; set `language: <code>` on a custom model in `whisper.models` to do the same
+- **Initial prompt applies to the whole recording** - `whisper.initial_prompt` used to stop after the first 30 s; faster-whisper now transcribes long prompted recordings in chunks split at pauses, whisper.cpp carries the prompt into every window
+- **Hotwords work with whisper.cpp** - `whisper.hotwords` are added to the prompt instead of being ignored
+- **whisper.cpp suppresses non-speech tokens** - `[MUSIC]`/`(laughs)`-style output is avoided during decoding (whisper-cli only when the installed build supports it)
+- **Parakeet handles long recordings** - all ONNX models are split at pauses (at most 60 s for Parakeet/NeMo, 28 s for Qwen3-ASR; override with `max_chunk_seconds` per model) instead of Parakeet getting the whole recording at once
+- **Separate pre-check sensitivity** - the speech pre-check uses its own, more permissive thresholds (`vad.vad_precheck_onset_threshold` 0.5 / `vad.vad_precheck_offset_threshold` 0.35, the TEN VAD default) so quiet speech is no longer skipped as silence; the real-time thresholds for silence timeout and voice-activated recording are unchanged
+- **Long silences are no longer transcribed** - trailing silence measured by the real-time VAD is cut down to 1 s before transcription (e.g. the 30 s before a silence-timeout stop), which saves time and avoids hallucinated phrases such as "Thank you."; nothing is trimmed when the real-time VAD has not analyzed the whole recording yet
+- **Less work in the microphone callback** - voice detection, the live streaming preview and its console output run on a separate analysis thread, so a busy moment no longer delays the audio driver and drops samples; input overflows (lost audio) are now reported as warnings in the log
+- **Cleaner audio for voice detection** - audio for the real-time VAD is resampled as a continuous stream instead of block by block
+
+### Fixed
+- **Voice detection broken on 22.05 kHz and 11.025 kHz microphones** - on WASAPI devices with these rates the real-time VAD received 255-sample frames, failed on every frame and flooded the log; frames are now always exactly 256 samples, and the real-time VAD turns itself off with one clear message after repeated errors
+- **Streaming preview could crash when a recording started** - the preview recognizer was reset from the hotkey thread while the audio thread decoded with it; resets now happen in order on the analysis thread
+- **Clipboard images and files lost after auto-paste** - with `clipboard.paste_preserve_clipboard` all clipboard formats (images, copied files, rich text) are restored, not only plain text
+- **Speech pre-check ran while disabled** - `vad.vad_precheck_enabled: false` was ignored whenever real-time VAD was on
+- **Stereo microphones transcribed garbage** - with `audio.channels: 2` the two channels were interleaved into one stream at double length; they are now mixed down to mono when captured
+- **Voice commands fired inside other words** - a trigger like "go" ran on "I'm going home", which with `voice_commands.match_in_dictation` replaced the dictation; triggers now match whole words only, and punctuation in triggers is normalized like the spoken text ("what's up" matches "whats up", "follow-up" matches "follow up")
+- **Corrections with symbols never matched** - `post_processing.corrections` entries such as "C++", "C#" or ".NET" are now replaced
+- **GPU out of memory when switching models** - faster-whisper on CUDA/ROCm kept the old model loaded while the new one loaded; it is now downloaded first, then the old model is released, and the old model is restored if the new one fails
+- **CUDA errors did not fall back to the previous runtime** - faster-whisper transcription errors were swallowed, so the automatic runtime fallback never ran
+
+### Removed
+- `audio.dtype` setting, which had no effect (audio is always captured as float32)
+
 ## [1.8.0] - 2026-10-10
 
 ### Added

@@ -1,4 +1,5 @@
 import ctypes
+import functools
 import glob
 import importlib.metadata
 import importlib.util
@@ -103,6 +104,7 @@ def _classify_gpu(gpu_vendor: str, gpu_name: str) -> str | None:
     return None
 
 
+@functools.lru_cache(maxsize=1)
 def _detect_gpu() -> tuple[str | None, str | None]:
     nvidia = _detect_nvidia_gpu()
     if nvidia:
@@ -308,6 +310,7 @@ def has_vulkan_driver() -> bool:
     return os.path.isfile(os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'System32', 'vulkan-1.dll'))
 
 
+@functools.lru_cache(maxsize=1)
 def _detect_ct2_variant() -> str:
     try:
         import ctranslate2

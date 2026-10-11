@@ -54,6 +54,15 @@ class ModelRegistry:
     def is_english_only(self, key: str) -> bool:
         return key.endswith(".en") or self.get_source(key).endswith(".en")
 
+    def forced_language(self, key: str) -> Optional[str]:
+        model = self.get_model(key)
+        if model and model.language:
+            return model.language
+        return "en" if self.is_english_only(key) else None
+
+    def transcription_language(self, key: str, configured_language: Optional[str]) -> Optional[str]:
+        return self.forced_language(key) or configured_language
+
     def is_known_model(self, key: str) -> bool:
         return key in self.whisper_models or key in _MODELS
 
@@ -216,6 +225,10 @@ class ModelDefinition:
         if not isinstance(self.supports_prompt, bool):
             logging.getLogger(__name__).warning(f"Model {key}: supports_prompt must be true or false, got {self.supports_prompt!r}; using true")
             self.supports_prompt = True
+        self.language = config.get("language")
+        if self.language is not None and (not isinstance(self.language, str) or not self.language.strip() or self.language == "auto"):
+            logging.getLogger(__name__).warning(f"Model {key}: language must be a language code, got {self.language!r}; using the language setting")
+            self.language = None
         self.max_chunk_seconds = config.get("max_chunk_seconds")
         if self.max_chunk_seconds is not None and (isinstance(self.max_chunk_seconds, bool) or not isinstance(self.max_chunk_seconds, (int, float)) or self.max_chunk_seconds <= 0):
             logging.getLogger(__name__).warning(f"Model {key}: max_chunk_seconds must be a positive number, got {self.max_chunk_seconds!r}; using the default")

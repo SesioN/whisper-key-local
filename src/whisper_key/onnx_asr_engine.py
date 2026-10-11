@@ -7,11 +7,13 @@ from typing import Callable, Optional
 
 import numpy as np
 
+from .audio_chunking import split_at_quiet_points
 from .runtime_loader import ONNX_CPU, ONNX_CUDA, ONNX_DIRECTML
 
 SPEECH_LLM = "speech-llm"
 SAMPLE_RATE = 16000
 SPEECH_LLM_MAX_CHUNK_SECONDS = 28
+DEFAULT_MAX_CHUNK_SECONDS = 60
 
 PROVIDERS = {
     ONNX_CPU: ["CPUExecutionProvider"],
@@ -54,21 +56,6 @@ def onnx_required_file_patterns(onnx_model_type: str, quantization: Optional[str
             group += [variant[:-len(".onnx")] + ".onnx?data" for variant in list(group)]
         groups.append(group)
     return groups
-
-
-def split_at_quiet_points(audio: np.ndarray, max_seconds: float = SPEECH_LLM_MAX_CHUNK_SECONDS) -> list:
-    chunks = []
-    frame = SAMPLE_RATE // 50
-    max_samples = int(max_seconds * SAMPLE_RATE)
-    search_start = max_samples * 2 // 3
-    while len(audio) > max_samples:
-        search = audio[search_start:max_samples]
-        frame_energy = np.square(search[:len(search) // frame * frame].reshape(-1, frame)).mean(axis=1)
-        split = search_start + int(frame_energy.argmin()) * frame + frame // 2
-        chunks.append(audio[:split])
-        audio = audio[split:]
-    chunks.append(audio)
-    return chunks
 
 
 def matches_any_pattern(file_path: str, patterns: list) -> bool:
@@ -141,7 +128,10 @@ class OnnxAsrEngine:
         return manager._create_asr_adapter(asr), definition.onnx_model_type, device
 
     def _chunk_seconds(self, model_key: str) -> float:
-        return self.registry.get_model(model_key).max_chunk_seconds or SPEECH_LLM_MAX_CHUNK_SECONDS
+        definition = self.registry.get_model(model_key)
+        if definition.max_chunk_seconds:
+            return definition.max_chunk_seconds
+        return SPEECH_LLM_MAX_CHUNK_SECONDS if definition.onnx_model_type == SPEECH_LLM else DEFAULT_MAX_CHUNK_SECONDS
 
     def _load_model(self):
         print(f"🧠 Loading ONNX model [{self.model_key}] on [{self.onnx_runtime}]...")
@@ -168,11 +158,12 @@ class OnnxAsrEngine:
         self._recognize(np.zeros(SAMPLE_RATE, dtype=np.float32))
 
     def _recognize_kwargs(self) -> dict:
-        if self._model_type != SPEECH_LLM or not self.language:
+        language_code = self.registry.transcription_language(self.model_key, self.language)
+        if self._model_type != SPEECH_LLM or not language_code:
             return {}
-        language = QWEN_LANGUAGE_NAMES.get(self.language.lower().split("-")[0])
+        language = QWEN_LANGUAGE_NAMES.get(language_code.lower().split("-")[0])
         if not language:
-            self.logger.warning(f"Language [{self.language}] is not supported by [{self.model_key}], using auto-detect")
+            self.logger.warning(f"Language [{language_code}] is not supported by [{self.model_key}], using auto-detect")
             return {}
         return {"language": language}
 
@@ -181,8 +172,6 @@ class OnnxAsrEngine:
             model = self.model
             if model is None:
                 raise RuntimeError("No ONNX model loaded")
-            if self._model_type != SPEECH_LLM:
-                return model.recognize(audio, sample_rate=SAMPLE_RATE)
             kwargs = self._recognize_kwargs()
             texts = []
             for chunk in split_at_quiet_points(audio, self._max_chunk_seconds):
@@ -241,11 +230,6 @@ class OnnxAsrEngine:
         if audio_data is None or len(audio_data) == 0:
             self.logger.warning("No audio data to transcribe")
             return None
-
-        if self.vad_manager and self.vad_manager.is_available():
-            if not self.vad_manager.check_audio_for_speech(audio_data):
-                print("   ✗ No speech detected, skipping transcription")
-                return None
 
         start_time = time.time()
         text = self._recognize(np.ascontiguousarray(audio_data.flatten(), dtype=np.float32)).strip()

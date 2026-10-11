@@ -114,7 +114,8 @@ class ConfigManager:
         self.use_user_settings = use_user_settings
         self.config = {}
         self.logger = logging.getLogger(__name__)
-        
+        self.created_user_settings = False
+
         self.config_path = self._determine_config_path(use_user_settings, config_path)
         
         self.config = self._load_config()
@@ -140,6 +141,7 @@ class ConfigManager:
         if not os.path.exists(self.user_settings_path):
             with open(self.user_settings_path, 'w', encoding='utf-8') as f:
                 f.write(_build_settings_header())
+            self.created_user_settings = True
             self.logger.info(f"Created user settings at {self.user_settings_path}")
     
     def _remove_unused_keys_from_user_config(self, user_config: Dict[str, Any], default_config: Dict[str, Any]):
@@ -483,13 +485,24 @@ def _assign_free_bindings(action, bindings, owners_by_binding, logger):
 
 def validate_config(config, default_config, logger):
     _validate_numeric_range(config, default_config, 'audio.max_duration', logger, min_val=0)
+    _validate_numeric_range(config, default_config, 'audio.channels', logger, min_val=1, max_val=2)
     _validate_numeric_range(config, default_config, 'audio.pre_roll_seconds', logger, min_val=0, max_val=10)
 
-    _validate_numeric_range(config, default_config, 'vad.vad_onset_threshold', logger, min_val=0.0, max_val=1.0)
-    _validate_numeric_range(config, default_config, 'vad.vad_offset_threshold', logger, min_val=0.0, max_val=1.0)
+    for onset_path, offset_path in (('vad.vad_onset_threshold', 'vad.vad_offset_threshold'),
+                                    ('vad.vad_precheck_onset_threshold', 'vad.vad_precheck_offset_threshold')):
+        _validate_numeric_range(config, default_config, onset_path, logger, min_val=0.0, max_val=1.0)
+        _validate_numeric_range(config, default_config, offset_path, logger, min_val=0.0, max_val=1.0)
+        if _get_config_value_at_path(config, offset_path) > _get_config_value_at_path(config, onset_path):
+            logger.warning(f"{offset_path} must not be above {onset_path}")
+            _set_to_default(config, default_config, onset_path, _get_config_value_at_path(config, onset_path), logger)
+            _set_to_default(config, default_config, offset_path, _get_config_value_at_path(config, offset_path), logger)
     _validate_numeric_range(config, default_config, 'vad.vad_min_speech_duration', logger, min_val=0.001, max_val=5.0)
     _validate_numeric_range(config, default_config, 'vad.vad_silence_timeout_seconds', logger, min_val=1.0, max_val=36000.0)
     _validate_numeric_range(config, default_config, 'vad.auto_trigger_silence_seconds', logger, min_val=0.2, max_val=60.0)
+
+    _validate_numeric_range(config, default_config, 'whisper.cpu_threads', logger, min_val=0, max_val=256)
+    if not isinstance(_get_config_value_at_path(config, 'whisper.cpu_threads'), int):
+        _set_to_default(config, default_config, 'whisper.cpu_threads', _get_config_value_at_path(config, 'whisper.cpu_threads'), logger)
 
     runtime = _get_config_value_at_path(config, 'whisper.runtime')
     if runtime not in ('cpu', 'cuda', 'rocm', 'vulkan'):

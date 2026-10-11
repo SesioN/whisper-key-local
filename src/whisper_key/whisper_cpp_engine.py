@@ -22,6 +22,7 @@ import numpy as np
 
 from .audio_recorder import AudioRecorder
 from .platform import child_processes
+from .runtime_options import resolve_cpu_threads
 from .utils import get_user_app_data_path
 
 SERVER_HOST = "127.0.0.1"
@@ -31,6 +32,9 @@ SERVER_POLL_INTERVAL_SECONDS = 0.2
 SERVER_STOP_TIMEOUT_SECONDS = 5
 SERVER_MAX_RESTARTS = 2
 SERVER_LOG_FILE = "whisper-server.log"
+CLI_HELP_TIMEOUT_SECONDS = 10
+CARRY_INITIAL_PROMPT_FLAG = "--carry-initial-prompt"
+SUPPRESS_NON_SPEECH_FLAG = "--suppress-nst"
 _LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
@@ -130,10 +134,10 @@ class WhisperCppEngine:
                  beam_size: int = 5,
                  initial_prompt: str = "",
                  hotwords: list = None,
-                 vad_manager=None,
                  model_registry=None,
                  binary_path: str = None,
-                 model_dir: str = None):
+                 model_dir: str = None,
+                 cpu_threads: int = 0):
 
         self.model_key = model_key
         self.language = None if language == 'auto' else language
@@ -141,10 +145,9 @@ class WhisperCppEngine:
         self.initial_prompt = initial_prompt or None
         self.hotwords = ", ".join(hotwords) if hotwords else None
         self.logger = logging.getLogger(__name__)
-        if self.hotwords:
-            self.logger.warning("hotwords are not supported by whisper.cpp and will be ignored")
-        self.vad_manager = vad_manager
         self.registry = model_registry
+        self.cpu_threads = resolve_cpu_threads(cpu_threads)
+        self._cli_flags = None
         self._prompt_skip_logged_models = set()
 
         self._binary = binary_path or find_whisper_cli()
@@ -188,7 +191,7 @@ class WhisperCppEngine:
         port = _free_local_port()
         request_path = f"/{secrets.token_urlsafe(16)}"
         command = [server_binary, "-m", model_path, "--host", SERVER_HOST, "--port", str(port),
-                   "--request-path", request_path, "-nt", "-l", self.language or "auto"]
+                   "--request-path", request_path, "-nt", "-l", self._language(model_key), "-t", str(self.cpu_threads)]
         if self.beam_size:
             command.extend(["-bs", str(self.beam_size)])
         print("   Starting whisper.cpp server...", flush=True)
@@ -266,13 +269,33 @@ class WhisperCppEngine:
                 return
         print("   ⚠ whisper-server could not be restarted, using whisper-cli (slower)")
 
-    def _active_initial_prompt(self) -> Optional[str]:
+    def _language(self, model_key: str = None) -> str:
+        model_key = model_key or self.model_key
+        if self.registry:
+            return self.registry.transcription_language(model_key, self.language) or "auto"
+        return self.language or "auto"
+
+    def _active_prompt(self) -> Optional[str]:
+        prompt = " ".join(part for part in (self.initial_prompt, self.hotwords) if part) or None
         if not self.registry or self.registry.supports_prompt(self.model_key):
-            return self.initial_prompt
-        if self.initial_prompt and self.model_key not in self._prompt_skip_logged_models:
+            return prompt
+        if prompt and self.model_key not in self._prompt_skip_logged_models:
             self._prompt_skip_logged_models.add(self.model_key)
-            self.logger.info(f"Model {self.model_key} has supports_prompt: false, skipping initial_prompt")
+            self.logger.info(f"Model {self.model_key} has supports_prompt: false, skipping initial_prompt and hotwords")
         return None
+
+    def _supported_cli_flags(self) -> set:
+        if self._cli_flags is not None:
+            return self._cli_flags
+        try:
+            result = subprocess.run([self._binary, "--help"], capture_output=True, text=True, encoding="utf-8",
+                                    errors="replace", timeout=CLI_HELP_TIMEOUT_SECONDS, creationflags=_NO_WINDOW)
+        except (OSError, subprocess.SubprocessError) as e:
+            self.logger.warning(f"Could not read whisper-cli options, trying again next time: {e}")
+            return set()
+        help_text = result.stdout + result.stderr
+        self._cli_flags = {flag for flag in (CARRY_INITIAL_PROMPT_FLAG, SUPPRESS_NON_SPEECH_FLAG) if flag in help_text}
+        return self._cli_flags
 
     def _transcribe_with_server(self, wav_bytes: bytes, timeout: float) -> Optional[str]:
         with self._server_lock:
@@ -280,10 +303,11 @@ class WhisperCppEngine:
             process = self._server_process
         if not server_url:
             return None
-        fields = {"response_format": "json", "language": self.language or "auto"}
-        initial_prompt = self._active_initial_prompt()
-        if initial_prompt:
-            fields["prompt"] = initial_prompt
+        fields = {"response_format": "json", "language": self._language(), "suppress_nst": "true"}
+        prompt = self._active_prompt()
+        if prompt:
+            fields["prompt"] = prompt
+            fields["carry_initial_prompt"] = "true"
         body, content_type = _multipart_body(fields, "file", "audio.wav", wav_bytes)
         request = urllib.request.Request(server_url, data=body, headers={"Content-Type": content_type}, method="POST")
         try:
@@ -417,12 +441,6 @@ class WhisperCppEngine:
             self.logger.warning("No audio data to transcribe")
             return None
 
-        if self.vad_manager and self.vad_manager.is_available():
-            speech_detected = self.vad_manager.check_audio_for_speech(audio_data)
-            if not speech_detected:
-                print("   X No speech detected, skipping transcription")
-                return None
-
         start_time = time.time()
         audio_seconds = len(audio_data) / AudioRecorder.WHISPER_SAMPLE_RATE
         timeout = max(120, audio_seconds * 4)
@@ -499,13 +517,19 @@ class WhisperCppEngine:
             "-m", model_path,
             "-f", audio_path,
             "-nt",
-            "-l", self.language or "auto",
+            "-l", self._language(),
+            "-t", str(self.cpu_threads),
         ]
         if self.beam_size:
             cmd.extend(["-bs", str(self.beam_size)])
-        initial_prompt = self._active_initial_prompt()
-        if initial_prompt:
-            cmd.extend(["--prompt", initial_prompt])
+        supported_flags = self._supported_cli_flags()
+        if SUPPRESS_NON_SPEECH_FLAG in supported_flags:
+            cmd.append(SUPPRESS_NON_SPEECH_FLAG)
+        prompt = self._active_prompt()
+        if prompt:
+            cmd.extend(["--prompt", prompt])
+            if CARRY_INITIAL_PROMPT_FLAG in supported_flags:
+                cmd.append(CARRY_INITIAL_PROMPT_FLAG)
         return cmd
 
     @staticmethod
