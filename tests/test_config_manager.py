@@ -19,3 +19,27 @@ def test_offset_above_onset_resets_both_to_defaults():
     validated = validate_config(config, copy.deepcopy(defaults), logging.getLogger("test"))
     assert validated['vad']['vad_precheck_onset_threshold'] == defaults['vad']['vad_precheck_onset_threshold']
     assert validated['vad']['vad_precheck_offset_threshold'] == defaults['vad']['vad_precheck_offset_threshold']
+
+
+def test_language_settings_are_validated():
+    import copy
+    defaults = ConfigManager(use_user_settings=False).config
+    config = copy.deepcopy(defaults)
+    config['whisper']['model_languages'] = {'tiny': 'DE-at', 'base': 5, 'small': ' ', 'medium': 'xx', 'tiny.en': 'Auto'}
+    config['whisper']['recent_languages'] = ['de', 3, 'DE-at', 'xx', 'fr', 'en', 'nl']
+    validated = validate_config(config, copy.deepcopy(defaults), logging.getLogger("test"))
+    assert validated['whisper']['model_languages'] == {'tiny': 'de', 'tiny.en': 'auto'}
+    assert validated['whisper']['recent_languages'] == ['de', 'fr', 'en']
+    config['whisper']['model_languages'] = ['de']
+    assert validate_config(config, copy.deepcopy(defaults), logging.getLogger("test"))['whisper']['model_languages'] == {}
+
+
+def test_model_languages_are_saved_as_user_overrides():
+    from whisper_key.config_manager import _compute_overrides
+    defaults = ConfigManager(use_user_settings=False).config
+    import copy
+    config = copy.deepcopy(defaults)
+    config['whisper']['model_languages'] = {'large-v3-turbo': 'de'}
+    config['whisper']['recent_languages'] = ['de']
+    overrides = _compute_overrides(config, defaults)
+    assert overrides['whisper'] == {'model_languages': {'large-v3-turbo': 'de'}, 'recent_languages': ['de']}

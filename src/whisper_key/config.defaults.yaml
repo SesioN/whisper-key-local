@@ -46,7 +46,15 @@ whisper: # Whisper AI Model Settings
     # Language detection
     # Options: auto (auto-detect), en, es, fr, de, etc.
     # Set to specific language code to force language, or auto for auto-detection
+    # Default for models without their own choice in model_languages
     language: auto
+
+    # Language per model, chosen in the tray "Model > Language" page (overrides "language" above)
+    # Example: {large-v3-turbo: de, qwen3-asr-1.7b: auto}
+    model_languages: {}
+
+    # Languages picked most recently in the tray, listed first there (managed automatically)
+    recent_languages: []
 
     # Transcription quality settings
     # Higher = more accurate but slower (1-10); 1 (greedy) is noticeably faster on CPU with a small accuracy cost
@@ -69,6 +77,7 @@ whisper: # Whisper AI Model Settings
     # Example: my-model: {source: "username/repo-ct2", label: "My Model", group: custom}
     # supports_prompt: false skips initial_prompt and hotwords for models that repeat or derail with them
     # language: <code> always transcribes in that language for models trained on a single language (overrides "language" above)
+    # languages: [<code>, ...] limits the languages offered in the tray for a custom model ([] = automatic detection only)
     models:
         # Official whisper models
         tiny:

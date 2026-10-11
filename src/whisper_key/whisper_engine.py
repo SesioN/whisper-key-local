@@ -24,7 +24,6 @@ class WhisperEngine:
                  model_key: str = "tiny",
                  device: str = "cpu",
                  compute_type: str = "int8",
-                 language: str = None,
                  beam_size: int = 5,
                  initial_prompt: str = "",
                  hotwords: list = None,
@@ -34,7 +33,6 @@ class WhisperEngine:
         self.model_key = model_key
         self.device = device
         self.compute_type = compute_type
-        self.language = None if language == 'auto' else language
         self.beam_size = beam_size
         self.initial_prompt = initial_prompt or None
         self.hotwords = ", ".join(hotwords) if hotwords else None
@@ -121,12 +119,12 @@ class WhisperEngine:
         self._warmed_model = model
 
     def _warm_up_language(self, model_key: str) -> str:
-        return self._transcription_language(model_key) or "en"
+        return self._transcription_language(model_key, None) or "en"
 
-    def _transcription_language(self, model_key: str) -> Optional[str]:
+    def _transcription_language(self, model_key: str, requested_language: Optional[str]) -> Optional[str]:
         if self.registry:
-            return self.registry.transcription_language(model_key, self.language)
-        return "en" if model_key.endswith(".en") else self.language
+            return self.registry.transcription_language(model_key, requested_language)
+        return "en" if model_key.endswith(".en") else requested_language
 
     def _load_model_async(self,
                           new_model_key: str,
@@ -208,7 +206,8 @@ class WhisperEngine:
     
 
     def transcribe_audio(self,
-                         audio_data: np.ndarray) -> Optional[str]:
+                         audio_data: np.ndarray,
+                         language: Optional[str] = None) -> Optional[str]:
         model = self.model
         if model is None:
             return None
@@ -222,7 +221,7 @@ class WhisperEngine:
 
         transcribe_kwargs = dict(
             beam_size=self.beam_size,
-            language=self._transcription_language(self.model_key),
+            language=self._transcription_language(self.model_key, language),
             condition_on_previous_text=False,
         )
         if self._model_supports_prompt():
@@ -290,7 +289,6 @@ def create_whisper_engine(engine_type: str, whisper_config: dict, vad_manager, m
         return OnnxAsrEngine(
             model_key=whisper_config['model'],
             onnx_runtime=whisper_config['onnx_runtime'],
-            language=whisper_config['language'],
             vad_manager=vad_manager,
             model_registry=model_registry,
         )
@@ -299,7 +297,6 @@ def create_whisper_engine(engine_type: str, whisper_config: dict, vad_manager, m
         from .whisper_cpp_engine import WhisperCppEngine
         return WhisperCppEngine(
             model_key=whisper_config['model'],
-            language=whisper_config['language'],
             beam_size=whisper_config['beam_size'],
             initial_prompt=whisper_config.get('initial_prompt', ''),
             hotwords=whisper_config.get('hotwords', []),
@@ -313,7 +310,6 @@ def create_whisper_engine(engine_type: str, whisper_config: dict, vad_manager, m
         model_key=whisper_config['model'],
         device=whisper_config['device'],
         compute_type=whisper_config['compute_type'],
-        language=whisper_config['language'],
         beam_size=whisper_config['beam_size'],
         initial_prompt=whisper_config.get('initial_prompt', ''),
         hotwords=whisper_config.get('hotwords', []),

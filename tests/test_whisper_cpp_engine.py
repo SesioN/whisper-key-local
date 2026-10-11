@@ -8,10 +8,9 @@ from whisper_key.model_registry import ModelRegistry
 from whisper_key.whisper_cpp_engine import WhisperCppEngine
 
 
-def make_engine(model_key="base", language=None, initial_prompt=None, hotwords=None, models=None):
+def make_engine(model_key="base", initial_prompt=None, hotwords=None, models=None):
     engine = WhisperCppEngine.__new__(WhisperCppEngine)
     engine.model_key = model_key
-    engine.language = language
     engine.beam_size = 5
     engine.initial_prompt = initial_prompt
     engine.hotwords = hotwords
@@ -58,7 +57,7 @@ def test_prompt_skipped_for_models_without_prompt_support():
 
 
 def test_server_request_carries_prompt_and_suppresses_non_speech(monkeypatch):
-    engine = make_engine(language="fr", initial_prompt="Bonjour.", hotwords="Kubernetes")
+    engine = make_engine(initial_prompt="Bonjour.", hotwords="Kubernetes")
     engine._server_lock = MagicMock()
     engine._server_url = "http://127.0.0.1:1/x/inference"
     engine._server_process = MagicMock()
@@ -73,7 +72,7 @@ def test_server_request_carries_prompt_and_suppresses_non_speech(monkeypatch):
     monkeypatch.setattr(whisper_cpp_engine, "_multipart_body", fake_multipart)
     monkeypatch.setattr(whisper_cpp_engine.json, "load", lambda _: {"text": " Salut "})
     monkeypatch.setattr(whisper_cpp_engine._LOCAL_OPENER, "open", MagicMock(return_value=response))
-    assert engine._transcribe_with_server(engine._wav_bytes(np.zeros(160, dtype=np.float32)), 5) == "Salut"
+    assert engine._transcribe_with_server(engine._wav_bytes(np.zeros(160, dtype=np.float32)), 5, "fr") == "Salut"
     assert sent["language"] == "fr"
     assert sent["prompt"] == "Bonjour. Kubernetes"
     assert sent["carry_initial_prompt"] == "true" and sent["suppress_nst"] == "true"

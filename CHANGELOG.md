@@ -5,6 +5,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ## [Unreleased]
 
 ### Added
+- **Language per model in the tray** - the Model page has a **Language** page: Auto-detect and your last used languages, with every language the selected model supports under **All languages** (100 for Whisper models, 30 for Qwen3-ASR). The choice is remembered per model (`whisper.model_languages`), switching models applies that model's language, and a change takes effect with the next recording without reloading the model. English-only and single-language models show their fixed language, Parakeet shows that it detects the language itself; `whisper.language` stays the default for models without their own choice
 - **Retry last recording** - when a transcription fails (or the recording arrives while the runtime is switching) the audio is kept, and the tray Recording section offers "Retry last recording" until a transcription succeeds; the kept audio stays in memory until then (up to `audio.max_duration` of audio)
 - **Model suggestion on first run** - a new install that still uses Tiny offers a model that fits the PC: Large-V3-Turbo when a GPU runtime is chosen, Small with 4+ physical CPU cores (performance cores on Apple Silicon), Base otherwise (`.en` variants when the language is English)
 - **CPU thread setting** - `whisper.cpu_threads` (default 0 = one thread per physical core, performance cores on Apple Silicon, up to 16) for faster-whisper on CPU and whisper.cpp; faster-whisper used to be limited to 4 threads
