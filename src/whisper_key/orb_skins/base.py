@@ -2,6 +2,7 @@ import numpy as np
 
 ALPHA_FLOOR = 0.035
 DEFAULT_IDLE_OPACITY = 0.7
+MAX_OPACITY = 1.0
 GRAYSCALE_WEIGHTS = (0.299, 0.587, 0.114)
 
 def smoothstep(edge0, edge1, x):
@@ -20,6 +21,10 @@ RGB_TO_YIQ = np.array([[0.299, 0.587, 0.114],
                        [0.596, -0.274, -0.322],
                        [0.211, -0.523, 0.312]], dtype=np.float64)
 YIQ_TO_RGB = np.linalg.inv(RGB_TO_YIQ)
+
+
+def solidity_for_opacity(opacity: float) -> float:
+    return float(np.clip((opacity - DEFAULT_IDLE_OPACITY) / (MAX_OPACITY - DEFAULT_IDLE_OPACITY), 0.0, 1.0))
 
 
 def appearance_matrix(hue_degrees: float, vibrancy: float):
@@ -51,6 +56,7 @@ class OrbSkin:
     LABEL = ""
 
     HANDLES_MUTED = False
+    TRANSLUCENT_BODY = False
     HANDLES_OUTCOMES = False
     IDLE_FPS = None
 
@@ -85,6 +91,12 @@ class OrbSkin:
         self.rr = np.sqrt(self.dx * self.dx + self.dy * self.dy)
         self.th = np.arctan2(self.dy, self.dx)
         self.buffer = np.zeros((canvas, canvas, 4), dtype=np.float32)
+        self._body_mask = None
+
+    def body_mask(self):
+        if self._body_mask is None:
+            self._body_mask = smoothstep(self.r0 + self.px, self.r0 - self.px, self.rr).astype(np.float32)
+        return self._body_mask
 
     def shade(self, state: str, level: float, t: float):
         raise NotImplementedError
@@ -102,7 +114,7 @@ class OrbSkin:
         return a.reshape((n, s, n, s) + a.shape[2:]).mean(axis=(1, 3))
 
     def render_into(self, pixels, state: str, level: float, t: float, opacity: float, flash: float = 0.0,
-                    flash_color=None, grayscale: bool = False, color_matrix=None):
+                    flash_color=None, grayscale: bool = False, color_matrix=None, solidity: float = 0.0):
         rgb, alpha = self.shade(state, level, t)
 
         if color_matrix is not None:
@@ -123,6 +135,16 @@ class OrbSkin:
         premul = np.clip(rgb, 0.0, 255.0)
         premul *= alpha[..., None]
 
+        if solidity > 0.0 and self.TRANSLUCENT_BODY:
+            backing = self.body_mask() * np.float32(solidity) * (1.0 - alpha)
+            backdrop = np.array(self.BADGE_FILL, dtype=np.float32)
+            if color_matrix is not None:
+                backdrop = backdrop @ color_matrix.T
+            if grayscale:
+                backdrop = np.repeat(backdrop @ np.array(GRAYSCALE_WEIGHTS, dtype=np.float32), 3)
+            premul += backing[..., None] * np.clip(backdrop, 0.0, 255.0)
+            alpha = alpha + backing
+
         alpha = self._downsample(alpha) * np.float32(opacity * 255.0)
         premul = self._downsample(premul) * np.float32(opacity)
 
@@ -135,7 +157,8 @@ class OrbSkin:
         out[..., 3] = alpha
         np.copyto(pixels, out, casting="unsafe")
 
-    def render(self, state: str, level: float, t: float, opacity: float, flash: float = 0.0, color_matrix=None):
+    def render(self, state: str, level: float, t: float, opacity: float, flash: float = 0.0, color_matrix=None,
+               solidity: float = 0.0):
         pixels = np.empty((self.canvas, self.canvas, 4), dtype=np.uint8)
-        self.render_into(pixels, state, level, t, opacity, flash, color_matrix=color_matrix)
+        self.render_into(pixels, state, level, t, opacity, flash, color_matrix=color_matrix, solidity=solidity)
         return pixels
