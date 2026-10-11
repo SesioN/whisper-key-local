@@ -4,7 +4,7 @@ import signal
 import threading
 from typing import Optional, TYPE_CHECKING
 
-from .utils import beautify_hotkey_bindings, open_file
+from .utils import beautify_hotkey_bindings, get_version, open_file
 from .platform import IS_WINDOWS, permissions, icons, autostart
 from .languages import AUTO_LANGUAGE, language_name, sorted_by_name
 from .model_registry import AUTOMATIC_LANGUAGE, FIXED_LANGUAGE
@@ -26,6 +26,7 @@ except ImportError:
     pystray = None
     Image = None
 
+MODEL_STATE_SUFFIXES = {"download": " (download)", "install": " (install whisper.cpp)", "faster_whisper": " (CPU)"}
 RECORDING_MODES = (("toggle", "Toggle"), ("push_to_talk", "Push to talk"))
 FLOATING_WIDGET_STYLES = (("button", "Button"), ("orb", "Voice orb"))
 ORB_APPEARANCE_DEFAULTS = {"opacity": DEFAULT_IDLE_OPACITY, "vibrancy": 1.0, "hue": 0}
@@ -59,6 +60,7 @@ class SystemTray:
         self.tray_config = tray_config or {}
         self.config_manager = config_manager
         self.model_registry = model_registry
+        self._version_label = None
         self.shortcut_manager_window = None
         self.voice_command_manager_window = None
         self.logger = logging.getLogger(__name__)
@@ -112,7 +114,8 @@ class SystemTray:
     def build_menu(self) -> list:
         voice_commands_enabled = self.config_manager.get_setting('voice_commands', 'enabled')
         return [
-            Header("Whisper Key", self._status_text, lambda: self.state_manager.is_muted, self._toggle_mute),
+            Header("Whisper Key", self._status_text, lambda: self.state_manager.is_muted, self._toggle_mute,
+                   version=self._app_version()),
             Section("Recording"),
             Info("Shortcut", self._recording_shortcut_text),
             Action("Retry last recording", self.state_manager.retry_failed_recording, icon=ICON_RETRY,
@@ -152,6 +155,15 @@ class SystemTray:
         else:
             status = STATUS_TEXTS.get(self.current_state, "Ready")
         return f"{status} · {self._model_detail()}"
+
+    def _app_version(self) -> str:
+        if self._version_label is None:
+            try:
+                self._version_label = f"v{get_version()}"
+            except Exception as e:
+                self.logger.warning(f"Could not read the app version: {e}")
+                self._version_label = ""
+        return self._version_label
 
     def _model_label(self, model_key: str) -> str:
         model = self.model_registry.get_model(model_key) if self.model_registry else None
@@ -233,7 +245,7 @@ class SystemTray:
                 download_state = self.state_manager.get_model_download_state(model.key)
                 options.append(Option(
                     model.key,
-                    f"{model.label} (download)" if download_state == "download" else model.label,
+                    f"{model.label}{MODEL_STATE_SUFFIXES.get(download_state, '')}",
                     enabled=download_state != "unavailable" and not is_model_loading,
                     starts_group=index == 0,
                 ))

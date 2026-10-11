@@ -149,6 +149,7 @@ def _textures(width):
 class NebulaSkin(OrbSkin):
 
     LABEL = "Nebula"
+    TRANSLUCENT_BODY = True
 
     CANVAS_FACTOR = 1.55
     VISUAL_SCALE = 1.15

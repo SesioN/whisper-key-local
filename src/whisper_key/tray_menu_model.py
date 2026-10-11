@@ -14,6 +14,7 @@ class Header:
     subtitle: Callable[[], str]
     muted: Callable[[], bool]
     on_toggle_mute: Callable[[], None]
+    version: str = ""
 
 
 @dataclass
@@ -125,6 +126,8 @@ def _pystray_items(items: list, pystray) -> list:
         if item is None:
             continue
         if isinstance(item, Header):
+            if item.version:
+                out.append(pystray.MenuItem(f"{item.title} {item.version}", None, enabled=False))
             out.append(pystray.MenuItem("Mute microphone", _on_click(item.on_toggle_mute), checked=_getter(item.muted)))
         elif isinstance(item, Section):
             separator()

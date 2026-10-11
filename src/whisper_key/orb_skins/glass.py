@@ -15,6 +15,7 @@ COLOR_CAUSTIC = (255, 246, 220)
 class GlassSkin(BlobSkin):
 
     LABEL = "Glass drop"
+    TRANSLUCENT_BODY = True
 
     CANVAS_FACTOR = 2.0
 

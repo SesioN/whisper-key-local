@@ -10,7 +10,7 @@ from typing import Callable, Optional
 from .orb_skins import DEFAULT_SKIN, SKINS, get_skin
 from .orb_skins.badges import BadgeRenderer
 from .widget_sizes import DEFAULT_SIZE, clamp_size
-from .orb_skins.base import DEFAULT_IDLE_OPACITY, appearance_matrix, apply_color_matrix
+from .orb_skins.base import DEFAULT_IDLE_OPACITY, appearance_matrix, apply_color_matrix, solidity_for_opacity
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
@@ -837,11 +837,13 @@ class VoiceOrb:
         flash_length = FLASH_DURATION * 2 if self._flash_color else FLASH_DURATION
         flash = max(0.0, (self._flash_until - time.monotonic()) / flash_length)
 
+        solidity = solidity_for_opacity(self.appearance_opacity)
         opacity = min(1.0, opacity * self.appearance_opacity / DEFAULT_IDLE_OPACITY)
+        opacity += (1.0 - opacity) * solidity
         color_matrix = self.color_matrix
         surface = self._surface
         self._renderer.render_into(surface["pixels"], state, level, t, opacity, flash, self._flash_color, grayscale,
-                                   color_matrix)
+                                   color_matrix, solidity)
         visibility = self._update_badge_visibility()
         badges = self._enabled_badges()
         if badges:
