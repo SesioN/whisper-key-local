@@ -150,7 +150,11 @@ class OnnxAsrEngine:
         language_code = self.registry.transcription_language(self.model_key, requested_language)
         if self._model_type != SPEECH_LLM or not language_code:
             return {}
-        return {"language": QWEN_LANGUAGE_NAMES[language_code]}
+        language_name = QWEN_LANGUAGE_NAMES.get(language_code)
+        if language_name is None:
+            self.logger.warning(f"Language [{language_code}] is not supported by [{self.model_key}], using auto-detect")
+            return {}
+        return {"language": language_name}
 
     def _recognize(self, audio: np.ndarray, language: Optional[str] = None) -> str:
         with self._model_lock:

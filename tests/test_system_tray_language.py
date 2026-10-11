@@ -25,35 +25,73 @@ def make_tray(model_key, effective_language=None, recent_languages=()):
     return tray
 
 
-def test_selectable_model_lists_auto_then_recent_then_all_others_by_name():
-    tray = make_tray('qwen', effective_language='de', recent_languages=['de', 'fr'])
+def language_page_parts(tray):
     page = tray._build_language_page()
-    assert len(page) == 1 and isinstance(page[0], Choice)
-    options = page[0].resolved_options()
-    values = [option.value for option in options]
-    assert values[:3] == [AUTO_LANGUAGE, 'de', 'fr']
-    assert len(values) == len(set(values)) == 1 + len(tray.model_registry.selectable_languages('qwen'))
-    assert options[1].starts_group and options[3].starts_group
-    others = [option.label for option in options[3:]]
-    assert others == sorted(others, key=str.casefold)
-    assert page[0].current() == 'de'
+    quick_choice, all_languages = page
+    assert isinstance(quick_choice, Choice) and isinstance(all_languages, Submenu)
+    full_choice = all_languages.resolved_items()[0]
+    return quick_choice, all_languages, full_choice
+
+
+def test_selectable_model_offers_auto_and_recent_languages_with_the_full_list_one_level_down():
+    tray = make_tray('qwen', effective_language='de', recent_languages=['de', 'fr'])
+    quick_choice, all_languages, full_choice = language_page_parts(tray)
+    assert [option.value for option in quick_choice.resolved_options()] == [AUTO_LANGUAGE, 'de', 'fr']
+    assert quick_choice.resolved_options()[1].starts_group
+    full_values = [option.value for option in full_choice.resolved_options()]
+    assert sorted(full_values) == sorted(tray.model_registry.selectable_languages('qwen'))
+    labels = [option.label for option in full_choice.resolved_options()]
+    assert labels == sorted(labels, key=str.casefold)
+    assert quick_choice.current() == full_choice.current() == 'de'
+    assert all_languages.detail() == ''
     assert tray._language_detail() == 'German'
+
+
+def test_all_languages_row_names_a_current_language_that_is_not_recent():
+    tray = make_tray('tiny', effective_language='nl', recent_languages=['de'])
+    _, all_languages, _ = language_page_parts(tray)
+    assert all_languages.detail() == 'Dutch'
+
+
+def test_native_menu_keeps_the_long_list_in_a_nested_submenu():
+    import types
+
+    class FakeMenu:
+        SEPARATOR = object()
+
+        def __init__(self, *items):
+            self.items = items
+
+    class FakeMenuItem:
+        def __init__(self, text, action, **kwargs):
+            self.text = text
+            self.submenu = action if isinstance(action, FakeMenu) else None
+
+    fake_pystray = types.SimpleNamespace(Menu=FakeMenu, MenuItem=FakeMenuItem)
+    from whisper_key.tray_menu_model import to_pystray
+    tray = make_tray('tiny', effective_language='de', recent_languages=['de'])
+    language_menu = to_pystray(tray._build_language_page(), fake_pystray)
+    top_level = [item for item in language_menu.items if item is not FakeMenu.SEPARATOR]
+    assert len(top_level) <= 6
+    nested = [item for item in top_level if item.submenu is not None]
+    assert len(nested) == 1 and nested[0].text == 'All languages'
+    assert len([item for item in nested[0].submenu.items if item is not FakeMenu.SEPARATOR]) == 100
 
 
 def test_auto_detect_is_the_current_choice_without_a_language():
     tray = make_tray('tiny')
-    assert tray._build_language_page()[0].current() == AUTO_LANGUAGE
+    assert language_page_parts(tray)[0].current() == AUTO_LANGUAGE
     assert tray._language_detail() == 'Auto-detect'
 
 
 def test_selecting_a_language_saves_it_for_the_selected_model():
     tray = make_tray('tiny')
     tray.state_manager.set_model_language.return_value = True
-    tray._build_language_page()[0].on_select('nl')
+    language_page_parts(tray)[2].on_select('nl')
     tray.state_manager.set_model_language.assert_called_once_with('tiny', 'nl')
-    tray._build_language_page()[0].on_select(AUTO_LANGUAGE)
+    language_page_parts(tray)[0].on_select(AUTO_LANGUAGE)
     tray.state_manager.set_model_language.assert_called_with('tiny', None)
-    assert tray.refresh_menu.call_count == 2
+    tray.refresh_menu.assert_not_called()
 
 
 def test_fixed_and_automatic_models_explain_instead_of_offering_choices():

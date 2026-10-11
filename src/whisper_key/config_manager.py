@@ -6,6 +6,7 @@ from io import StringIO
 
 from ruamel.yaml import YAML
 
+from .languages import AUTO_LANGUAGE, WHISPER_LANGUAGE_NAMES, language_code
 from .utils import resolve_asset_path, beautify_hotkey_bindings, get_user_app_data_path, get_version
 from .platform import IS_MACOS
 from .orb_skins import SKINS as ORB_SKINS
@@ -493,8 +494,9 @@ def _validate_language_settings(config, logger):
         model_languages = {}
     valid_model_languages = {}
     for model_key, language in model_languages.items():
-        if isinstance(model_key, str) and isinstance(language, str) and language.strip():
-            valid_model_languages[model_key] = language.strip()
+        code = language_code(language) if isinstance(language, str) else None
+        if isinstance(model_key, str) and isinstance(language, str) and (code in WHISPER_LANGUAGE_NAMES or (language.strip() and code is None)):
+            valid_model_languages[model_key] = code or AUTO_LANGUAGE
         else:
             logger.warning(f"Ignoring whisper.model_languages entry {model_key!r}: {language!r}")
     whisper_section['model_languages'] = valid_model_languages
@@ -502,8 +504,12 @@ def _validate_language_settings(config, logger):
     recent_languages = whisper_section.get('recent_languages')
     if not isinstance(recent_languages, list):
         recent_languages = []
-    whisper_section['recent_languages'] = [language for language in recent_languages
-                                           if isinstance(language, str) and language.strip()][:MAX_RECENT_LANGUAGES]
+    valid_recent_languages = []
+    for language in recent_languages:
+        code = language_code(language) if isinstance(language, str) else None
+        if code in WHISPER_LANGUAGE_NAMES and code not in valid_recent_languages:
+            valid_recent_languages.append(code)
+    whisper_section['recent_languages'] = valid_recent_languages[:MAX_RECENT_LANGUAGES]
 
 
 def validate_config(config, default_config, logger):

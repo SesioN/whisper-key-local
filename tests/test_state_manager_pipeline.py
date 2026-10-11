@@ -361,3 +361,33 @@ def test_retry_uses_the_language_chosen_at_retry_time():
     assert manager.retry_failed_recording()
     wait_for_pipeline(manager)
     assert seen_languages == ['de', 'fr']
+
+
+def test_language_is_resolved_again_when_the_model_changed_before_the_job_ran():
+    seen_languages = []
+    manager, engine, _, _ = make_state_manager(settings={('whisper', 'model_languages'): {'tiny': 'sw', 'qwen': 'de'}})
+    engine.transcribe_audio.side_effect = lambda audio, language=None: seen_languages.append(language) or "hallo"
+    release = threading.Event()
+    original_pipeline = manager._transcription_pipeline
+
+    def gated_pipeline(request):
+        release.wait(5)
+        return original_pipeline(request)
+
+    manager._transcription_pipeline = gated_pipeline
+    manager._submit_transcription(Recording(np.ones(16000, dtype=np.float32)), False)
+    engine.model_key = 'qwen'
+    release.set()
+    wait_for_pipeline(manager)
+    assert seen_languages == ['de']
+
+
+def test_fixed_language_warning_only_for_an_explicit_choice(capsys):
+    manager, _, _, _ = make_state_manager(settings={('whisper', 'language'): 'de'})
+    manager.get_model_download_state = MagicMock(return_value="unavailable")
+    manager.request_model_change('tiny.en')
+    assert 'only transcribes' not in capsys.readouterr().out
+    manager.config_manager.get_setting.side_effect = lambda section, key: {
+        ('whisper', 'language'): 'de', ('whisper', 'model_languages'): {'tiny.en': 'de'}}.get((section, key))
+    manager.request_model_change('tiny.en')
+    assert 'only transcribes' in capsys.readouterr().out

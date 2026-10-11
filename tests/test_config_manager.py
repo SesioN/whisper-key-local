@@ -25,10 +25,10 @@ def test_language_settings_are_validated():
     import copy
     defaults = ConfigManager(use_user_settings=False).config
     config = copy.deepcopy(defaults)
-    config['whisper']['model_languages'] = {'tiny': 'de', 'base': 5, 'small': ' '}
-    config['whisper']['recent_languages'] = ['de', 3, 'fr', 'en', 'nl']
+    config['whisper']['model_languages'] = {'tiny': 'DE-at', 'base': 5, 'small': ' ', 'medium': 'xx', 'tiny.en': 'Auto'}
+    config['whisper']['recent_languages'] = ['de', 3, 'DE-at', 'xx', 'fr', 'en', 'nl']
     validated = validate_config(config, copy.deepcopy(defaults), logging.getLogger("test"))
-    assert validated['whisper']['model_languages'] == {'tiny': 'de'}
+    assert validated['whisper']['model_languages'] == {'tiny': 'de', 'tiny.en': 'auto'}
     assert validated['whisper']['recent_languages'] == ['de', 'fr', 'en']
     config['whisper']['model_languages'] = ['de']
     assert validate_config(config, copy.deepcopy(defaults), logging.getLogger("test"))['whisper']['model_languages'] == {}

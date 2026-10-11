@@ -56,3 +56,19 @@ def test_transcription_language_validates_the_choice(caplog):
         assert registry.transcription_language("qwen", "sw") is None
     assert caplog.text.count("does not support language") == 1
     assert registry.transcription_language("parakeet", "de") is None
+
+
+def test_custom_onnx_language_lists_respect_what_the_model_type_accepts(caplog):
+    with caplog.at_level(logging.WARNING):
+        registry = ModelRegistry({
+            "custom-qwen": {"engine": "onnx_asr", "onnx_model_type": "speech-llm", "languages": ["de", "la"]},
+            "custom-nemo": {"engine": "onnx_asr", "onnx_model_type": "nemo-conformer-tdt", "languages": ["de"]},
+        })
+    assert registry.selectable_languages("custom-qwen") == ["de"]
+    assert registry.transcription_language("custom-qwen", "la") is None
+    assert registry.language_choice("custom-nemo") == AUTOMATIC_LANGUAGE
+    assert "['la'] are not supported" in caplog.text and "languages is ignored" in caplog.text
+
+
+def test_tagalog_is_named_for_both_model_families():
+    assert language_name("tl") == "Tagalog (Filipino)"

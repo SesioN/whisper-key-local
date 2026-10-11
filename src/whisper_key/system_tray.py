@@ -158,7 +158,7 @@ class SystemTray:
         return model.label if model else model_key.title()
 
     def _model_detail(self) -> str:
-        return self._model_label(self.config_manager.get_setting('whisper', 'model'))
+        return self._model_label(self._selected_model_key())
 
     def _selected_model_key(self) -> str:
         return self.config_manager.get_setting('whisper', 'model')
@@ -180,22 +180,36 @@ class SystemTray:
             return [Info("Language", lambda: f"{fixed_language}, fixed by this model")]
         if language_choice == AUTOMATIC_LANGUAGE:
             return [Info("Language", lambda: "detected automatically by this model")]
-        return [Choice("Language", lambda: self._language_options(model_key),
-                       lambda: self.state_manager.get_effective_language(model_key) or AUTO_LANGUAGE,
-                       lambda language: self._select_language(model_key, language))]
+        def current_language():
+            return self.state_manager.get_effective_language(model_key) or AUTO_LANGUAGE
 
-    def _language_options(self, model_key: str) -> list:
+        def select_language(language):
+            self._select_language(model_key, language)
+
+        return [
+            Choice("Language", lambda: self._quick_language_options(model_key), current_language, select_language),
+            Submenu("All languages", lambda: [Choice("All languages", lambda: self._all_language_options(model_key),
+                                                     current_language, select_language)],
+                    detail=lambda: self._all_languages_detail(model_key)),
+        ]
+
+    def _quick_language_options(self, model_key: str) -> list:
         recent_languages = self.state_manager.get_recent_languages(model_key)
-        other_languages = sorted_by_name(code for code in self.state_manager.get_selectable_languages(model_key)
-                                         if code not in recent_languages)
         return ([Option(AUTO_LANGUAGE, language_name(None))]
-                + [Option(code, language_name(code), starts_group=index == 0) for index, code in enumerate(recent_languages)]
-                + [Option(code, language_name(code), starts_group=index == 0) for index, code in enumerate(other_languages)])
+                + [Option(code, language_name(code), starts_group=index == 0) for index, code in enumerate(recent_languages)])
+
+    def _all_language_options(self, model_key: str) -> list:
+        return [Option(code, language_name(code)) for code in sorted_by_name(self.state_manager.get_selectable_languages(model_key))]
+
+    def _all_languages_detail(self, model_key: str) -> str:
+        effective_language = self.state_manager.get_effective_language(model_key)
+        if effective_language is None or effective_language in self.state_manager.get_recent_languages(model_key):
+            return ""
+        return language_name(effective_language)
 
     def _select_language(self, model_key: str, language: str):
         try:
-            if self.state_manager.set_model_language(model_key, None if language == AUTO_LANGUAGE else language):
-                self.refresh_menu()
+            self.state_manager.set_model_language(model_key, None if language == AUTO_LANGUAGE else language)
         except Exception as e:
             self.logger.error(f"Error selecting language {language} for {model_key}: {e}")
 
@@ -204,8 +218,7 @@ class SystemTray:
         is_model_loading = app_state.get('model_loading', False)
         is_busy = is_model_loading or app_state.get('processing', False)
         return [
-            Choice("Model", self._model_options(is_model_loading),
-                   lambda: self.config_manager.get_setting('whisper', 'model'), self._select_model),
+            Choice("Model", self._model_options(is_model_loading), self._selected_model_key, self._select_model),
             Submenu("Language", self._build_language_page, detail=self._language_detail) if self.model_registry else None,
             *self._build_runtime_items(is_busy),
         ]

@@ -51,3 +51,9 @@ def test_speech_llm_chunk_limits_and_language():
     assert engine._max_chunk_seconds == 14
     engine._recognize(np.ones(SAMPLE_RATE * 10, dtype=np.float32), "de")
     assert engine.model.calls[0][1] == {"language": "German"}
+
+
+def test_unknown_qwen_language_falls_back_to_auto_detect():
+    engine = make_engine("qwen", QWEN)
+    engine.registry.transcription_language = lambda key, language: language
+    assert engine._recognize_kwargs("la") == {}

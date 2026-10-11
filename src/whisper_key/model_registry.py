@@ -27,11 +27,23 @@ class ModelRegistry:
             for key, config in whisper_models_config.items():
                 if isinstance(config, dict):
                     self.whisper_models[key] = ModelDefinition(key, config, model_type="whisper")
+                    self._warn_about_unusable_languages(self.whisper_models[key])
 
         if streaming_models_config:
             for key, config in streaming_models_config.items():
                 if isinstance(config, dict):
                     self.streaming_models[key] = ModelDefinition(key, config, model_type="streaming")
+
+    def _warn_about_unusable_languages(self, model):
+        if model.languages is None:
+            return
+        if model.engine == ONNX_FAMILY and model.onnx_model_type != SPEECH_LLM_MODEL_TYPE:
+            self.logger.warning(f"Model {model.key}: this model type detects the language itself, languages is ignored")
+            return
+        family_languages = QWEN_LANGUAGE_CODES if model.engine == ONNX_FAMILY else WHISPER_LANGUAGE_NAMES
+        unsupported = [code for code in model.languages if code not in family_languages]
+        if unsupported:
+            self.logger.warning(f"Model {model.key}: languages {unsupported} are not supported by this model type, skipped")
 
     def get_model(self, key: str):
         return self.whisper_models.get(key)
@@ -71,11 +83,12 @@ class ModelRegistry:
         if self.forced_language(key):
             return []
         model = self.get_model(key)
+        if model and model.engine == ONNX_FAMILY and model.onnx_model_type != SPEECH_LLM_MODEL_TYPE:
+            return []
+        family_languages = QWEN_LANGUAGE_CODES if model and model.engine == ONNX_FAMILY else WHISPER_LANGUAGE_NAMES
         if model and model.languages is not None:
-            return list(model.languages)
-        if model and model.engine == ONNX_FAMILY:
-            return list(QWEN_LANGUAGE_CODES) if model.onnx_model_type == SPEECH_LLM_MODEL_TYPE else []
-        return list(WHISPER_LANGUAGE_NAMES)
+            return [code for code in model.languages if code in family_languages]
+        return list(family_languages)
 
     def language_choice(self, key: str) -> str:
         if self.forced_language(key):

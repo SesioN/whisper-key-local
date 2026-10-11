@@ -62,7 +62,7 @@ Click the system tray icon (Windows: left or right click opens a Windows 11 styl
 - See the status and current model, and mute the microphone (microphone button at the top)
 - **Recording**: switch the recording mode between toggle and push-to-talk, toggle voice-activated recording and audio feedback, open the voice detection sensitivity window
 - **Output**: toggle auto-paste, copy to clipboard and voice commands in normal recordings
-- **Model**: change the transcription model, its **Language** (Auto-detect, your recently used languages, then every language the model supports; remembered per model, takes effect with the next recording), runtime (CPU / CUDA / ROCm / Vulkan / ONNX) and precision
+- **Model**: change the transcription model, its **Language** (Auto-detect and your recently used languages, every supported language under **All languages**; remembered per model, takes effect with the next recording), runtime (CPU / CUDA / ROCm / Vulkan / ONNX) and precision
 - **Microphone**: select the input device and audio host
 - **Floating button** (Windows): show it, button or animated voice orb style, size (smooth slider that snaps to Small, Medium and Big), lock, hide in fullscreen apps. **Orb skin** lists every skin with a preview; clicking one applies it right away and keeps the menu open, so you can click through them. **Appearance** has sliders for the orb's opacity (20-100%; starts at the skin's own 70%, higher is more solid, lower more see-through), vibrancy and color (shifts the skin's whole palette); the orb follows while you drag, and **Reset appearance** puts all three back to the skin's own look
 - Manage shortcuts: record a primary and secondary binding per action, or unset one (Windows, **Shortcuts...**)
