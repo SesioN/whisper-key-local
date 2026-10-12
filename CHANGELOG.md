@@ -4,6 +4,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-10-12
+
+### Fixed
+- App updates verify the release wheel against `SHA256SUMS.txt` before installation and reject ambiguous assets or downloads outside this repository's GitHub release paths.
+
+### Changed
+- Windows release builds verify the PyApp source archive, use a committed Cargo lockfile, and publish build provenance alongside executables. Manual builds can include a diagnostic GUI launcher without the launcher splash.
+
 ## [1.9.0] - 2026-10-11
 
 ### Added
