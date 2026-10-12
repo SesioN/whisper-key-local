@@ -4,12 +4,14 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      diagnostics:
+        description: Build an additional GUI launcher without its animated splash
+        type: boolean
+        default: false
 
 permissions:
   contents: read
-
-env:
-  PYAPP_VERSION: "0.29.0"
 
 jobs:
   build-windows:
@@ -47,39 +49,42 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: pyapp-source
+      - name: Install Python build tools
+        run: python -m pip install --quiet build setuptools wheel
 
       - name: Fetch pyapp source
         shell: pwsh
         run: |
-          Invoke-WebRequest "https://github.com/ofek/pyapp/releases/download/v$env:PYAPP_VERSION/source.tar.gz" -OutFile pyapp.tar.gz
-          New-Item -ItemType Directory pyapp-source -Force | Out-Null
-          tar -xzf pyapp.tar.gz -C pyapp-source --strip-components=1
+          ./pyapp-build/fetch-pyapp-source.ps1 -Destination pyapp-source
+          Copy-Item pyapp-build/Cargo.lock pyapp-source/Cargo.lock -Force
           @{ pyapp_source_path = "pyapp-source"; dist_path = "dist" } | ConvertTo-Json | Set-Content pyapp-build/build-config.json
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: pyapp-source
 
       - name: Build executables
         shell: pwsh
         run: |
-          ./pyapp-build/build-pyapp.ps1 -FromSource -Release:("${{ github.ref_type }}" -eq "tag")
+          ./pyapp-build/build-pyapp.ps1 -FromSource -Release:("${{ github.ref_type }}" -eq "tag") -Diagnostics:("${{ inputs.diagnostics }}" -eq "true")
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
-      - name: Build wheel and sdist
+      - name: Collect embedded wheel and build sdist
         shell: pwsh
         run: |
-          python -m pip install --quiet build
-          python -m build --outdir dist/python
+          python -m build --sdist --no-isolation --outdir dist/python
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Copy-Item dist/wheel/*.whl dist/python/
 
       - name: Collect artifacts
         shell: pwsh
         run: |
           New-Item -ItemType Directory release | Out-Null
-          Copy-Item dist/*.exe, dist/python/* release/
+          Copy-Item dist/*.exe, dist/python/*, dist/BUILD-* release/
           $Sums = Get-ChildItem release | ForEach-Object {
             "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
           }
-          $Sums | Set-Content release/SHA256SUMS.txt
+          $Sums | Set-Content release/SHA256SUMS.txt -Encoding utf8
 
       - uses: actions/upload-artifact@v4
         with:

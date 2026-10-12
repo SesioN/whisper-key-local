@@ -26,7 +26,9 @@ Global hotkeys to record speech and transcribe directly to your cursor.
 1. Download `whisper-key.exe` from the [latest release](https://github.com/SesioN/whisper-key-local/releases/latest).
    It runs without a console window (loading screen, tray icon and voice orb only);
    `whisper-key-console.exe` is the same app with a console that shows the log, for troubleshooting
-2. Run it. On startup the app checks this repository's releases for updates.
+2. Run it. On startup the app checks this repository's releases for updates. Updates verify the downloaded wheel against the release's `SHA256SUMS.txt` before installation.
+
+If Windows reports a virus, collect the detection name and affected file path; see [Windows antivirus reports](docs/windows-antivirus.md).
 
 ### Python Package
 

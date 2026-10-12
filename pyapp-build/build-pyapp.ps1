@@ -3,8 +3,11 @@ param(
     [string]$AppName = "whisper-key",
     [switch]$Clean,
     [switch]$FromSource,
-    [switch]$Release
+    [switch]$Release,
+    [switch]$Diagnostics
 )
+
+$ErrorActionPreference = "Stop"
 
 function Get-ResolvedPath {
     param($Path, $BaseDir)
@@ -71,7 +74,7 @@ function Build-SourceWheel {
         [System.IO.File]::WriteAllText($PyProjectFile, $PatchedPyProject, $Utf8NoBom)
 
         Write-Host "Building wheel $WheelVersion from commit $Commit..." -ForegroundColor Yellow
-        python -m pip wheel $StagingDir --no-deps --wheel-dir $WheelDir --quiet | Out-Host
+        python -m pip wheel $StagingDir --no-build-isolation --no-deps --wheel-dir $WheelDir --quiet | Out-Host
         if ($LASTEXITCODE -ne 0) {
             Write-Host "Wheel build failed!" -ForegroundColor Red
             exit 1
@@ -310,6 +313,8 @@ Patch-NoTerminalSupport $PyAppSourcePath
 Write-Host "Disabling pyapp self update..." -ForegroundColor Yellow
 Patch-SelfUpdate $PyAppSourcePath
 
+Copy-Item (Join-Path $PSScriptRoot "Cargo.lock") (Join-Path $PyAppSourcePath "Cargo.lock") -Force
+
 Write-Host "Starting pyapp build for $AppName v$AppVersion..." -ForegroundColor Green
 Write-Host "PyApp source: $PyAppSourcePath" -ForegroundColor Gray
 Write-Host "Distribution: $DistPath" -ForegroundColor Gray
@@ -354,6 +359,10 @@ try {
         @{ Name = "$AppName-console"; IsGui = $false; NoTerminal = $false; Label = "console";                     ExecCode = $ExecCode }
     )
 
+    if ($Diagnostics) {
+        $Builds += @{ Name = "$AppName-diagnostic-no-splash"; IsGui = $true; NoTerminal = $true; NoSplash = $true; Label = "diagnostic GUI without launcher splash"; ExecCode = $NoTerminalExecCode }
+    }
+
     Push-Location $PyAppSourcePath
     $PushedLocation = $true
 
@@ -368,7 +377,10 @@ try {
 
         (Get-Item (Join-Path $PyAppSourcePath "build.rs")).LastWriteTime = Get-Date
 
-        cargo build --release
+        $SplashSource = if ($Build.NoSplash) { "splash-disabled.rs" } else { "splash.rs" }
+        Copy-Item (Join-Path $PSScriptRoot "pyapp-patches\$SplashSource") (Join-Path $PyAppSourcePath "src\splash.rs") -Force
+
+        cargo build --release --locked
         if ($LASTEXITCODE -ne 0) {
             Write-Host "Build failed for $($Build.Name)!" -ForegroundColor Red
             exit 1
@@ -382,8 +394,39 @@ try {
         Write-Host ("  -> $DestExe ({0:N2} MB)" -f $ExeSize) -ForegroundColor Green
     }
 
+    $BuildPythonVersion = python --version
+    $RustVersion = rustc --version
+    $CargoVersion = cargo --version
+    $Commit = git -C $ProjectRoot rev-parse HEAD
+    if ($LASTEXITCODE -ne 0) { throw "Could not record source commit" }
+    $PythonPackages = python -m pip freeze --all
+    if ($LASTEXITCODE -ne 0) { throw "Could not record Python build dependencies" }
+    $SourceMetadata = Get-Content -LiteralPath (Join-Path $PSScriptRoot "pyapp-source.json") -Raw | ConvertFrom-Json
+    $PyAppManifest = Get-Content -LiteralPath (Join-Path $PyAppSourcePath "Cargo.toml") -Raw
+    $ConfiguredPyAppVersion = [regex]::Match($PyAppManifest, '(?m)^version\s*=\s*"([^"]+)"').Groups[1].Value
+    $SourceReceiptPath = Join-Path $PyAppSourcePath "WHISPER-KEY-SOURCE.json"
+    $SourceReceipt = if (Test-Path -LiteralPath $SourceReceiptPath) { Get-Content -LiteralPath $SourceReceiptPath -Raw | ConvertFrom-Json } else { $null }
+    $BuildMetadata = @{
+        application_version = $AppVersion
+        source_commit = $Commit.Trim()
+        release = [bool]$Release
+        diagnostics = [bool]$Diagnostics
+        pyapp_version = $ConfiguredPyAppVersion
+        expected_pyapp_version = $SourceMetadata.version
+        expected_pyapp_source_sha256 = $SourceMetadata.sha256
+        source_archive_verification = $SourceReceipt
+        configured_python_version = $env:PYAPP_PYTHON_VERSION
+        build_python_version = "$BuildPythonVersion"
+        rust_version = "$RustVersion"
+        cargo_version = "$CargoVersion"
+        executables = @($Builds | ForEach-Object { "$($_.Name).exe" })
+    }
+    $BuildMetadata | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $DistPath "BUILD-INFO.json") -Encoding utf8
+    $PythonPackages | Set-Content (Join-Path $DistPath "BUILD-PYTHON-DEPENDENCIES.txt") -Encoding utf8
+    Copy-Item (Join-Path $PyAppSourcePath "Cargo.lock") (Join-Path $DistPath "BUILD-CARGO.lock") -Force
     Write-Host "`nBuild complete!" -ForegroundColor Green
 } finally {
+    Copy-Item (Join-Path $PSScriptRoot "pyapp-patches\splash.rs") (Join-Path $PyAppSourcePath "src\splash.rs") -Force
     if ($PushedLocation) { Pop-Location }
     foreach ($Var in $PyAppVars) { [Environment]::SetEnvironmentVariable($Var, $SavedEnv[$Var]) }
 }
