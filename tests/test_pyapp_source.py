@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -7,7 +8,8 @@ import subprocess
 import pytest
 
 BUILD_DIR = Path(__file__).resolve().parents[1] / "pyapp-build"
-POWERSHELL = shutil.which("powershell") or shutil.which("pwsh")
+POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
+POWERSHELL_ENV = {key: value for key, value in os.environ.items() if key.lower() != "psmodulepath"}
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is needed to check source archive verification")
@@ -23,7 +25,7 @@ def test_source_archive_checksum_before_extraction(tmp_path, valid):
     metadata_path = str(metadata).replace("'", "''")
     command = f"$ErrorActionPreference = 'Stop'; . '{helper}'; Assert-PyAppSourceArchive -ArchivePath '{archive_path}' -MetadataPath '{metadata_path}'"
     result = subprocess.run([POWERSHELL, "-NoProfile", "-NonInteractive", "-Command", command],
-                            capture_output=True, text=True)
+                            capture_output=True, text=True, env=POWERSHELL_ENV)
     assert (result.returncode == 0) is valid, result.stderr
     if not valid:
         assert "checksum mismatch" in result.stderr
@@ -36,7 +38,7 @@ def test_invalid_archive_does_not_create_extraction_destination(tmp_path):
     destination = tmp_path / "unpacked"
     result = subprocess.run([POWERSHELL, "-NoProfile", "-NonInteractive", "-File",
                              str(BUILD_DIR / "fetch-pyapp-source.ps1"), "-Destination", str(destination),
-                             "-ArchivePath", str(archive)], capture_output=True, text=True)
+                             "-ArchivePath", str(archive)], capture_output=True, text=True, env=POWERSHELL_ENV)
     assert result.returncode != 0
     assert "checksum mismatch" in result.stderr
     assert not destination.exists()
