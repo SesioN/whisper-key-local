@@ -86,7 +86,10 @@ BUILD_FREE_SPACE_BYTES = 2 * 1024 ** 3
 PIP_TIMEOUT_SECONDS = 3600
 BUILD_TIMEOUT_SECONDS = 3600
 WINGET_REBOOT_REQUIRED = 0x8A150109
-WINGET_SUCCESS_CODES = (0, 3010, WINGET_REBOOT_REQUIRED, WINGET_REBOOT_REQUIRED - 2**32)
+WINGET_UPDATE_NOT_APPLICABLE = 0x8A15002B
+WINGET_PACKAGE_ALREADY_INSTALLED = 0x8A150061
+WINGET_SUCCESS_CODES = (0, 3010, *[code - offset for code in (WINGET_REBOOT_REQUIRED, WINGET_UPDATE_NOT_APPLICABLE,
+                                                               WINGET_PACKAGE_ALREADY_INSTALLED) for offset in (0, 2**32)])
 OUTPUT_TAIL_LINES = 2000
 RENAME_ATTEMPTS = 10
 NO_WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
@@ -308,7 +311,7 @@ class RuntimeInstaller:
             raise RuntimeInstallError("Installation cancelled")
         if process.returncode not in success_codes:
             error_lines = [line for line in output_lines if " error " in line.lower() or "error:" in line.lower()]
-            tail = "\n".join((error_lines or output_lines)[-15:])
+            tail = "\n".join((error_lines or list(output_lines))[-15:])
             raise RuntimeInstallError(f"Command failed ({process.returncode}): {' '.join(command[:4])}...\n{tail}")
         return "\n".join(output_lines)
 
@@ -524,10 +527,10 @@ class RuntimeInstaller:
     def _prepare_build_tools(self) -> dict:
         env = dict(os.environ)
 
-        cmake = shutil.which("cmake") or self._first_existing([r"C:\Program Files\CMake\bin\cmake.exe"])
+        cmake = self._find_cmake()
         if not cmake:
             self._winget_install("cmake")
-            cmake = self._first_existing([r"C:\Program Files\CMake\bin\cmake.exe"])
+            cmake = self._find_cmake()
         if not cmake:
             raise RuntimeInstallError("CMake could not be installed")
 
@@ -548,12 +551,27 @@ class RuntimeInstaller:
         env["PATH"] = os.pathsep.join([os.path.join(vulkan_sdk, "Bin"), os.path.dirname(cmake), env.get("PATH", "")])
         return env
 
+    def _find_cmake(self) -> Optional[str]:
+        registry_path = os.pathsep.join(filter(None, [self._machine_environment_variable("Path"),
+                                                      self._user_environment_variable("Path")]))
+        found = shutil.which("cmake") or shutil.which("cmake", path=registry_path or None)
+        if found:
+            return found
+        program_dirs = [os.environ.get("ProgramFiles", r"C:\Program Files"),
+                        os.environ.get("ProgramW6432", r"C:\Program Files"),
+                        os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+                        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs")]
+        return self._first_existing([os.path.join(directory, "CMake", "bin", "cmake.exe") for directory in program_dirs])
+
     def _first_existing(self, paths: list) -> Optional[str]:
         return next((path for path in paths if os.path.isfile(path)), None)
 
     def _find_vulkan_sdk(self) -> Optional[str]:
-        candidates = [os.environ.get("VULKAN_SDK"), self._machine_environment_variable("VULKAN_SDK")]
-        candidates += sorted(glob.glob(r"C:\VulkanSDK\*"), key=self._version_key, reverse=True)
+        candidates = [os.environ.get("VULKAN_SDK"), self._machine_environment_variable("VULKAN_SDK"),
+                      self._user_environment_variable("VULKAN_SDK")]
+        install_roots = [r"C:\VulkanSDK", os.path.join(os.environ.get("LOCALAPPDATA", ""), "VulkanSDK")]
+        installed = [path for root in install_roots for path in glob.glob(os.path.join(root, "*"))]
+        candidates += sorted(installed, key=self._version_key, reverse=True)
         for candidate in filter(None, candidates):
             if os.path.isfile(os.path.join(candidate, "Bin", "glslc.exe")):
                 return candidate
@@ -564,9 +582,15 @@ class RuntimeInstaller:
         return tuple(int(part) for part in re.findall(r"\d+", os.path.basename(path)))
 
     def _machine_environment_variable(self, name: str) -> Optional[str]:
+        return self._registry_environment_variable("HKEY_LOCAL_MACHINE", r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment", name)
+
+    def _user_environment_variable(self, name: str) -> Optional[str]:
+        return self._registry_environment_variable("HKEY_CURRENT_USER", "Environment", name)
+
+    def _registry_environment_variable(self, hive: str, subkey: str, name: str) -> Optional[str]:
         try:
             import winreg
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment") as key:
+            with winreg.OpenKey(getattr(winreg, hive), subkey) as key:
                 value, value_type = winreg.QueryValueEx(key, name)
         except OSError:
             return None
