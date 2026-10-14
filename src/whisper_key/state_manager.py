@@ -86,6 +86,7 @@ class StateManager:
         self.is_processing = False
         self.is_model_loading = False
         self.is_muted = False
+        self.pre_roll_enabled = bool(config_manager.get_setting('audio', 'pre_roll_enabled'))
         self.last_transcription = None
         self._failed_recording = None
         self._pending_model_change = None
@@ -140,7 +141,7 @@ class StateManager:
         self._apply_auto_trigger()
 
     def _apply_pre_roll_buffering(self):
-        if self.is_muted:
+        if self.is_muted or not self.pre_roll_enabled:
             self.audio_recorder.stop_buffering()
         elif not self.audio_recorder.start_buffering() and self.audio_recorder.pre_roll_seconds > 0:
             self.logger.warning("Pre-roll buffering could not start")
@@ -1428,6 +1429,11 @@ class StateManager:
     def update_pause_media_while_recording(self, enabled: bool):
         self.output_audio_control.set_pause_media_enabled(enabled)
         self.config_manager.update_user_setting('output_audio', 'pause_media_while_recording', enabled)
+
+    def update_pre_roll_enabled(self, enabled: bool):
+        self.pre_roll_enabled = enabled
+        self.config_manager.update_user_setting('audio', 'pre_roll_enabled', enabled)
+        self._apply_pre_roll_buffering()
 
     def update_audio_feedback(self, enabled: bool):
         self.audio_feedback.set_enabled(enabled)

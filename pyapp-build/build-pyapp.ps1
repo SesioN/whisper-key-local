@@ -158,6 +158,17 @@ function Patch-VersionInfo {
 '@ 'res.set_version_info(winresource::VersionInfo::FILEVERSION'
 }
 
+function Patch-AvoidPythonw {
+    param($PyAppSourcePath)
+    Set-PatchedText (Join-Path $PyAppSourcePath "src\app.rs") @'
+    python_path.replace("python.exe", "pythonw.exe")
+'@ @'
+    python_path
+'@ '.into();
+    python_path
+}'
+}
+
 function Patch-SelfUpdate {
     param($PyAppSourcePath)
     Set-PatchedText (Join-Path $PyAppSourcePath "src\commands\self_cmd\update.rs") @'
@@ -309,6 +320,7 @@ if (Test-Path $IconPath) {
 
 Write-Host "Patching no-terminal support..." -ForegroundColor Yellow
 Patch-NoTerminalSupport $PyAppSourcePath
+Patch-AvoidPythonw $PyAppSourcePath
 
 Write-Host "Disabling pyapp self update..." -ForegroundColor Yellow
 Patch-SelfUpdate $PyAppSourcePath
