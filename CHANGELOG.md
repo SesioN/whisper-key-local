@@ -4,6 +4,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [1.9.4] - 2026-10-15
+
 ### Added
 - **Beam size in the tray** - Model > Beam size (1, 2, 3, 5) trades accuracy for speed and video memory
 - The Vulkan install measures the largest beam size that fits in the GPU's free video memory and lowers `whisper.beam_size` to it
