@@ -718,6 +718,13 @@ class RuntimeInstaller:
                 wav_file.setsampwidth(2)
                 wav_file.setframerate(16000)
                 wav_file.writeframes(b"\x00\x00" * 16000)
-            output = self._run([str(binary), "-m", str(model_path), "-f", str(silent_wav), "-nt"], timeout=300)
+            try:
+                output = self._run([str(binary), "-m", str(model_path), "-f", str(silent_wav), "-nt", "-bs", "1", "-bo", "1"],
+                                   timeout=300)
+            except RuntimeInstallError as error:
+                if "OutOfDeviceMemory" in str(error) or "failed to allocate Vulkan" in str(error):
+                    raise RuntimeInstallError(f"The GPU does not have enough free video memory for {model_path.name}; "
+                                              "close other GPU-heavy apps or pick a smaller model and try again") from error
+                raise
         if not re.search(r"ggml_vulkan: Found [1-9]\d* Vulkan devices?", output):
             raise RuntimeInstallError("whisper.cpp was built but did not find a Vulkan GPU")
