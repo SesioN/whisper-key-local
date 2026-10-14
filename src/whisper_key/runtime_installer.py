@@ -524,10 +524,10 @@ class RuntimeInstaller:
     def _prepare_build_tools(self) -> dict:
         env = dict(os.environ)
 
-        cmake = shutil.which("cmake") or self._first_existing([r"C:\Program Files\CMake\bin\cmake.exe"])
+        cmake = self._find_cmake()
         if not cmake:
             self._winget_install("cmake")
-            cmake = self._first_existing([r"C:\Program Files\CMake\bin\cmake.exe"])
+            cmake = self._find_cmake()
         if not cmake:
             raise RuntimeInstallError("CMake could not be installed")
 
@@ -548,6 +548,18 @@ class RuntimeInstaller:
         env["PATH"] = os.pathsep.join([os.path.join(vulkan_sdk, "Bin"), os.path.dirname(cmake), env.get("PATH", "")])
         return env
 
+    def _find_cmake(self) -> Optional[str]:
+        registry_path = os.pathsep.join(filter(None, [self._machine_environment_variable("Path"),
+                                                      self._user_environment_variable("Path")]))
+        found = shutil.which("cmake") or shutil.which("cmake", path=registry_path or None)
+        if found:
+            return found
+        program_dirs = [os.environ.get("ProgramFiles", r"C:\Program Files"),
+                        os.environ.get("ProgramW6432", r"C:\Program Files"),
+                        os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+                        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs")]
+        return self._first_existing([os.path.join(directory, "CMake", "bin", "cmake.exe") for directory in program_dirs])
+
     def _first_existing(self, paths: list) -> Optional[str]:
         return next((path for path in paths if os.path.isfile(path)), None)
 
@@ -564,9 +576,15 @@ class RuntimeInstaller:
         return tuple(int(part) for part in re.findall(r"\d+", os.path.basename(path)))
 
     def _machine_environment_variable(self, name: str) -> Optional[str]:
+        return self._registry_environment_variable("HKEY_LOCAL_MACHINE", r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment", name)
+
+    def _user_environment_variable(self, name: str) -> Optional[str]:
+        return self._registry_environment_variable("HKEY_CURRENT_USER", "Environment", name)
+
+    def _registry_environment_variable(self, hive: str, subkey: str, name: str) -> Optional[str]:
         try:
             import winreg
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment") as key:
+            with winreg.OpenKey(getattr(winreg, hive), subkey) as key:
                 value, value_type = winreg.QueryValueEx(key, name)
         except OSError:
             return None
