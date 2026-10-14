@@ -1301,7 +1301,7 @@ class StateManager:
         beam_size = self.config_manager.get_setting('whisper', 'beam_size')
         if not max_beam_size or not beam_size or beam_size <= max_beam_size:
             return
-        self.config_manager.update_user_setting('whisper', 'beam_size', max_beam_size)
+        self.update_beam_size(max_beam_size)
         self.logger.info(f"Beam size lowered from {beam_size} to {max_beam_size} to fit the GPU's free video memory")
         print(f"ℹ️ Beam size lowered from {beam_size} to {max_beam_size} to fit the GPU's free video memory "
               "(change it in the tray under Model > Beam size)")
@@ -1451,7 +1451,8 @@ class StateManager:
         return getattr(self.whisper_engine, 'beam_size', None)
 
     def update_beam_size(self, beam_size: int):
-        self.whisper_engine.beam_size = beam_size
+        if self.get_beam_size() is not None:
+            self.whisper_engine.beam_size = beam_size
         self.config_manager.update_user_setting('whisper', 'beam_size', beam_size)
 
     def update_audio_feedback(self, enabled: bool):
