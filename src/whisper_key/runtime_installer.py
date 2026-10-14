@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .onboarding import CT2_WHEEL_URLS, NVIDIA_PACKAGES, ROCM_72_PACKAGES
+from .runtime_options import is_out_of_video_memory
 from .runtime_loader import (CUDA, MARKER_FILE, ONNX_CUDA, ONNX_DIRECTML, ORT_RUNTIMES, PYTHON_TAG, ROCM, VULKAN,
                              active_ct2_runtime, active_ort_runtime, get_runtime_dir)
 
@@ -91,6 +92,7 @@ WINGET_PACKAGE_ALREADY_INSTALLED = 0x8A150061
 WINGET_SUCCESS_CODES = (0, 3010, *[code - offset for code in (WINGET_REBOOT_REQUIRED, WINGET_UPDATE_NOT_APPLICABLE,
                                                                WINGET_PACKAGE_ALREADY_INSTALLED) for offset in (0, 2**32)])
 OUTPUT_TAIL_LINES = 2000
+BEAM_SIZES = (5, 3, 2, 1)
 RENAME_ATTEMPTS = 10
 NO_WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
 
@@ -103,7 +105,9 @@ class InstallOption:
 
 
 class RuntimeInstallError(Exception):
-    pass
+    def __init__(self, message: str, output: str = ""):
+        super().__init__(message)
+        self.output = output
 
 
 def find_system_rocm_bin() -> Optional[str]:
@@ -185,6 +189,7 @@ class RuntimeInstaller:
         self.logger = logging.getLogger(__name__)
         self._process = None
         self._cancelled = False
+        self.max_beam_size = None
 
     @property
     def cancelled(self) -> bool:
@@ -312,7 +317,8 @@ class RuntimeInstaller:
         if process.returncode not in success_codes:
             error_lines = [line for line in output_lines if " error " in line.lower() or "error:" in line.lower()]
             tail = "\n".join((error_lines or list(output_lines))[-15:])
-            raise RuntimeInstallError(f"Command failed ({process.returncode}): {' '.join(command[:4])}...\n{tail}")
+            raise RuntimeInstallError(f"Command failed ({process.returncode}): {' '.join(command[:4])}...\n{tail}",
+                                      output="\n".join(output_lines))
         return "\n".join(output_lines)
 
     def _kill_process_tree(self, process: subprocess.Popen):
@@ -521,8 +527,8 @@ class RuntimeInstaller:
 
         binary = bin_dir / "whisper-cli.exe"
         self._report("Checking the GPU...")
-        self._verify_whisper_cpp(binary, model_dir / model_file_name)
-        return {"runtime": VULKAN, "whisper_cpp_version": tag, "model": model_file_name}
+        self.max_beam_size = self._verify_whisper_cpp(binary, model_dir / model_file_name)
+        return {"runtime": VULKAN, "whisper_cpp_version": tag, "model": model_file_name, "max_beam_size": self.max_beam_size}
 
     def _prepare_build_tools(self) -> dict:
         env = dict(os.environ)
@@ -710,7 +716,7 @@ class RuntimeInstaller:
                                       f"A proxy or virus scanner may be altering the download")
         partial.replace(destination)
 
-    def _verify_whisper_cpp(self, binary: Path, model_path: Path):
+    def _verify_whisper_cpp(self, binary: Path, model_path: Path) -> int:
         with tempfile.TemporaryDirectory() as temp_dir:
             silent_wav = Path(temp_dir) / "silence.wav"
             with wave.open(str(silent_wav), "wb") as wav_file:
@@ -718,6 +724,18 @@ class RuntimeInstaller:
                 wav_file.setsampwidth(2)
                 wav_file.setframerate(16000)
                 wav_file.writeframes(b"\x00\x00" * 16000)
-            output = self._run([str(binary), "-m", str(model_path), "-f", str(silent_wav), "-nt"], timeout=300)
-        if not re.search(r"ggml_vulkan: Found [1-9]\d* Vulkan devices?", output):
-            raise RuntimeInstallError("whisper.cpp was built but did not find a Vulkan GPU")
+            for beam_size in BEAM_SIZES:
+                self._report(f"Checking the GPU with beam size {beam_size}...")
+                try:
+                    output = self._run([str(binary), "-m", str(model_path), "-f", str(silent_wav), "-nt",
+                                        "-bs", str(beam_size), "-bo", str(beam_size)], timeout=300)
+                except RuntimeInstallError as error:
+                    if not is_out_of_video_memory(error.output):
+                        raise
+                    self.logger.info(f"Not enough video memory for beam size {beam_size}")
+                    continue
+                if not re.search(r"ggml_vulkan: Found [1-9]\d* Vulkan devices?", output):
+                    raise RuntimeInstallError("whisper.cpp was built but did not find a Vulkan GPU")
+                return beam_size
+        raise RuntimeInstallError(f"The GPU does not have enough free video memory for {model_path.name}, even with "
+                                  "beam size 1; close other GPU-heavy apps or pick a smaller model and try again")
