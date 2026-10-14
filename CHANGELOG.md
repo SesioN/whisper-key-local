@@ -4,6 +4,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [1.9.3] - 2026-10-15
+
+### Fixed
+- Vulkan runtime install failed with "CMake could not be installed" when winget put CMake somewhere other than `C:\Program Files\CMake`; CMake and the Vulkan SDK are now found via the registry PATH/variables and per-user install folders
+- Re-running the Vulkan install failed when winget reported the package as already installed; those results now count as success
+- A failed install command crashed with "sequence index must be integer, not 'slice'" instead of showing the command's error output
+
 ## [1.9.2] - 2026-10-14
 
 ### Added
