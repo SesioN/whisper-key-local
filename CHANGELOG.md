@@ -4,6 +4,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [1.9.2] - 2026-10-14
+
+### Added
+- **Pre-roll toggle in the tray** - "Pre-roll (keep words before shortcut)" turns the pre-roll buffer on or off (`audio.pre_roll_enabled`, default on); off also stops keeping the microphone open in the background
+
+### Fixed
+- The no-terminal Windows exe failed to start with "Unable to create process using ...pythonw.exe" when Windows 11 Smart App Control blocked the unsigned `pythonw.exe`; it now launches `python.exe` with a hidden console
+
 ## [1.9.1] - 2026-10-12
 
 ### Fixed

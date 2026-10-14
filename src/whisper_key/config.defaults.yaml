@@ -309,6 +309,9 @@ audio: # Audio Recording Settings
     # 0 to 10; 0 = off: the microphone only opens while recording or listening for voice activation
     pre_roll_seconds: 1.0
 
+    # Pre-roll on/off without losing the duration above (also in the tray menu)
+    pre_roll_enabled: true
+
     # Audio input device selection
     # "default" = Use system default microphone (default behavior)
     # <device_id> = Specific device ID number (set automatically when changed via system tray)
