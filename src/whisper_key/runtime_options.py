@@ -243,3 +243,7 @@ def resolve_cpu_threads(configured) -> int:
     if isinstance(configured, int) and not isinstance(configured, bool) and configured > 0:
         return configured
     return _auto_cpu_threads()
+
+
+def is_out_of_video_memory(output: str) -> bool:
+    return "OutOfDeviceMemory" in output or "failed to allocate Vulkan" in output

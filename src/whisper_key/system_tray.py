@@ -29,6 +29,7 @@ except ImportError:
 MODEL_STATE_SUFFIXES = {"download": " (download)", "install": " (install whisper.cpp)", "faster_whisper": " (CPU)"}
 RECORDING_MODES = (("toggle", "Toggle"), ("push_to_talk", "Push to talk"))
 FLOATING_WIDGET_STYLES = (("button", "Button"), ("orb", "Voice orb"))
+BEAM_SIZE_OPTIONS = ((1, "1 (fastest, least video memory)"), (2, "2"), (3, "3"), (5, "5 (most accurate)"))
 ORB_APPEARANCE_DEFAULTS = {"opacity": DEFAULT_IDLE_OPACITY, "vibrancy": 1.0, "hue": 0}
 MIN_ORB_OPACITY = 0.2
 HUE_TRACK_STEP_DEGREES = 15
@@ -234,6 +235,9 @@ class SystemTray:
             Choice("Model", self._model_options(is_model_loading), self._selected_model_key, self._select_model),
             Submenu("Language", self._build_language_page, detail=self._language_detail) if self.model_registry else None,
             *self._build_runtime_items(is_busy),
+            Choice("Beam size", [Option(beam_size, label) for beam_size, label in BEAM_SIZE_OPTIONS],
+                   self.state_manager.get_beam_size, self._set_beam_size)
+            if self.state_manager.get_beam_size() is not None else None,
         ]
 
     def _model_options(self, is_model_loading: bool) -> list:
@@ -488,6 +492,13 @@ class SystemTray:
 
     def _is_pause_media_enabled(self):
         return bool(self.config_manager.get_setting('output_audio', 'pause_media_while_recording'))
+
+    def _set_beam_size(self, beam_size: int):
+        try:
+            self.state_manager.update_beam_size(beam_size)
+        except Exception as e:
+            self.logger.error(f"Error setting beam size to {beam_size}: {e}")
+        self.refresh_menu()
 
     def _set_pre_roll(self, enabled: bool):
         try:

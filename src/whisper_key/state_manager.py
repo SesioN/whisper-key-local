@@ -1297,6 +1297,15 @@ class StateManager:
         if window:
             window.close()
 
+    def _limit_beam_size_to_gpu(self, max_beam_size: Optional[int]):
+        beam_size = self.config_manager.get_setting('whisper', 'beam_size')
+        if not max_beam_size or not beam_size or beam_size <= max_beam_size:
+            return
+        self.config_manager.update_user_setting('whisper', 'beam_size', max_beam_size)
+        self.logger.info(f"Beam size lowered from {beam_size} to {max_beam_size} to fit the GPU's free video memory")
+        print(f"ℹ️ Beam size lowered from {beam_size} to {max_beam_size} to fit the GPU's free video memory "
+              "(change it in the tray under Model > Beam size)")
+
     def _install_was_cancelled(self) -> bool:
         installer = self._runtime_installer
         return bool(installer and installer.cancelled)
@@ -1330,6 +1339,7 @@ class StateManager:
             self._end_engine_switch(refresh_ui=not installed)
 
         print(f"✅ {runtime.label} installed")
+        self._limit_beam_size_to_gpu(self._runtime_installer.max_beam_size)
         try:
             self.refresh_runtimes()
             installed_runtime = next(candidate for candidate in self.get_runtimes() if candidate.key == runtime.key)
@@ -1434,6 +1444,13 @@ class StateManager:
         self.pre_roll_enabled = enabled
         self.config_manager.update_user_setting('audio', 'pre_roll_enabled', enabled)
         self._apply_pre_roll_buffering()
+
+    def get_beam_size(self) -> Optional[int]:
+        return getattr(self.whisper_engine, 'beam_size', None)
+
+    def update_beam_size(self, beam_size: int):
+        self.whisper_engine.beam_size = beam_size
+        self.config_manager.update_user_setting('whisper', 'beam_size', beam_size)
 
     def update_audio_feedback(self, enabled: bool):
         self.audio_feedback.set_enabled(enabled)

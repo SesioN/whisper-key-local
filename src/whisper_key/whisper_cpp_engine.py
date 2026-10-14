@@ -22,7 +22,7 @@ import numpy as np
 
 from .audio_recorder import AudioRecorder
 from .platform import child_processes
-from .runtime_options import resolve_cpu_threads
+from .runtime_options import is_out_of_video_memory, resolve_cpu_threads
 from .utils import get_user_app_data_path
 
 SERVER_HOST = "127.0.0.1"
@@ -301,6 +301,8 @@ class WhisperCppEngine:
         if not server_url:
             return None
         fields = {"response_format": "json", "language": self._language(self.model_key, language), "suppress_nst": "true"}
+        if self.beam_size:
+            fields["beam_size"] = str(self.beam_size)
         prompt = self._active_prompt()
         if prompt:
             fields["prompt"] = prompt
@@ -321,8 +323,9 @@ class WhisperCppEngine:
                 return None
             if self._server_process is not process:
                 return None
-            self.logger.warning("whisper-server exited with code %s:\n%s", process.returncode,
-                                _log_tail(self._server_log))
+            server_log_tail = _log_tail(self._server_log)
+            self.logger.warning("whisper-server exited with code %s:\n%s", process.returncode, server_log_tail)
+            self._warn_if_out_of_video_memory(server_log_tail)
             print("   ⚠ whisper-server stopped, restarting it; using whisper-cli for this recording")
             threading.Thread(target=self._recover_server, args=(process,), daemon=True).start()
             return None
@@ -474,6 +477,7 @@ class WhisperCppEngine:
                 stderr_tail = "\n".join(result.stderr.strip().splitlines()[-20:])
                 self.logger.error("whisper-cli exited with code %s:\n%s", result.returncode, stderr_tail)
                 print(f"   ✗ whisper.cpp failed (exit code {result.returncode}), see log for details")
+                self._warn_if_out_of_video_memory(result.stderr)
                 return None
 
             transcribed = self._clean_output(result.stdout)
@@ -507,6 +511,16 @@ class WhisperCppEngine:
                 progress_callback("Model already loaded")
             return
         self._load_model_async(new_model_key, progress_callback)
+
+    def _warn_if_out_of_video_memory(self, output: str):
+        if not is_out_of_video_memory(output):
+            return
+        if self.beam_size and self.beam_size > 1:
+            suggestion = f"lower Model > Beam size in the tray (now {self.beam_size}, try {max(1, self.beam_size // 2)})"
+        else:
+            suggestion = "pick a smaller model or close other GPU-heavy apps"
+        self.logger.warning(f"The GPU ran out of video memory; {suggestion}")
+        print(f"   ⚠ The GPU ran out of video memory; {suggestion}")
 
     def _build_command(self, model_path: str, audio_path: str, language: Optional[str] = None) -> list:
         cmd = [

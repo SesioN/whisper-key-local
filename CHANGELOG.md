@@ -4,6 +4,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+- **Beam size in the tray** - Model > Beam size (1, 2, 3, 5) trades accuracy for speed and video memory
+- The Vulkan install measures the largest beam size that fits in the GPU's free video memory and lowers `whisper.beam_size` to it
+
+### Fixed
+- The Vulkan GPU check failed with out-of-memory on GPUs with little free video memory; when transcription runs out of video memory the app now suggests a lower beam size or a smaller model
+
 ## [1.9.3] - 2026-10-15
 
 ### Fixed
