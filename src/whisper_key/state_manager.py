@@ -1316,6 +1316,7 @@ class StateManager:
 
         self._runtime_installer = RuntimeInstaller(on_progress=self._report_install_progress)
         installed = False
+        max_beam_size = None
         try:
             if option is None:
                 option = install_options(runtime.key)[0] if model_key else self._choose_install_option(runtime, upgrade)
@@ -1324,6 +1325,7 @@ class StateManager:
             print(f"📦 Installing [{runtime.label}]: {option.description}")
             self._show_install_progress(f"Installing {runtime.label}")
             self._runtime_installer.install(runtime.key, option, model_key=model_key or self.whisper_engine.model_key)
+            max_beam_size = self._runtime_installer.max_beam_size
             installed = True
         except Exception as e:
             self._close_install_progress()
@@ -1339,7 +1341,7 @@ class StateManager:
             self._end_engine_switch(refresh_ui=not installed)
 
         print(f"✅ {runtime.label} installed")
-        self._limit_beam_size_to_gpu(self._runtime_installer.max_beam_size)
+        self._limit_beam_size_to_gpu(max_beam_size)
         try:
             self.refresh_runtimes()
             installed_runtime = next(candidate for candidate in self.get_runtimes() if candidate.key == runtime.key)
