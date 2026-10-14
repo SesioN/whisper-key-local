@@ -308,7 +308,7 @@ class RuntimeInstaller:
             raise RuntimeInstallError("Installation cancelled")
         if process.returncode not in success_codes:
             error_lines = [line for line in output_lines if " error " in line.lower() or "error:" in line.lower()]
-            tail = "\n".join((error_lines or output_lines)[-15:])
+            tail = "\n".join((error_lines or list(output_lines))[-15:])
             raise RuntimeInstallError(f"Command failed ({process.returncode}): {' '.join(command[:4])}...\n{tail}")
         return "\n".join(output_lines)
 
