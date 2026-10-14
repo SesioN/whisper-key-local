@@ -564,8 +564,11 @@ class RuntimeInstaller:
         return next((path for path in paths if os.path.isfile(path)), None)
 
     def _find_vulkan_sdk(self) -> Optional[str]:
-        candidates = [os.environ.get("VULKAN_SDK"), self._machine_environment_variable("VULKAN_SDK")]
-        candidates += sorted(glob.glob(r"C:\VulkanSDK\*"), key=self._version_key, reverse=True)
+        candidates = [os.environ.get("VULKAN_SDK"), self._machine_environment_variable("VULKAN_SDK"),
+                      self._user_environment_variable("VULKAN_SDK")]
+        install_roots = [r"C:\VulkanSDK", os.path.join(os.environ.get("LOCALAPPDATA", ""), "VulkanSDK")]
+        installed = [path for root in install_roots for path in glob.glob(os.path.join(root, "*"))]
+        candidates += sorted(installed, key=self._version_key, reverse=True)
         for candidate in filter(None, candidates):
             if os.path.isfile(os.path.join(candidate, "Bin", "glslc.exe")):
                 return candidate
