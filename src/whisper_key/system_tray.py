@@ -124,6 +124,7 @@ class SystemTray:
                    self._current_recording_mode, self._set_recording_mode, style="segmented") if self.recording_mode_changer else None,
             Toggle("Voice-activated recording", lambda: self.state_manager.auto_trigger_enabled, self._set_auto_trigger) if self.state_manager.is_auto_trigger_available() else None,
             Action("Voice detection sensitivity...", self._open_vad_sensitivity_window, icon=ICON_SLIDERS) if self.state_manager.is_vad_sensitivity_window_available() else None,
+            Toggle("Pre-roll (keep words before shortcut)", lambda: self.state_manager.pre_roll_enabled, self._set_pre_roll) if self.state_manager.audio_recorder.pre_roll_seconds > 0 else None,
             Toggle("Audio feedback", self._is_audio_feedback_enabled, self._set_audio_feedback),
             Toggle("Mute system audio while recording", self._is_mute_output_enabled, self._set_mute_output),
             Toggle("Pause media while recording", self._is_pause_media_enabled, self._set_pause_media),
@@ -487,6 +488,13 @@ class SystemTray:
 
     def _is_pause_media_enabled(self):
         return bool(self.config_manager.get_setting('output_audio', 'pause_media_while_recording'))
+
+    def _set_pre_roll(self, enabled: bool):
+        try:
+            self.state_manager.update_pre_roll_enabled(enabled)
+        except Exception as e:
+            self.logger.error(f"Error setting pre-roll to {enabled}: {e}")
+        self.refresh_menu()
 
     def _set_pause_media(self, enabled: bool):
         try:
