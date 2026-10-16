@@ -4,6 +4,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+- **Return to original window** - auto-paste goes to the window that was focused when recording started, even if focus moved meanwhile; if that window is gone the text is copied to the clipboard. Auto-enter is skipped if focus moves away during paste. Retrying a failed recording pastes into the window focused at retry time. On by default, toggle in the tray or `clipboard.restore_focus` (Windows)
+
 ## [1.9.4] - 2026-10-15
 
 ### Added

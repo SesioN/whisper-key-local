@@ -6,7 +6,7 @@ import threading
 from dataclasses import dataclass, replace
 from pathlib import Path
 import platform
-from typing import Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import sounddevice as sd
 
@@ -19,7 +19,7 @@ from .runtime_loader import CPU, ONNX_CUDA, ONNX_DIRECTML, VULKAN, whisper_cpp_r
 from .config_manager import MAX_RECENT_LANGUAGES
 from .languages import AUTO_LANGUAGE, language_code, language_name
 from .model_registry import ONNX_FAMILY, SELECTABLE_LANGUAGE
-from .platform import dialogs
+from .platform import dialogs, window_style
 from .clipboard_manager import ClipboardManager
 from .system_tray import SystemTray
 from .config_manager import ConfigManager
@@ -43,6 +43,7 @@ class TranscriptionRequest:
     is_retry: bool = False
     language: Optional[str] = None
     model_key: Optional[str] = None
+    focus_target: Any = None
 
 
 class StateManager:
@@ -92,6 +93,7 @@ class StateManager:
         self._pending_model_change = None
         self._pending_device_change = None
         self._command_mode = False
+        self._focus_target = None
         self._state_lock = threading.Lock()
         self._recording_stop_lock = threading.Lock()
         self._monitoring_lock = threading.Lock()
@@ -193,8 +195,9 @@ class StateManager:
     def _submit_transcription(self, recording: Optional[Recording], use_auto_enter: bool):
         with self._state_lock:
             request = TranscriptionRequest(recording, use_auto_enter, self._command_mode, self._auto_triggered_recording,
-                                           **self._language_for_current_model())
+                                           **self._language_for_current_model(), focus_target=self._focus_target)
             self._command_mode = False
+            self._focus_target = None
             self._auto_triggered_recording = False
         self._enqueue_transcription(request)
 
@@ -417,6 +420,7 @@ class StateManager:
                 print("⏳ Transcription is unavailable until the model is ready...")
 
     def _begin_command_recording(self):
+        self._capture_focus_target()
         with self._state_lock:
             self._command_mode = True
             self._auto_triggered_recording = False
@@ -443,7 +447,20 @@ class StateManager:
         with self._state_lock:
             self._auto_triggered_recording = auto_triggered
 
+    def _current_focus_target(self):
+        try:
+            return window_style.capture_focus_target()
+        except Exception as e:
+            self.logger.error(f"Failed to capture focused window: {e}")
+            return None
+
+    def _capture_focus_target(self):
+        focus_target = self._current_focus_target()
+        with self._state_lock:
+            self._focus_target = focus_target
+
     def _begin_recording(self, auto_triggered: bool = False):
+        self._capture_focus_target()
         self._set_auto_triggered_recording(auto_triggered)
         success = self.audio_recorder.start_recording(voice_activated=auto_triggered)
 
@@ -483,7 +500,8 @@ class StateManager:
                 print("⏳ Cannot retry right now, wait until Whisper Key is idle")
                 return False
             print(f"\n↻ Retrying the last failed recording ({failed_recording.recording.duration_seconds:.1f} seconds)...")
-            self._enqueue_transcription(replace(failed_recording, is_retry=True, **self._language_for_current_model()))
+            self._enqueue_transcription(replace(failed_recording, is_retry=True, focus_target=self._current_focus_target(),
+                                                       **self._language_for_current_model()))
             return True
 
     def _prepare_audio(self, recording: Recording, trailing_silence_seconds: float):
@@ -573,7 +591,7 @@ class StateManager:
                 success = self.clipboard_manager.copy_with_notification(transcribed_text)
             else:
                 success = self.clipboard_manager.deliver_transcription(
-                    transcribed_text, use_auto_enter
+                    transcribed_text, use_auto_enter, request.focus_target
                 )
 
             if success:
@@ -1458,6 +1476,10 @@ class StateManager:
     def update_audio_feedback(self, enabled: bool):
         self.audio_feedback.set_enabled(enabled)
         self.config_manager.update_user_setting('audio_feedback', 'enabled', enabled)
+
+    def update_restore_focus(self, value):
+        self.clipboard_manager.update_restore_focus(value)
+        self.config_manager.update_user_setting('clipboard', 'restore_focus', value)
 
     def update_copy_to_clipboard(self, value):
         self.clipboard_manager.update_copy_to_clipboard(value)

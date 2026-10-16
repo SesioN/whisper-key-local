@@ -170,6 +170,7 @@ Delete this file and restart app to reset to defaults.
 | **Clipboard** |||
 | `clipboard.auto_paste` | `true` | false = clipboard only. Windows blocks typing into apps running as administrator; then the text stays on the clipboard and a notification asks you to press Ctrl+V |
 | `clipboard.copy_to_clipboard` | `false` | Keep transcription on clipboard after auto-paste |
+| `clipboard.restore_focus` | `true` | Refocus the window that was active when recording started before auto-paste; copies to the clipboard if it is gone (Windows; tray toggle "Return to original window") |
 | `clipboard.delivery_method` | `paste` | paste (Ctrl+V) or type (direct injection) |
 | `clipboard.paste_hotkey` | `ctrl+v` / `cmd+v` | Paste key simulation |
 | `clipboard.paste_pre_paste_delay` | `0.05` | Delay after copy, before paste hotkey (seconds) |

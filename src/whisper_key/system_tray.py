@@ -132,6 +132,7 @@ class SystemTray:
             Section("Output"),
             Toggle("Auto-paste", self._is_auto_paste_enabled, self._set_transcription_mode),
             Toggle("Copy to clipboard", self._is_copy_enabled, self._set_copy_to_clipboard, enabled=self._is_auto_paste_enabled),
+            Toggle("Return to original window", self._is_restore_focus_enabled, self._set_restore_focus, enabled=self._is_auto_paste_enabled) if IS_WINDOWS else None,
             Toggle("Voice commands in normal recordings", self._is_match_in_dictation_enabled, self._set_match_in_dictation) if self._is_voice_command_manager_enabled() else None,
             Section("Setup"),
             Submenu("Model", self._build_model_page, icon=ICON_MODEL, detail=self._model_detail),
@@ -534,6 +535,16 @@ class SystemTray:
 
     def _is_copy_enabled(self):
         return bool(self.config_manager.get_setting('clipboard', 'copy_to_clipboard')) or not self._is_auto_paste_enabled()
+
+    def _is_restore_focus_enabled(self):
+        return bool(self.config_manager.get_setting('clipboard', 'restore_focus'))
+
+    def _set_restore_focus(self, enabled: bool):
+        try:
+            self.state_manager.update_restore_focus(enabled)
+        except Exception as e:
+            self.logger.error(f"Error setting restore focus to {enabled}: {e}")
+        self.refresh_menu()
 
     def _set_copy_to_clipboard(self, enabled: bool):
         try:

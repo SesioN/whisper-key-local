@@ -1,5 +1,8 @@
 import ctypes
+import os
+import time
 from ctypes import wintypes
+from dataclasses import dataclass
 
 GWL_EXSTYLE = -20
 WS_EX_NOACTIVATE = 0x08000000
@@ -19,6 +22,22 @@ SWP_NOACTIVATE = 0x0010
 DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = ctypes.c_void_p(-4)
 
 
+SW_RESTORE = 9
+
+
+class GUITHREADINFO(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("flags", wintypes.DWORD), ("hwndActive", wintypes.HWND),
+                ("hwndFocus", wintypes.HWND), ("hwndCapture", wintypes.HWND), ("hwndMenuOwner", wintypes.HWND),
+                ("hwndMoveSize", wintypes.HWND), ("hwndCaret", wintypes.HWND), ("rcCaret", wintypes.RECT)]
+
+
+@dataclass(frozen=True)
+class FocusTarget:
+    window: int
+    focused_control: int
+    thread_id: int
+
+
 class MONITORINFO(ctypes.Structure):
     _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
                 ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
@@ -36,6 +55,24 @@ user32.SetForegroundWindow.argtypes = [wintypes.HWND]
 user32.SetForegroundWindow.restype = wintypes.BOOL
 user32.IsWindow.argtypes = [wintypes.HWND]
 user32.IsWindow.restype = wintypes.BOOL
+user32.IsIconic.argtypes = [wintypes.HWND]
+user32.IsIconic.restype = wintypes.BOOL
+user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.ShowWindow.restype = wintypes.BOOL
+user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+user32.GetGUIThreadInfo.argtypes = [wintypes.DWORD, ctypes.c_void_p]
+user32.GetGUIThreadInfo.restype = wintypes.BOOL
+user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+user32.AttachThreadInput.restype = wintypes.BOOL
+user32.SetFocus.argtypes = [wintypes.HWND]
+user32.SetFocus.restype = wintypes.HWND
+user32.BringWindowToTop.argtypes = [wintypes.HWND]
+user32.BringWindowToTop.restype = wintypes.BOOL
+user32.IsChild.argtypes = [wintypes.HWND, wintypes.HWND]
+user32.IsChild.restype = wintypes.BOOL
+kernel32 = ctypes.WinDLL("kernel32")
+kernel32.GetCurrentThreadId.restype = wintypes.DWORD
 user32.GetSystemMetrics.argtypes = [ctypes.c_int]
 user32.GetSystemMetrics.restype = ctypes.c_int
 user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
@@ -126,6 +163,59 @@ def give_back_foreground(previous_window: int, tk_window_ids: list[int]):
         return
     if get_foreground_window() in own_windows:
         user32.SetForegroundWindow(previous_window)
+
+
+def _thread_of(window: int) -> int:
+    return user32.GetWindowThreadProcessId(window, None) if window else 0
+
+
+def capture_focus_target():
+    window = get_foreground_window()
+    if not window:
+        return None
+    process_id = wintypes.DWORD()
+    thread_id = user32.GetWindowThreadProcessId(window, ctypes.byref(process_id))
+    if process_id.value == os.getpid():
+        return None
+    info = GUITHREADINFO(cbSize=ctypes.sizeof(GUITHREADINFO))
+    focused_control = 0
+    if user32.GetGUIThreadInfo(thread_id, ctypes.byref(info)):
+        focused_control = info.hwndFocus or 0
+    return FocusTarget(window, focused_control, thread_id)
+
+
+def is_focus_target_active(target) -> bool:
+    return bool(target and user32.IsWindow(target.window) and get_foreground_window() == target.window)
+
+
+def _activate(target):
+    user32.SetForegroundWindow(target.window)
+    if target.focused_control and user32.IsWindow(target.focused_control) \
+            and user32.IsChild(target.window, target.focused_control):
+        user32.SetFocus(target.focused_control)
+
+
+def restore_focus_target(target, settle_seconds: float = 0.05) -> bool:
+    if not target or not user32.IsWindow(target.window):
+        return False
+    if is_focus_target_active(target):
+        return True
+    if user32.IsIconic(target.window):
+        user32.ShowWindow(target.window, SW_RESTORE)
+    own_thread = kernel32.GetCurrentThreadId()
+    foreground_thread = _thread_of(get_foreground_window())
+    attached = []
+    for thread_id in {foreground_thread, target.thread_id} - {0, own_thread}:
+        if user32.AttachThreadInput(own_thread, thread_id, True):
+            attached.append(thread_id)
+    try:
+        user32.BringWindowToTop(target.window)
+        _activate(target)
+    finally:
+        for thread_id in attached:
+            user32.AttachThreadInput(own_thread, thread_id, False)
+    time.sleep(settle_seconds)
+    return is_focus_target_active(target)
 
 
 def is_point_on_screen(x: int, y: int) -> bool:

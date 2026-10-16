@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 import pyperclip
 
-from .platform import clipboard, keyboard
+from .platform import clipboard, keyboard, window_style
 from .utils import parse_hotkey
 
 @dataclass(eq=False)
@@ -22,7 +22,7 @@ class ClipboardManager:
                  paste_clipboard_restore_delay,
                  copy_to_clipboard, type_auto_enter_delay,
                  type_auto_enter_delay_per_100_chars,
-                 macos_key_simulation_delay):
+                 macos_key_simulation_delay, restore_focus=True):
         self.logger = logging.getLogger(__name__)
         self.auto_paste = auto_paste
         self.delivery_method = keyboard.validate_delivery_method(delivery_method)
@@ -34,6 +34,7 @@ class ClipboardManager:
         self.copy_to_clipboard = copy_to_clipboard
         self.type_auto_enter_delay = type_auto_enter_delay
         self.type_auto_enter_delay_per_100_chars = type_auto_enter_delay_per_100_chars
+        self.restore_focus = restore_focus
         self.on_delivery_blocked = None
         self._clipboard_lock = threading.RLock()
         self._pending_restore = None
@@ -185,14 +186,8 @@ class ClipboardManager:
                 if original_clipboard:
                     self._schedule_restore(original_clipboard)
 
-    def _deliver_to_blocked_target(self, text: str) -> bool:
-        self.logger.warning("Foreground window runs at a higher privilege level - auto-paste blocked")
-        copied = self.copy_text(text)
-        hotkey_display = self.paste_hotkey.upper()
-        if copied:
-            message = f"Target window runs as administrator - press {hotkey_display} to paste."
-        else:
-            message = "Target window runs as administrator - auto-paste blocked and copying to the clipboard failed."
+    def _copy_and_notify(self, text: str, copied_message: str, failed_message: str) -> bool:
+        message = copied_message if self.copy_text(text) else failed_message
         print(f"   ⚠ {message}")
         if self.on_delivery_blocked:
             try:
@@ -200,6 +195,32 @@ class ClipboardManager:
             except Exception as e:
                 self.logger.error(f"Failed to report blocked delivery: {e}")
         return False
+
+    def _deliver_to_blocked_target(self, text: str) -> bool:
+        self.logger.warning("Foreground window runs at a higher privilege level - auto-paste blocked")
+        return self._copy_and_notify(
+            text, f"Target window runs as administrator - press {self.paste_hotkey.upper()} to paste.",
+            "Target window runs as administrator - auto-paste blocked and copying to the clipboard failed.")
+
+    def _report_unreachable_target(self, text: str) -> bool:
+        self.logger.warning("Original window could not be focused again - auto-paste skipped")
+        return self._copy_and_notify(
+            text, f"The original window is no longer available - press {self.paste_hotkey.upper()} to paste.",
+            "The original window is no longer available and copying to the clipboard failed.")
+
+    def _focus_target_ready(self, focus_target) -> bool:
+        if not self.restore_focus or focus_target is None:
+            return True
+        try:
+            return window_style.restore_focus_target(focus_target)
+        except Exception as e:
+            self.logger.error(f"Failed to restore focus: {e}")
+            return False
+
+    def _focus_target_still_active(self, focus_target) -> bool:
+        if not self.restore_focus or focus_target is None:
+            return True
+        return window_style.is_focus_target_active(focus_target)
 
     def execute_delivery(self, text: str) -> bool:
         if keyboard.is_foreground_input_blocked():
@@ -223,17 +244,24 @@ class ClipboardManager:
 
     def deliver_transcription(self,
                               transcribed_text: str,
-                              use_auto_enter: bool = False) -> bool:
+                              use_auto_enter: bool = False,
+                              focus_target=None) -> bool:
 
         try:
             if self.auto_paste:
+                if not self._focus_target_ready(focus_target):
+                    return self._report_unreachable_target(transcribed_text)
                 success = self.execute_delivery(transcribed_text)
                 if success and use_auto_enter:
                     if self.delivery_method == "type":
                         delay = self.type_auto_enter_delay + len(transcribed_text) / 100 * self.type_auto_enter_delay_per_100_chars
                         if delay > 0:
                             time.sleep(delay)
-                    success = self.send_enter_key()
+                    if self._focus_target_still_active(focus_target):
+                        success = self.send_enter_key()
+                    else:
+                        self.logger.warning("Focus left the original window - ENTER not sent")
+                        print("   ⚠ Focus left the original window - ENTER was not sent")
             else:
                 print("📋 Copying to clipboard...")
                 success = self.copy_with_notification(transcribed_text)
@@ -247,6 +275,9 @@ class ClipboardManager:
     def update_auto_paste(self, enabled: bool):
         self.auto_paste = enabled
         self._print_status()
+
+    def update_restore_focus(self, enabled: bool):
+        self.restore_focus = enabled
 
     def update_copy_to_clipboard(self, enabled: bool):
         self.copy_to_clipboard = enabled
