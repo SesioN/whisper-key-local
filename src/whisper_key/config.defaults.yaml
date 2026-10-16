@@ -330,6 +330,10 @@ clipboard: # Clipboard Behavior
     # Disables paste_preserve_clipboard; always on when auto_paste is false
     copy_to_clipboard: false
 
+    # Bring back the window that was focused when recording started before auto-paste (Windows)
+    # If that window is gone or cannot be focused, the text is copied to the clipboard instead
+    restore_focus: true
+
     # Delivery method for auto-paste
     # "paste" = clipboard copy + simulated Ctrl+V paste
     # "type" = direct text injection (Windows only)

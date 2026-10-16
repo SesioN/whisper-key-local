@@ -20,3 +20,15 @@ def get_foreground_window() -> int:
 
 def give_back_foreground(previous_window: int, tk_window_ids: list[int]):
     pass
+
+
+def capture_focus_target():
+    return None
+
+
+def is_focus_target_active(target) -> bool:
+    return True
+
+
+def restore_focus_target(target, settle_seconds: float = 0.05) -> bool:
+    return True

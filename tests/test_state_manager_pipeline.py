@@ -1,6 +1,6 @@
 import threading
 import time
-from unittest.mock import MagicMock
+from unittest.mock import ANY, MagicMock
 
 import numpy as np
 
@@ -82,7 +82,7 @@ def test_stop_recording_returns_before_transcription_finishes():
     release.set()
     wait_for_pipeline(manager)
     assert not manager.is_processing
-    clipboard.deliver_transcription.assert_called_once_with("hello", False)
+    clipboard.deliver_transcription.assert_called_once_with("hello", False, ANY)
 
 
 def test_realtime_speech_skips_the_precheck():
@@ -161,7 +161,7 @@ def test_failed_transcription_can_be_retried():
     assert manager.retry_failed_recording()
     wait_for_pipeline(manager)
     assert not manager.has_failed_recording()
-    clipboard.deliver_transcription.assert_called_once_with("second try", True)
+    clipboard.deliver_transcription.assert_called_once_with("second try", True, ANY)
 
 
 def test_recording_is_kept_when_the_engine_is_switching():
@@ -391,3 +391,51 @@ def test_fixed_language_warning_only_for_an_explicit_choice(capsys):
         ('whisper', 'language'): 'de', ('whisper', 'model_languages'): {'tiny.en': 'de'}}.get((section, key))
     manager.request_model_change('tiny.en')
     assert 'only transcribes' in capsys.readouterr().out
+
+
+def test_focus_target_captured_at_start_reaches_delivery(monkeypatch):
+    from whisper_key import state_manager as state_module
+    window_style = MagicMock()
+    window_style.capture_focus_target.return_value = "start-window"
+    monkeypatch.setattr(state_module, "window_style", window_style)
+    manager, _, _, clipboard = make_state_manager()
+    manager.audio_recorder.start_recording.return_value = True
+    manager.audio_feedback = MagicMock()
+    manager._begin_recording()
+    window_style.capture_focus_target.return_value = "other-window"
+    manager._submit_transcription(Recording(np.ones(16000, dtype=np.float32)), False)
+    wait_for_pipeline(manager)
+    clipboard.deliver_transcription.assert_called_once_with("hello", False, "start-window")
+
+
+def test_command_recording_captures_focus_target(monkeypatch):
+    from whisper_key import state_manager as state_module
+    window_style = MagicMock()
+    window_style.capture_focus_target.return_value = "command-window"
+    monkeypatch.setattr(state_module, "window_style", window_style)
+    manager, _, _, _ = make_state_manager()
+    manager.audio_recorder.start_recording.return_value = False
+    manager._begin_command_recording()
+    assert manager._focus_target == "command-window"
+
+
+def test_retry_uses_the_window_focused_at_retry_time(monkeypatch):
+    from whisper_key import state_manager as state_module
+    window_style = MagicMock()
+    window_style.capture_focus_target.return_value = "retry-window"
+    monkeypatch.setattr(state_module, "window_style", window_style)
+    attempts = []
+
+    def transcribe(audio):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise RuntimeError("boom")
+        return "again"
+
+    manager, _, _, clipboard = make_state_manager(transcribe=transcribe)
+    manager.audio_recorder.get_recording_status.return_value = False
+    manager._submit_transcription(Recording(np.ones(16000, dtype=np.float32)), False)
+    wait_for_pipeline(manager)
+    assert manager.retry_failed_recording()
+    wait_for_pipeline(manager)
+    clipboard.deliver_transcription.assert_called_once_with("again", False, "retry-window")
