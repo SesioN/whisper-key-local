@@ -1,6 +1,6 @@
 import threading
 import time
-from unittest.mock import MagicMock
+from unittest.mock import ANY, MagicMock
 
 import numpy as np
 
@@ -82,7 +82,7 @@ def test_stop_recording_returns_before_transcription_finishes():
     release.set()
     wait_for_pipeline(manager)
     assert not manager.is_processing
-    clipboard.deliver_transcription.assert_called_once_with("hello", False)
+    clipboard.deliver_transcription.assert_called_once_with("hello", False, ANY)
 
 
 def test_realtime_speech_skips_the_precheck():
@@ -161,7 +161,7 @@ def test_failed_transcription_can_be_retried():
     assert manager.retry_failed_recording()
     wait_for_pipeline(manager)
     assert not manager.has_failed_recording()
-    clipboard.deliver_transcription.assert_called_once_with("second try", True)
+    clipboard.deliver_transcription.assert_called_once_with("second try", True, ANY)
 
 
 def test_recording_is_kept_when_the_engine_is_switching():

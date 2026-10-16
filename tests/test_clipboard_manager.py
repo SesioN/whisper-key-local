@@ -95,3 +95,38 @@ def test_failed_restore_is_logged(manager, caplog):
         manager._clipboard_paste("dictated")
         time.sleep(0.35)
     assert "could not be restored" in caplog.text
+
+
+def test_delivery_restores_focus_target_before_paste(manager, monkeypatch):
+    manager, _, _ = manager
+    calls = []
+    window_style = MagicMock()
+    window_style.restore_focus_target.side_effect = lambda target: calls.append("restore") or True
+    monkeypatch.setattr(clipboard_module, "window_style", window_style)
+    monkeypatch.setattr(manager, "execute_delivery", lambda text: calls.append("paste") or True)
+    assert manager.deliver_transcription("dictated", focus_target="target")
+    assert calls == ["restore", "paste"]
+
+
+def test_unreachable_focus_target_copies_instead_of_pasting(manager, monkeypatch):
+    manager, contents, _ = manager
+    window_style = MagicMock()
+    window_style.restore_focus_target.return_value = False
+    monkeypatch.setattr(clipboard_module, "window_style", window_style)
+    execute_delivery = MagicMock()
+    monkeypatch.setattr(manager, "execute_delivery", execute_delivery)
+    manager.on_delivery_blocked = MagicMock()
+    assert not manager.deliver_transcription("dictated", focus_target="target")
+    execute_delivery.assert_not_called()
+    assert contents["text"] == "dictated"
+    manager.on_delivery_blocked.assert_called_once()
+
+
+def test_disabled_restore_focus_skips_refocus(manager, monkeypatch):
+    manager, _, _ = manager
+    window_style = MagicMock()
+    monkeypatch.setattr(clipboard_module, "window_style", window_style)
+    monkeypatch.setattr(manager, "execute_delivery", lambda text: True)
+    manager.update_restore_focus(False)
+    assert manager.deliver_transcription("dictated", focus_target="target")
+    window_style.restore_focus_target.assert_not_called()
