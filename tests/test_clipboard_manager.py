@@ -130,3 +130,28 @@ def test_disabled_restore_focus_skips_refocus(manager, monkeypatch):
     manager.update_restore_focus(False)
     assert manager.deliver_transcription("dictated", focus_target="target")
     window_style.restore_focus_target.assert_not_called()
+
+
+def test_failing_refocus_counts_as_unreachable(manager, monkeypatch):
+    manager, contents, _ = manager
+    window_style = MagicMock()
+    window_style.restore_focus_target.side_effect = OSError("denied")
+    monkeypatch.setattr(clipboard_module, "window_style", window_style)
+    execute_delivery = MagicMock()
+    monkeypatch.setattr(manager, "execute_delivery", execute_delivery)
+    assert not manager.deliver_transcription("dictated", focus_target="target")
+    execute_delivery.assert_not_called()
+    assert contents["text"] == "dictated"
+
+
+def test_enter_is_skipped_but_delivery_succeeds_when_focus_moved(manager, monkeypatch):
+    manager, _, _ = manager
+    window_style = MagicMock()
+    window_style.restore_focus_target.return_value = True
+    window_style.is_focus_target_active.return_value = False
+    monkeypatch.setattr(clipboard_module, "window_style", window_style)
+    monkeypatch.setattr(manager, "execute_delivery", lambda text: True)
+    send_enter = MagicMock()
+    monkeypatch.setattr(manager, "send_enter_key", send_enter)
+    assert manager.deliver_transcription("dictated", use_auto_enter=True, focus_target="target")
+    send_enter.assert_not_called()

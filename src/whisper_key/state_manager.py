@@ -447,12 +447,15 @@ class StateManager:
         with self._state_lock:
             self._auto_triggered_recording = auto_triggered
 
-    def _capture_focus_target(self):
+    def _current_focus_target(self):
         try:
-            focus_target = window_style.capture_focus_target()
+            return window_style.capture_focus_target()
         except Exception as e:
             self.logger.error(f"Failed to capture focused window: {e}")
-            focus_target = None
+            return None
+
+    def _capture_focus_target(self):
+        focus_target = self._current_focus_target()
         with self._state_lock:
             self._focus_target = focus_target
 
@@ -497,7 +500,8 @@ class StateManager:
                 print("⏳ Cannot retry right now, wait until Whisper Key is idle")
                 return False
             print(f"\n↻ Retrying the last failed recording ({failed_recording.recording.duration_seconds:.1f} seconds)...")
-            self._enqueue_transcription(replace(failed_recording, is_retry=True, **self._language_for_current_model()))
+            self._enqueue_transcription(replace(failed_recording, is_retry=True, focus_target=self._current_focus_target(),
+                                                       **self._language_for_current_model()))
             return True
 
     def _prepare_audio(self, recording: Recording, trailing_silence_seconds: float):

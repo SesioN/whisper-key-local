@@ -186,14 +186,8 @@ class ClipboardManager:
                 if original_clipboard:
                     self._schedule_restore(original_clipboard)
 
-    def _deliver_to_blocked_target(self, text: str) -> bool:
-        self.logger.warning("Foreground window runs at a higher privilege level - auto-paste blocked")
-        copied = self.copy_text(text)
-        hotkey_display = self.paste_hotkey.upper()
-        if copied:
-            message = f"Target window runs as administrator - press {hotkey_display} to paste."
-        else:
-            message = "Target window runs as administrator - auto-paste blocked and copying to the clipboard failed."
+    def _copy_and_notify(self, text: str, copied_message: str, failed_message: str) -> bool:
+        message = copied_message if self.copy_text(text) else failed_message
         print(f"   ⚠ {message}")
         if self.on_delivery_blocked:
             try:
@@ -202,21 +196,17 @@ class ClipboardManager:
                 self.logger.error(f"Failed to report blocked delivery: {e}")
         return False
 
+    def _deliver_to_blocked_target(self, text: str) -> bool:
+        self.logger.warning("Foreground window runs at a higher privilege level - auto-paste blocked")
+        return self._copy_and_notify(
+            text, f"Target window runs as administrator - press {self.paste_hotkey.upper()} to paste.",
+            "Target window runs as administrator - auto-paste blocked and copying to the clipboard failed.")
+
     def _report_unreachable_target(self, text: str) -> bool:
         self.logger.warning("Original window could not be focused again - auto-paste skipped")
-        copied = self.copy_text(text)
-        hotkey_display = self.paste_hotkey.upper()
-        if copied:
-            message = f"The original window is no longer available - press {hotkey_display} to paste."
-        else:
-            message = "The original window is no longer available and copying to the clipboard failed."
-        print(f"   ⚠ {message}")
-        if self.on_delivery_blocked:
-            try:
-                self.on_delivery_blocked(message)
-            except Exception as e:
-                self.logger.error(f"Failed to report blocked delivery: {e}")
-        return False
+        return self._copy_and_notify(
+            text, f"The original window is no longer available - press {self.paste_hotkey.upper()} to paste.",
+            "The original window is no longer available and copying to the clipboard failed.")
 
     def _focus_target_ready(self, focus_target) -> bool:
         if not self.restore_focus or focus_target is None:
@@ -267,10 +257,11 @@ class ClipboardManager:
                         delay = self.type_auto_enter_delay + len(transcribed_text) / 100 * self.type_auto_enter_delay_per_100_chars
                         if delay > 0:
                             time.sleep(delay)
-                    if not self._focus_target_still_active(focus_target):
+                    if self._focus_target_still_active(focus_target):
+                        success = self.send_enter_key()
+                    else:
                         self.logger.warning("Focus left the original window - ENTER not sent")
-                        return False
-                    success = self.send_enter_key()
+                        print("   ⚠ Focus left the original window - ENTER was not sent")
             else:
                 print("📋 Copying to clipboard...")
                 success = self.copy_with_notification(transcribed_text)

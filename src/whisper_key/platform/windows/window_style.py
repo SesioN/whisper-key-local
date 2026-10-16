@@ -178,7 +178,9 @@ def capture_focus_target():
     if process_id.value == os.getpid():
         return None
     info = GUITHREADINFO(cbSize=ctypes.sizeof(GUITHREADINFO))
-    focused_control = info.hwndFocus or 0 if user32.GetGUIThreadInfo(thread_id, ctypes.byref(info)) else 0
+    focused_control = 0
+    if user32.GetGUIThreadInfo(thread_id, ctypes.byref(info)):
+        focused_control = info.hwndFocus or 0
     return FocusTarget(window, focused_control, thread_id)
 
 
