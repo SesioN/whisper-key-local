@@ -115,6 +115,11 @@ class WNDCLASS(ctypes.Structure):
                 ("lpszMenuName", wintypes.LPCWSTR), ("lpszClassName", wintypes.LPCWSTR)]
 
 
+def clamp_canvas_to_rect(x, y, canvas, inset, rect):
+    return (max(rect.left - inset, min(x, rect.right - canvas + inset)),
+            max(rect.top - inset, min(y, rect.bottom - canvas + inset)))
+
+
 def _bind():
     user32.CreateWindowExW.restype = wintypes.HWND
     user32.CreateWindowExW.argtypes = [
@@ -544,8 +549,7 @@ class VoiceOrb:
         padding = round(SCREEN_EDGE_PADDING * self._dpi / 96)
         inset = max(0, int(canvas / 2 - self._orb_radius() / get_skin(self.skin).VISUAL_SCALE)) - padding
         screen, _ = self._monitor_rects(user32.MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST))
-        return (max(screen.left - inset, min(x, screen.right - canvas + inset)),
-                max(screen.top - inset, min(y, screen.bottom - canvas + inset)))
+        return clamp_canvas_to_rect(x, y, canvas, inset, screen)
 
     def _snap(self, x, y):
         canvas = self._surface["canvas"]
