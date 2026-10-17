@@ -4,6 +4,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [1.9.6] - 2026-10-17
+
 ### Fixed
 - **Return to original window** pasted into nothing in apps with an embedded browser view (Tauri/WebView2, Electron, Chromium): keyboard focus is now put back on the exact control that had it, even when that control belongs to another process
 - Refocusing retries for up to half a second and unlocks the Windows foreground lock when the first attempt is refused, instead of giving up after 50 ms
