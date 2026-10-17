@@ -32,7 +32,7 @@ If Windows reports a virus, collect the detection name and affected file path; s
 
 ### Python Package
 
-Requires Python 3.11 or newer (the Windows app uses Python 3.12). This fork is not on PyPI (`pip install whisper-key-local` installs the upstream app).
+Requires Python 3.12 or newer (the Windows app uses Python 3.14). This fork is not on PyPI (`pip install whisper-key-local` installs the upstream app).
 Download the `.whl` from the [latest release](https://github.com/SesioN/whisper-key-local/releases/latest), then:
 
 ```bash

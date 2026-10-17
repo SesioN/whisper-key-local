@@ -4,40 +4,40 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "whisper-key-local"
-version = "1.9.6"
+version = "1.10.0"
 description = "Global hotkeys to record speech and transcribe directly to your cursor"
 readme = "README.md"
 license = "MIT"
 authors = [
     {name = "Pin Wang", email = "pinwang@gmail.com"}
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     # Cross-platform
     "faster-whisper>=1.2.1",
     "ctranslate2==4.7.1",
-    "numpy>=1.24.0",
-    "soxr>=0.3.0",
-    "sherpa-onnx>=1.11.3",
+    "numpy>=2.5",
+    "soxr>=1.1",
+    "sherpa-onnx>=1.13.8",
     "onnx-asr==0.12.0",
-    "onnxruntime==1.24.4",
-    "sounddevice>=0.4.6",
+    "onnxruntime==1.31.0",
+    "sounddevice>=0.5.6",
     "pyperclip>=1.8.2",
-    "packaging>=24.0",
-    "ruamel.yaml>=0.18.14",
+    "packaging>=26.0",
+    "ruamel.yaml>=0.19.1",
     "pystray>=0.19.5",
-    "Pillow>=10.0.0",
-    "hf-xet>=1.1.5",
-    "playsound3>=2.0",
-    "ten-vad>=1.0.6",
+    "Pillow>=13.0",
+    "hf-xet>=1.7",
+    "playsound3>=3.3",
+    "ten-vad>=1.0.6.9",
 
     # Windows-only
     "global-hotkeys>=0.1.7; sys_platform=='win32'",
-    "pywin32>=306; sys_platform=='win32'",
-    "pycaw>=20251023; sys_platform=='win32'",
-    "winrt-Windows.Media.Control>=3.0; sys_platform=='win32'",
-    "winrt-Windows.Foundation>=3.0; sys_platform=='win32'",
-    "winrt-Windows.Foundation.Collections>=3.0; sys_platform=='win32'",
+    "pywin32>=312; sys_platform=='win32'",
+    "pycaw>=20260927; sys_platform=='win32'",
+    "winrt-Windows.Media.Control>=3.2.1; sys_platform=='win32'",
+    "winrt-Windows.Foundation>=3.2.1; sys_platform=='win32'",
+    "winrt-Windows.Foundation.Collections>=3.2.1; sys_platform=='win32'",
 
     # macOS-only
     "pyobjc-framework-Quartz; sys_platform=='darwin'",
@@ -45,7 +45,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=9.1"]
 
 [project.scripts]
 whisper-key = "whisper_key.main:main"

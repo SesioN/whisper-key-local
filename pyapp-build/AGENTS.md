@@ -38,9 +38,8 @@ Produces two executables: `whisper-key.exe` (GUI subsystem, never opens a consol
 
 Fetch fresh sources with `fetch-pyapp-source.ps1 -Destination <empty-directory>`;
 `-ArchivePath <source.tar.gz>` verifies a cached archive without network access.
-`pyapp-source.json` pins PyApp 0.29.0 and the SHA256 of the locally retained release archive.
-The upstream asset digest could not be independently retrieved in the restricted environment;
-verify it against the upstream release asset before the first release using this pin.
+`pyapp-source.json` pins PyApp 0.30.0 and the SHA256 of its release archive, which matches the
+digest GitHub publishes for the upstream `source.tar.gz` asset.
 
 `Cargo.lock` records the existing patched PyApp dependency graph (winresource, windows-sys,
 jpeg-decoder). Changes to these patches must update/review this lockfile; builds use `--locked`.
