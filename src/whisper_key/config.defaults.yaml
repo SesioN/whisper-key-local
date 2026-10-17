@@ -334,6 +334,10 @@ clipboard: # Clipboard Behavior
     # If that window is gone or cannot be focused, the text is copied to the clipboard instead
     restore_focus: true
 
+    # Seconds to wait after refocusing before pasting, so the app can put its cursor back
+    # Raise it if text still goes missing in browsers, editors or terminals
+    restore_focus_settle_delay: 0.2
+
     # Delivery method for auto-paste
     # "paste" = clipboard copy + simulated Ctrl+V paste
     # "type" = direct text injection (Windows only)

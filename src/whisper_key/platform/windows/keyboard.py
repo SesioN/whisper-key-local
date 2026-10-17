@@ -1,5 +1,6 @@
 import ctypes
 import ctypes.wintypes as wintypes
+import time
 
 user32 = ctypes.windll.user32
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -125,6 +126,31 @@ def _send(inputs):
     n = len(inputs)
     array = (INPUT * n)(*inputs)
     user32.SendInput(n, array, ctypes.sizeof(INPUT))
+
+
+INPUT_MOUSE = 0
+MODIFIER_VIRTUAL_KEYS = (0x10, 0x11, 0x12, 0x5B, 0x5C)
+user32.GetAsyncKeyState.argtypes = (ctypes.c_int,)
+user32.GetAsyncKeyState.restype = ctypes.c_short
+
+
+def send_empty_input():
+    empty_mouse_input = INPUT()
+    empty_mouse_input.type = INPUT_MOUSE
+    _send([empty_mouse_input])
+
+
+def held_modifiers() -> list[int]:
+    return [virtual_key for virtual_key in MODIFIER_VIRTUAL_KEYS if user32.GetAsyncKeyState(virtual_key) & 0x8000]
+
+
+def wait_for_modifiers_released(timeout_seconds: float) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while held_modifiers():
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.01)
+    return True
 
 
 def _process_integrity_level(process_handle):

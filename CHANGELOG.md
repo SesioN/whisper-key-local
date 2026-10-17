@@ -4,6 +4,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Fixed
+- **Return to original window** pasted into nothing in apps with an embedded browser view (Tauri/WebView2, Electron, Chromium): keyboard focus is now put back on the exact control that had it, even when that control belongs to another process
+- Refocusing retries for up to half a second and unlocks the Windows foreground lock when the first attempt is refused, instead of giving up after 50 ms
+- Auto-paste waits for the hotkey's modifier keys (Ctrl, Alt, Shift, Win) to be released, so the app does not receive Win+V or Ctrl+Alt+V instead of Ctrl+V
+
+### Added
+- `clipboard.restore_focus_settle_delay` (default 0.2 s): wait after a refocus before pasting
+- The log records the window a recording started in, every refocus attempt and the window that receives the text
+
 ## [1.9.5] - 2026-10-16
 
 ### Added
