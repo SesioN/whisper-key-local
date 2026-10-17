@@ -4,6 +4,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Fixed
+- The floating widget and the voice orb can no longer be dragged off-screen; the orb stops 12 px from the monitor edge and may cover the taskbar
+
 ## [1.9.6] - 2026-10-17
 
 ### Fixed

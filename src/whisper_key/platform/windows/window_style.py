@@ -310,3 +310,17 @@ def is_point_on_screen(x: int, y: int) -> bool:
     width = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
     height = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
     return left <= x < left + width and top <= y < top + height
+
+
+def clamp_to_monitor(x: int, y: int, width: int, height: int) -> tuple[int, int]:
+    cursor = wintypes.POINT()
+    user32.GetCursorPos(ctypes.byref(cursor))
+    monitor_info = MONITORINFO()
+    monitor_info.cbSize = ctypes.sizeof(MONITORINFO)
+    if not user32.GetMonitorInfoW(user32.MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST),
+                                  ctypes.byref(monitor_info)):
+        return x, y
+    work = monitor_info.rcWork
+    clamped_x = max(work.left, min(x, work.right - width))
+    clamped_y = max(work.top, min(y, work.bottom - height))
+    return clamped_x, clamped_y
