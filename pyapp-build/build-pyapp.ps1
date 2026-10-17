@@ -347,7 +347,7 @@ try {
         $env:PYAPP_PROJECT_NAME = "whisper-key-local"
         $env:PYAPP_PROJECT_VERSION = $AppVersion
     }
-    $env:PYAPP_PYTHON_VERSION = "3.12"
+    $env:PYAPP_PYTHON_VERSION = "3.14"
     $env:WHISPER_KEY_EXE_VERSION = $AppVersion
     $ExecCode = 'from whisper_key.main import main; main()'
     $NoTerminalExecCode = 'import os; os.environ["WHISPER_KEY_NO_TERMINAL"] = "1"; from whisper_key.main import main; main()'
