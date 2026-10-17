@@ -1,4 +1,5 @@
 import ctypes
+import gc
 import logging
 import queue
 import threading
@@ -156,6 +157,8 @@ class TrayFlyout:
                     root.destroy()
                 except tk.TclError:
                     pass
+            root = None
+            gc.collect()
             with self._thread_lock:
                 self._thread = None
 
