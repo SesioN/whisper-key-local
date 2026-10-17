@@ -394,6 +394,8 @@ class FloatingWidget:
         if not self._locked:
             window_x = event.x_root - self._drag_offset_x
             window_y = event.y_root - self._drag_offset_y
+            window_x, window_y = window_style.clamp_to_monitor(
+                window_x, window_y, self._root.winfo_width(), self._root.winfo_height())
             self._root.geometry(f"+{window_x}+{window_y}")
             self._place_hit_target(window_x, window_y)
 
