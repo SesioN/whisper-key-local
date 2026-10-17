@@ -99,9 +99,9 @@ Run `whisper-key.exe` and follow the [automatic GPU setup](#automatic-setup-reco
 
 ### pip
 
-1. Install the ROCm CTranslate2 wheel matching your Python version from [ctranslate2-rocm-wheels](https://github.com/PinW/ctranslate2-rocm-wheels/releases/tag/v4.7.1-rocm72):
+1. Install the ROCm CTranslate2 wheel matching your Python version (cp314 for Python 3.14) from [ctranslate2-rocm-wheels](https://github.com/PinW/ctranslate2-rocm-wheels/releases/tag/v4.7.1-rocm72):
    ```
-   pip install ctranslate2-4.7.1-cp313-cp313-win_amd64.whl --force-reinstall --no-deps
+   pip install ctranslate2-4.7.1-cp314-cp314-win_amd64.whl --force-reinstall --no-deps
    ```
 2. Set `device: cuda` and `compute_type: float16`
 3. Restart Whisper Key
@@ -110,7 +110,7 @@ Run `whisper-key.exe` and follow the [automatic GPU setup](#automatic-setup-reco
 
 1. Install the ROCm CTranslate2 wheel into the pipx venv from [ctranslate2-rocm-wheels](https://github.com/PinW/ctranslate2-rocm-wheels/releases/tag/v4.7.1-rocm72):
    ```
-   pipx runpip whisper-key-local install ctranslate2-4.7.1-cp313-cp313-win_amd64.whl --force-reinstall --no-deps
+   pipx runpip whisper-key-local install ctranslate2-4.7.1-cp314-cp314-win_amd64.whl --force-reinstall --no-deps
    ```
 2. Set `device: cuda` and `compute_type: float16`
 3. Restart Whisper Key
