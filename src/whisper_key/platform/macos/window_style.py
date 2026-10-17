@@ -30,5 +30,13 @@ def is_focus_target_active(target) -> bool:
     return True
 
 
-def restore_focus_target(target, settle_seconds: float = 0.05) -> bool:
+def describe_focus_target(target) -> str:
+    return "none"
+
+
+def describe_foreground() -> str:
+    return "unknown"
+
+
+def restore_focus_target(target, settle_seconds: float = 0.2, timeout_seconds: float = 0.5) -> bool:
     return True

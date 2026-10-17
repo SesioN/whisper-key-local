@@ -456,6 +456,7 @@ class StateManager:
 
     def _capture_focus_target(self):
         focus_target = self._current_focus_target()
+        self.logger.info(f"Recording started in {window_style.describe_focus_target(focus_target)}")
         with self._state_lock:
             self._focus_target = focus_target
 
