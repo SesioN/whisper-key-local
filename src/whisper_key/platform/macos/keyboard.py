@@ -45,10 +45,6 @@ def is_foreground_input_blocked() -> bool:
     return False
 
 
-def send_empty_input():
-    pass
-
-
 def wait_for_modifiers_released(timeout_seconds: float) -> bool:
     return True
 

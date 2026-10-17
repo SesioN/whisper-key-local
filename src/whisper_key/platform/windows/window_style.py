@@ -298,8 +298,9 @@ def restore_focus_target(target, settle_seconds: float = 0.2, timeout_seconds: f
         if time.monotonic() >= deadline:
             return False
     time.sleep(settle_seconds)
-    active = is_focus_target_active(target)
-    logger.info(f"Refocus after {attempt} attempt(s) {'confirmed' if active else 'lost again during settle'}")
+    active = is_focus_target_active(target) and _focused_control_restored(target)
+    outcome = "confirmed" if active else f"lost again during settle, foreground is {describe_foreground()}"
+    logger.info(f"Refocus after {attempt} attempt(s) {outcome}")
     return active
 
 

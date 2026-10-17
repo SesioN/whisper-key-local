@@ -222,8 +222,13 @@ class ClipboardManager:
             return False
 
     def _wait_for_modifiers_released(self):
-        if not keyboard.wait_for_modifiers_released(MODIFIER_RELEASE_TIMEOUT_SECONDS):
-            self.logger.warning("Modifier keys still held - pasting anyway")
+        started_at = time.monotonic()
+        released = keyboard.wait_for_modifiers_released(MODIFIER_RELEASE_TIMEOUT_SECONDS)
+        waited_seconds = time.monotonic() - started_at
+        if not released:
+            self.logger.warning(f"Modifier keys still held after {waited_seconds:.2f}s - pasting anyway")
+        elif waited_seconds >= 0.01:
+            self.logger.info(f"Waited {waited_seconds:.2f}s for modifier keys to be released")
 
     def _focus_target_still_active(self, focus_target) -> bool:
         if not self.restore_focus or focus_target is None:
