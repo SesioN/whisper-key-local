@@ -14,6 +14,10 @@ def is_point_on_screen(x: int, y: int) -> bool:
     return True
 
 
+def clamp_to_monitor(x: int, y: int, width: int, height: int) -> tuple[int, int]:
+    return x, y
+
+
 def get_foreground_window() -> int:
     return 0
 

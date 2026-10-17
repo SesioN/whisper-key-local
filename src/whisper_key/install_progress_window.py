@@ -1,3 +1,4 @@
+import gc
 import logging
 import queue
 import sys
@@ -47,6 +48,8 @@ class InstallProgressWindow:
             self._run_window()
         except Exception as e:
             self.logger.error(f"Install progress window failed: {e}", exc_info=True)
+        finally:
+            gc.collect()
 
     def _run_window(self):
         import tkinter as tk

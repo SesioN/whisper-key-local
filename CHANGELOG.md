@@ -4,6 +4,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-10-18
+
+### Changed
+- The Windows app runs on Python 3.14 (was 3.12); installing from source needs Python 3.12 or newer
+- GPU runtimes are tied to the Python version: after updating, a selected CUDA, ROCm or DirectML runtime falls back to CPU with a warning until it is installed again from the tray
+- onnxruntime 1.31.0 for the Parakeet/Qwen3 engine on CPU (was 1.24.4); the CUDA runtime uses onnxruntime-gpu 1.26.0, the last release built for CUDA 12; DirectML stays on 1.24.4, its last release
+- PyApp launcher 0.30.0 (was 0.29.0)
+- Current minimum versions for all dependencies, including numpy 2.5, Pillow 13, sherpa-onnx 1.13, soxr 1.1 and playsound3 3.3
+
+### Fixed
+- Opening the tray menu or a GPU install no longer leaks a Tcl interpreter on exit (Python 3.14 warns about Tk objects freed on another thread)
+- The floating widget and the voice orb can no longer be dragged off-screen; the orb stops 12 px from the monitor edge and may cover the taskbar
+
 ## [1.9.6] - 2026-10-17
 
 ### Fixed

@@ -28,9 +28,10 @@ from .runtime_options import is_out_of_video_memory
 from .runtime_loader import (CUDA, MARKER_FILE, ONNX_CUDA, ONNX_DIRECTML, ORT_RUNTIMES, PYTHON_TAG, ROCM, VULKAN,
                              active_ct2_runtime, active_ort_runtime, get_runtime_dir)
 
+# DirectML ORT ends at 1.24.4; onnxruntime-gpu 1.27+ needs CUDA 13, the CUDA libraries below are CUDA 12
 ORT_PACKAGES = {
     ONNX_DIRECTML: ["onnxruntime-directml==1.24.4"],
-    ONNX_CUDA: ["onnxruntime-gpu==1.24.4"],
+    ONNX_CUDA: ["onnxruntime-gpu==1.26.0"],
 }
 ORT_CUDA_LIBRARIES = ["nvidia-cuda-nvrtc-cu12~=12.0", "nvidia-cuda-runtime-cu12~=12.0", "nvidia-cufft-cu12~=11.0",
                       "nvidia-curand-cu12~=10.0", "nvidia-cudnn-cu12~=9.0", "nvidia-cublas-cu12~=12.0"]

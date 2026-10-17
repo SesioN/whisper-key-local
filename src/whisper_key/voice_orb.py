@@ -115,6 +115,11 @@ class WNDCLASS(ctypes.Structure):
                 ("lpszMenuName", wintypes.LPCWSTR), ("lpszClassName", wintypes.LPCWSTR)]
 
 
+def clamp_canvas_to_rect(x, y, canvas, inset, rect):
+    return (max(rect.left - inset, min(x, rect.right - canvas + inset)),
+            max(rect.top - inset, min(y, rect.bottom - canvas + inset)))
+
+
 def _bind():
     user32.CreateWindowExW.restype = wintypes.HWND
     user32.CreateWindowExW.argtypes = [
@@ -185,6 +190,7 @@ POSITION_PATTERN = re.compile(r"^\+(-?\d+)\+(-?\d+)$")
 
 CLICK_SLOP = 4
 SNAP_DISTANCE = 16
+SCREEN_EDGE_PADDING = 12
 FLASH_DURATION = 0.45
 OUTCOME_SECONDS = {"success": 1.2, "error": 2.0}
 ERROR_FLASH_COLOR = (255, 60, 50)
@@ -538,6 +544,13 @@ class VoiceOrb:
         user32.UpdateLayeredWindow(self._hwnd, None, ctypes.byref(POINT(*target)), None,
                                    None, None, 0, None, 0)
 
+    def _clamp_to_monitor(self, cursor, x, y):
+        canvas = self._surface["canvas"]
+        padding = round(SCREEN_EDGE_PADDING * self._dpi / 96)
+        inset = max(0, int(canvas / 2 - self._orb_radius() / get_skin(self.skin).VISUAL_SCALE)) - padding
+        screen, _ = self._monitor_rects(user32.MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST))
+        return clamp_canvas_to_rect(x, y, canvas, inset, screen)
+
     def _snap(self, x, y):
         canvas = self._surface["canvas"]
         hmon = user32.MonitorFromPoint(POINT(x + canvas // 2, y + canvas // 2), MONITOR_DEFAULTTONEAREST)
@@ -648,7 +661,8 @@ class VoiceOrb:
             dx, dy = pt.x - self._drag_origin[0], pt.y - self._drag_origin[1]
             self._drag_distance = max(self._drag_distance, abs(dx) + abs(dy))
             if not self.locked and self._drag_distance > CLICK_SLOP:
-                self._drag_target = (self._window_origin[0] + dx, self._window_origin[1] + dy)
+                self._drag_target = self._clamp_to_monitor(pt, self._window_origin[0] + dx,
+                                                           self._window_origin[1] + dy)
             return True
 
         if msg == WM_LBUTTONUP and self._dragging:
