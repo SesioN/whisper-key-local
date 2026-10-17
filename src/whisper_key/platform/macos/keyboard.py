@@ -45,6 +45,10 @@ def is_foreground_input_blocked() -> bool:
     return False
 
 
+def wait_for_modifiers_released(timeout_seconds: float) -> bool:
+    return True
+
+
 def set_delay(delay: float):
     global _delay
     _delay = delay

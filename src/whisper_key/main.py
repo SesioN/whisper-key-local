@@ -176,7 +176,8 @@ def setup_clipboard_manager(clipboard_config):
         type_auto_enter_delay=clipboard_config['type_auto_enter_delay'],
         type_auto_enter_delay_per_100_chars=clipboard_config['type_auto_enter_delay_per_100_chars'],
         macos_key_simulation_delay=clipboard_config['macos_key_simulation_delay'],
-        restore_focus=clipboard_config.get('restore_focus', True)
+        restore_focus=clipboard_config.get('restore_focus', True),
+        restore_focus_settle_delay=clipboard_config.get('restore_focus_settle_delay', 0.2)
     )
 
 def setup_audio_feedback(audio_feedback_config):

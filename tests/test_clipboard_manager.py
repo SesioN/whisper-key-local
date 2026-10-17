@@ -101,7 +101,7 @@ def test_delivery_restores_focus_target_before_paste(manager, monkeypatch):
     manager, _, _ = manager
     calls = []
     window_style = MagicMock()
-    window_style.restore_focus_target.side_effect = lambda target: calls.append("restore") or True
+    window_style.restore_focus_target.side_effect = lambda target, **options: calls.append("restore") or True
     monkeypatch.setattr(clipboard_module, "window_style", window_style)
     monkeypatch.setattr(manager, "execute_delivery", lambda text: calls.append("paste") or True)
     assert manager.deliver_transcription("dictated", focus_target="target")
@@ -155,3 +155,18 @@ def test_enter_is_skipped_but_delivery_succeeds_when_focus_moved(manager, monkey
     monkeypatch.setattr(manager, "send_enter_key", send_enter)
     assert manager.deliver_transcription("dictated", use_auto_enter=True, focus_target="target")
     send_enter.assert_not_called()
+
+
+def test_modifiers_are_released_before_refocus_and_settle_delay_is_passed(manager, monkeypatch):
+    manager, _, _ = manager
+    calls = []
+    keyboard = MagicMock()
+    keyboard.wait_for_modifiers_released.side_effect = lambda timeout: calls.append("modifiers") or True
+    window_style = MagicMock()
+    window_style.restore_focus_target.side_effect = lambda target, settle_seconds: calls.append(("restore", settle_seconds)) or True
+    monkeypatch.setattr(clipboard_module, "keyboard", keyboard)
+    monkeypatch.setattr(clipboard_module, "window_style", window_style)
+    monkeypatch.setattr(manager, "execute_delivery", lambda text: calls.append("paste") or True)
+    manager.restore_focus_settle_delay = 0.4
+    assert manager.deliver_transcription("dictated", focus_target="target")
+    assert calls == ["modifiers", ("restore", 0.4), "paste"]
