@@ -241,8 +241,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Pull requests target the `dev` branch; `
 
 ## Credits
 
-Based on [Whisper Key](https://github.com/PinW/whisper-key-local) by Pin Wang (MIT). Upstream changes are merged in
-periodically.
+Based on [Whisper Key](https://github.com/PinW/whisper-key-local) by Pin Wang (MIT).
 
 ## 📦 Dependencies
 
